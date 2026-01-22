@@ -21,30 +21,57 @@ public class BasicWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
 
-        SignalMessage signal =
-                objectMapper.readValue(message.getPayload(), SignalMessage.class);
+        SignalMessage signal = objectMapper.readValue(message.getPayload(), SignalMessage.class);
 
         String type = signal.getType();
         String roomId = signal.getRoomId();
 
-        // 1️⃣ join 처리
+        // 0) type 없으면 무시
+        if (type == null || type.isBlank()) {
+            System.out.println("[WS] IGNORE (missing type)");
+            return;
+        }
+
+        // 1) join 처리
         if ("join".equals(type)) {
+            if (roomId == null || roomId.isBlank()) {
+                System.out.println("[WS] IGNORE join (missing roomId)");
+                return;
+            }
+
             sessionRoom.put(session.getId(), roomId);
-            rooms.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>())
-                    .add(session);
+            rooms.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>()).add(session);
 
             System.out.println("[WS] JOIN " + session.getId() + " -> " + roomId);
             return;
         }
 
-        // 2️⃣ join 안 한 세션 차단
-        if (!roomId.equals(sessionRoom.get(session.getId()))) {
-            System.out.println("[WS] IGNORE (not in room)");
+        // 2) join 안 한 세션 차단
+        String joinedRoom = sessionRoom.get(session.getId());
+        if (joinedRoom == null) {
+            System.out.println("[WS] IGNORE (not joined)");
             return;
         }
 
-        // 3️⃣ 같은 room에만 릴레이
-        for (WebSocketSession peer : rooms.get(roomId)) {
+        // 3) 메시지에 roomId가 없으면 joinedRoom로 보정(클라이언트 실수 방지)
+        if (roomId == null || roomId.isBlank()) {
+            roomId = joinedRoom;
+        }
+
+        // 4) join한 room이랑 다르면 차단
+        if (!joinedRoom.equals(roomId)) {
+            System.out.println("[WS] IGNORE (room mismatch) joined=" + joinedRoom + " msg=" + roomId);
+            return;
+        }
+
+        // 5) 같은 room에만 릴레이
+        CopyOnWriteArraySet<WebSocketSession> peers = rooms.get(roomId);
+        if (peers == null || peers.isEmpty()) {
+            System.out.println("[WS] IGNORE (room empty): " + roomId);
+            return;
+        }
+
+        for (WebSocketSession peer : peers) {
             if (peer.isOpen() && !peer.getId().equals(session.getId())) {
                 peer.sendMessage(message);
             }

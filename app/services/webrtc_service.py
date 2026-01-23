@@ -48,6 +48,10 @@ class WebRTCConfig:
     bitrate_kbps: int = 1200
     keyint: int = 30
     stun_server: str = "stun://stun.l.google.com:19302"
+    # 재연결 설정
+    reconnect_enabled: bool = True
+    reconnect_delay_sec: float = 3.0
+    max_reconnect_attempts: int = 5
 
 
 class WebRTCService:
@@ -95,6 +99,11 @@ class WebRTCService:
         
         # 협상 중 플래그 (무한 루프 방지)
         self._negotiating: bool = False
+        
+        # 재연결 관련
+        self._reconnect_attempts: int = 0
+        self._should_reconnect: bool = False
+        self._reconnect_timer: Optional[threading.Timer] = None
 
         Gst.init(None)
 
@@ -122,6 +131,11 @@ class WebRTCService:
 
             self._room_id = room_id
             self._negotiating = False  # 협상 플래그 리셋
+            
+            # 재연결 설정
+            self._should_reconnect = True
+            self._reconnect_attempts = 0
+            
             self._set_state(WebRTCState.STARTING, "connecting to signaling server")
 
             # 1. WebSocket 연결 (별도 스레드)
@@ -133,6 +147,12 @@ class WebRTCService:
             if self._state == WebRTCState.STOPPED:
                 logger.info("webrtc already stopped")
                 return
+
+            # 재연결 비활성화
+            self._should_reconnect = False
+            if self._reconnect_timer:
+                self._reconnect_timer.cancel()
+                self._reconnect_timer = None
 
             # WebSocket 종료
             self._stop_websocket()
@@ -190,8 +210,12 @@ class WebRTCService:
             self._notify_error(str(error))
 
         def on_close(ws, close_status_code, close_msg):
-            logger.info("WebSocket closed: %s %s", close_status_code, close_msg)
+            logger.warning("WebSocket closed: %s %s", close_status_code, close_msg)
             self._ws_connected = False
+            
+            # 자동 재연결 시도
+            if self._should_reconnect and self.config.reconnect_enabled:
+                self._schedule_reconnect()
 
         self._ws = websocket.WebSocketApp(
             self.signaling_url,
@@ -203,6 +227,62 @@ class WebRTCService:
         
         self._ws_thread = threading.Thread(target=self._ws.run_forever, daemon=True)
         self._ws_thread.start()
+
+    def _schedule_reconnect(self) -> None:
+        """재연결 스케줄링"""
+        if self._reconnect_attempts >= self.config.max_reconnect_attempts:
+            logger.error("Max reconnect attempts (%d) reached, giving up", 
+                        self.config.max_reconnect_attempts)
+            self._set_state(WebRTCState.ERROR, "reconnect failed - max attempts reached")
+            self._should_reconnect = False
+            return
+        
+        self._reconnect_attempts += 1
+        delay = self.config.reconnect_delay_sec
+        logger.info("Scheduling reconnect in %.1fs (attempt %d/%d)", 
+                   delay, self._reconnect_attempts, self.config.max_reconnect_attempts)
+        
+        self._set_state(WebRTCState.STARTING, f"reconnecting (attempt {self._reconnect_attempts})")
+        
+        self._reconnect_timer = threading.Timer(delay, self._do_reconnect)
+        self._reconnect_timer.daemon = True
+        self._reconnect_timer.start()
+
+    def _do_reconnect(self) -> None:
+        """재연결 수행"""
+        if not self._should_reconnect:
+            logger.debug("Reconnect cancelled")
+            return
+        
+        logger.info("Attempting reconnect...")
+        
+        # 기존 리소스 정리 (stop 호출 안 하고 직접 정리)
+        self._cleanup_for_reconnect()
+        
+        # 다시 시작
+        self._start_websocket()
+
+    def _cleanup_for_reconnect(self) -> None:
+        """재연결을 위한 정리 (stop과 달리 reconnect 플래그 유지)"""
+        # WebSocket 정리
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+        self._ws_connected = False
+        
+        # 파이프라인 정리
+        self._cleanup_pipeline()
+        
+        # 협상 플래그 리셋
+        self._negotiating = False
+        
+        # MainLoop 정리
+        if self._loop is not None and self._loop.is_running():
+            self._loop.quit()
+        self._loop = None
 
     def _stop_websocket(self) -> None:
         """WebSocket 연결 종료"""
@@ -320,7 +400,9 @@ class WebRTCService:
             self._set_state(WebRTCState.ERROR, f"mainloop error: {e}")
         finally:
             self._cleanup_pipeline()
-            self._room_id = None
+            # 재연결 중이 아닐 때만 room_id 초기화
+            if not self._should_reconnect:
+                self._room_id = None
             if self._state != WebRTCState.ERROR:
                 self._set_state(WebRTCState.STOPPED, "stopped")
 
@@ -391,7 +473,12 @@ class WebRTCService:
             logger.error(msg)
             self._set_state(WebRTCState.ERROR, msg)
             self._notify_error(msg)
-            self.stop()
+            
+            # 재연결 활성화 시 재시도, 아니면 완전 중지
+            if self._should_reconnect and self.config.reconnect_enabled:
+                self._schedule_reconnect()
+            else:
+                self.stop()
 
         elif t == Gst.MessageType.STATE_CHANGED:
             if message.src == self._pipeline:

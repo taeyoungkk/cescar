@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:17
+    container_name: postgres-ssafy
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=ssafy
+      - POSTGRES_PASSWORD=ssafy
+      - POSTGRES_DB=ssafy
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+volumes:
+  postgres_data:

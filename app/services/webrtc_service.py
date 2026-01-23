@@ -1,15 +1,16 @@
 """
-WebRTC Service for Jetson (Story 1)
+WebRTC Service for Jetson (Story 1 + Story 2)
 
 Jetson에서 WebRTC 영상 송출을 담당하는 서비스 모듈
-- start(room_id): 송출 시작
+- start(room_id): 송출 시작 + 시그널링 서버 연결
 - stop(): 송출 중지
 - status(): 현재 상태 조회
 
 GStreamer 파이프라인 + GLib MainLoop를 별도 스레드로 구동
-시그널링(offer/answer/candidate WS)은 Story 2에서 연결 예정
+WebSocket으로 Spring 시그널링 서버와 offer/answer/candidate 교환
 """
 
+import json
 import threading
 import logging
 from dataclasses import dataclass
@@ -19,7 +20,12 @@ from typing import Optional, Callable
 import gi
 gi.require_version("Gst", "1.0")
 gi.require_version("GstWebRTC", "1.0")
-from gi.repository import Gst, GLib
+gi.require_version("GstSdp", "1.0")
+from gi.repository import Gst, GLib, GstWebRTC, GstSdp
+
+import websocket
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -46,24 +52,27 @@ class WebRTCConfig:
 
 class WebRTCService:
     """
-    Jetson WebRTC 송출 서비스 (Story 1)
+    Jetson WebRTC 송출 서비스 (Story 1 + Story 2)
     
     - start(room_id), stop(), status()
-    - 내부적으로 GStreamer 파이프라인 + GLib MainLoop를 별도 스레드로 구동
-    - 중복 start/stop 호출 방어
+    - GStreamer 파이프라인 + GLib MainLoop
+    - WebSocket 시그널링 (offer/answer/candidate)
     """
 
     def __init__(
         self,
         config: Optional[WebRTCConfig] = None,
+        signaling_url: Optional[str] = None,
         on_error: Optional[Callable[[str], None]] = None,
     ):
         """
         Args:
             config: WebRTC 파이프라인 설정 (기본값 사용 가능)
+            signaling_url: 시그널링 서버 WebSocket URL (기본: settings.SIGNALING_WS_URL)
             on_error: 에러 발생 시 호출될 콜백 함수
         """
         self.config = config or WebRTCConfig()
+        self.signaling_url = signaling_url or settings.SIGNALING_WS_URL
         self._on_error = on_error
 
         self._state: WebRTCState = WebRTCState.STOPPED
@@ -74,69 +83,233 @@ class WebRTCService:
         self._loop_thread: Optional[threading.Thread] = None
 
         self._pipeline: Optional[Gst.Pipeline] = None
+        self._webrtc: Optional[Gst.Element] = None
         self._bus_watch_id: Optional[int] = None
 
-        # room_id는 Story 2에서 시그널링 연결 시 사용
+        # WebSocket 관련
+        self._ws: Optional[websocket.WebSocketApp] = None
+        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_connected: bool = False
+
         self._room_id: Optional[str] = None
+        
+        # 협상 중 플래그 (무한 루프 방지)
+        self._negotiating: bool = False
 
         Gst.init(None)
 
     def status(self) -> dict:
-        """
-        현재 WebRTC 서비스 상태 조회
-        
-        Returns:
-            dict: state, reason, room_id 포함
-        """
+        """현재 WebRTC 서비스 상태 조회"""
         with self._lock:
             return {
                 "state": self._state.value,
                 "reason": self._state_reason,
                 "room_id": self._room_id,
+                "ws_connected": self._ws_connected,
             }
 
     def start(self, room_id: str) -> None:
         """
         WebRTC 송출 시작
-        
-        Args:
-            room_id: 참여할 방 ID (시그널링 서버에서 사용)
+        1. WebSocket 연결
+        2. GStreamer 파이프라인 시작
+        3. offer 생성 및 전송
         """
         with self._lock:
-            # 중복 시작 방어
             if self._state in (WebRTCState.STARTING, WebRTCState.RUNNING):
                 logger.info("webrtc already started: %s", self._state.value)
                 return
 
             self._room_id = room_id
-            self._set_state(WebRTCState.STARTING, "starting")
+            self._negotiating = False  # 협상 플래그 리셋
+            self._set_state(WebRTCState.STARTING, "connecting to signaling server")
 
-            # GLib MainLoop를 별도 스레드에서 실행
-            self._loop = GLib.MainLoop()
-            self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
-            self._loop_thread.start()
-
-            # 파이프라인 생성/재생은 GLib 스레드에서 처리 (스레드 안정성)
-            GLib.idle_add(self._build_and_play_pipeline)
+            # 1. WebSocket 연결 (별도 스레드)
+            self._start_websocket()
 
     def stop(self) -> None:
-        """
-        WebRTC 송출 중지
-        파이프라인을 안전하게 종료하고 자원 회수
-        """
+        """WebRTC 송출 중지"""
         with self._lock:
-            # 중복 중지 방어
             if self._state == WebRTCState.STOPPED:
                 logger.info("webrtc already stopped")
                 return
 
-            # 파이프라인 정리도 GLib 스레드에서 처리
+            # WebSocket 종료
+            self._stop_websocket()
+            
+            # 협상 플래그 리셋
+            self._negotiating = False
+
+            # 파이프라인 정리
             if self._loop is not None:
                 GLib.idle_add(self._stop_pipeline_and_quit_loop)
             else:
-                # 루프가 없으면 직접 정리
                 self._cleanup_pipeline()
                 self._set_state(WebRTCState.STOPPED, "stopped")
+
+    # ==================== WebSocket 관련 ====================
+
+    def _start_websocket(self) -> None:
+        """WebSocket 연결 시작"""
+        def on_open(ws):
+            logger.info("WebSocket connected to %s", self.signaling_url)
+            self._ws_connected = True
+            
+            # join 메시지 전송
+            join_msg = {
+                "type": "join",
+                "roomId": self._room_id
+            }
+            ws.send(json.dumps(join_msg))
+            logger.info("Sent join message for room: %s", self._room_id)
+            
+            # GLib MainLoop 시작 + 파이프라인 생성
+            self._loop = GLib.MainLoop()
+            self._loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+            self._loop_thread.start()
+            GLib.idle_add(self._build_and_play_pipeline)
+
+        def on_message(ws, message):
+            try:
+                data = json.loads(message)
+                msg_type = data.get("type")
+                
+                if msg_type == "answer":
+                    self._handle_answer(data.get("data", {}))
+                elif msg_type == "candidate":
+                    self._handle_candidate(data.get("data", {}))
+                else:
+                    logger.debug("Received unknown message type: %s", msg_type)
+            except Exception as e:
+                logger.error("Error handling WS message: %s", e)
+
+        def on_error(ws, error):
+            logger.error("WebSocket error: %s", error)
+            self._ws_connected = False
+            self._set_state(WebRTCState.ERROR, f"WebSocket error: {error}")
+            self._notify_error(str(error))
+
+        def on_close(ws, close_status_code, close_msg):
+            logger.info("WebSocket closed: %s %s", close_status_code, close_msg)
+            self._ws_connected = False
+
+        self._ws = websocket.WebSocketApp(
+            self.signaling_url,
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
+        
+        self._ws_thread = threading.Thread(target=self._ws.run_forever, daemon=True)
+        self._ws_thread.start()
+
+    def _stop_websocket(self) -> None:
+        """WebSocket 연결 종료"""
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+        self._ws_connected = False
+
+    def _send_signaling(self, msg_type: str, data: dict) -> None:
+        """시그널링 메시지 전송"""
+        if self._ws is None or not self._ws_connected:
+            logger.warning("WebSocket not connected, cannot send %s", msg_type)
+            return
+        
+        message = {
+            "type": msg_type,
+            "roomId": self._room_id,
+            "data": data,
+        }
+        try:
+            self._ws.send(json.dumps(message))
+            logger.debug("Sent %s message", msg_type)
+        except Exception as e:
+            logger.error("Failed to send %s: %s", msg_type, e)
+
+    # ==================== WebRTC 시그널링 핸들러 ====================
+
+    def _on_negotiation_needed(self, element) -> None:
+        """webrtcbin에서 negotiation 필요 시 offer 생성"""
+        # 이미 협상 중이면 무시 (무한 루프 방지)
+        if self._negotiating:
+            logger.debug("Already negotiating, skipping")
+            return
+        
+        self._negotiating = True
+        logger.info("Negotiation needed, creating offer...")
+        promise = Gst.Promise.new_with_change_func(self._on_offer_created, element, None)
+        element.emit("create-offer", None, promise)
+
+    def _on_offer_created(self, promise, element, _) -> None:
+        """offer 생성 완료 콜백"""
+        promise.wait()
+        reply = promise.get_reply()
+        offer = reply.get_value("offer")
+        
+        if offer is None:
+            logger.error("Failed to create offer")
+            return
+        
+        # local description 설정
+        promise_local = Gst.Promise.new()
+        element.emit("set-local-description", offer, promise_local)
+        promise_local.interrupt()
+        
+        # offer SDP를 시그널링 서버로 전송
+        sdp_text = offer.sdp.as_text()
+        self._send_signaling("offer", {"sdp": sdp_text, "type": "offer"})
+        logger.info("Sent offer SDP")
+
+    def _on_ice_candidate(self, element, mlineindex: int, candidate: str) -> None:
+        """ICE candidate 발생 시 시그널링 서버로 전송"""
+        self._send_signaling("candidate", {
+            "candidate": candidate,
+            "sdpMLineIndex": mlineindex,
+        })
+        logger.debug("Sent ICE candidate: %s", candidate[:50] if candidate else "")
+
+    def _handle_answer(self, data: dict) -> None:
+        """answer SDP 수신 처리"""
+        sdp_text = data.get("sdp")
+        if not sdp_text:
+            logger.error("No SDP in answer")
+            return
+        
+        logger.info("Received answer SDP")
+        
+        # SDP 파싱
+        res, sdpmsg = GstSdp.SDPMessage.new()
+        GstSdp.sdp_message_parse_buffer(bytes(sdp_text, "utf-8"), sdpmsg)
+        answer = GstWebRTC.WebRTCSessionDescription.new(
+            GstWebRTC.WebRTCSDPType.ANSWER, sdpmsg
+        )
+        
+        # remote description 설정
+        if self._webrtc:
+            promise = Gst.Promise.new()
+            self._webrtc.emit("set-remote-description", answer, promise)
+            promise.interrupt()
+            logger.info("Set remote description (answer)")
+            
+            # 협상 완료 - True 유지하여 추가 offer 방지
+            # (연결 완료 후에는 더 이상 offer 생성 안 함)
+            self._negotiating = True
+
+    def _handle_candidate(self, data: dict) -> None:
+        """ICE candidate 수신 처리"""
+        candidate = data.get("candidate")
+        sdp_mline_index = data.get("sdpMLineIndex", 0)
+        
+        if candidate and self._webrtc:
+            self._webrtc.emit("add-ice-candidate", sdp_mline_index, candidate)
+            logger.debug("Added ICE candidate")
+
+    # ==================== GStreamer 파이프라인 ====================
 
     def _run_loop(self) -> None:
         """GLib MainLoop 실행 (별도 스레드)"""
@@ -146,19 +319,20 @@ class WebRTCService:
         except Exception as e:
             self._set_state(WebRTCState.ERROR, f"mainloop error: {e}")
         finally:
-            # 루프 종료 후 정리
             self._cleanup_pipeline()
             self._room_id = None
             if self._state != WebRTCState.ERROR:
                 self._set_state(WebRTCState.STOPPED, "stopped")
 
     def _build_and_play_pipeline(self) -> bool:
-        """
-        파이프라인 생성 및 PLAYING 상태로 전환
-        GLib thread context에서 호출됨
-        """
+        """파이프라인 생성 및 PLAYING 상태로 전환"""
         try:
-            self._pipeline = self._build_pipeline()
+            self._pipeline, self._webrtc = self._build_pipeline()
+            
+            # webrtcbin 시그널 연결
+            self._webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
+            self._webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+            
             bus = self._pipeline.get_bus()
             bus.add_signal_watch()
             self._bus_watch_id = bus.connect("message", self._on_bus_message)
@@ -172,27 +346,20 @@ class WebRTCService:
         except Exception as e:
             self._set_state(WebRTCState.ERROR, str(e))
             self._notify_error(str(e))
-            # 에러 시 루프 종료
             self._stop_pipeline_and_quit_loop()
-        return False  # idle_add: one-shot
+        return False
 
     def _stop_pipeline_and_quit_loop(self) -> bool:
-        """
-        파이프라인 정리 및 MainLoop 종료
-        GLib thread context에서 호출됨
-        """
+        """파이프라인 정리 및 MainLoop 종료"""
         try:
             self._cleanup_pipeline()
         finally:
             if self._loop is not None and self._loop.is_running():
                 self._loop.quit()
-        return False  # idle_add: one-shot
+        return False
 
     def _cleanup_pipeline(self) -> None:
-        """
-        파이프라인 자원 정리
-        어느 스레드에서든 호출 가능 (락으로 보호됨)
-        """
+        """파이프라인 자원 정리"""
         with self._lock:
             if self._pipeline is not None:
                 try:
@@ -203,14 +370,12 @@ class WebRTCService:
                 try:
                     bus = self._pipeline.get_bus()
                     if bus is not None:
-                        try:
-                            bus.remove_signal_watch()
-                        except Exception:
-                            pass
+                        bus.remove_signal_watch()
                 except Exception:
                     pass
 
                 self._pipeline = None
+                self._webrtc = None
                 self._bus_watch_id = None
                 logger.info("webrtc pipeline cleaned up")
 
@@ -237,15 +402,10 @@ class WebRTCService:
             logger.warning("Gst EOS received")
             self.stop()
 
-    def _build_pipeline(self) -> Gst.Pipeline:
+    def _build_pipeline(self) -> tuple:
         """
         GStreamer 파이프라인 구성
-        
-        Story 1: 파이프라인 생성 + webrtcbin까지 링크
-        시그널링(offer/answer/candidate WS)은 Story 2에서 연결
-        
-        파이프라인 구조:
-        v4l2src -> capsfilter -> videoconvert -> x264enc -> rtph264pay -> capsfilter -> queue -> webrtcbin
+        Returns: (pipeline, webrtcbin)
         """
         cfg = self.config
 
@@ -255,13 +415,14 @@ class WebRTCService:
         v4l2src = Gst.ElementFactory.make("v4l2src", "src")
         caps = Gst.ElementFactory.make("capsfilter", "caps")
         conv = Gst.ElementFactory.make("videoconvert", "conv")
+        i420caps = Gst.ElementFactory.make("capsfilter", "i420caps")  # I420 강제 변환
         x264 = Gst.ElementFactory.make("x264enc", "enc")
         pay = Gst.ElementFactory.make("rtph264pay", "pay")
         rtpcaps = Gst.ElementFactory.make("capsfilter", "rtpcaps")
         q = Gst.ElementFactory.make("queue", "q")
         webrtc = Gst.ElementFactory.make("webrtcbin", "webrtc")
 
-        if not all([v4l2src, caps, conv, x264, pay, rtpcaps, q, webrtc]):
+        if not all([v4l2src, caps, conv, i420caps, x264, pay, rtpcaps, q, webrtc]):
             raise RuntimeError("missing gstreamer elements (check plugins)")
 
         # 소스 설정
@@ -273,6 +434,12 @@ class WebRTCService:
             Gst.Caps.from_string(
                 f"video/x-raw,width={cfg.width},height={cfg.height},framerate={cfg.fps}/1"
             ),
+        )
+
+        # I420 강제 변환 (x264enc baseline profile은 4:2:2 지원 안함)
+        i420caps.set_property(
+            "caps",
+            Gst.Caps.from_string("video/x-raw,format=I420"),
         )
 
         # 인코더 설정 (저지연)
@@ -295,29 +462,29 @@ class WebRTCService:
         webrtc.set_property("stun-server", cfg.stun_server)
 
         # 파이프라인에 요소 추가
-        for e in [v4l2src, caps, conv, x264, pay, rtpcaps, q, webrtc]:
+        for e in [v4l2src, caps, conv, i420caps, x264, pay, rtpcaps, q, webrtc]:
             pipeline.add(e)
 
         # 요소 연결 (v4l2src -> ... -> queue) - 하나씩 link
-        elements = [v4l2src, caps, conv, x264, pay, rtpcaps, q]
+        elements = [v4l2src, caps, conv, i420caps, x264, pay, rtpcaps, q]
         for i in range(len(elements) - 1):
             if not elements[i].link(elements[i + 1]):
                 raise RuntimeError(f"failed to link {elements[i].get_name()} -> {elements[i+1].get_name()}")
 
-        # queue -> webrtcbin 연결 (request pad 사용)
+        # queue -> webrtcbin 연결
         q_src = q.get_static_pad("src")
         if q_src is None:
             raise RuntimeError("queue src pad not found")
 
         sinkpad = webrtc.request_pad_simple("sink_%u")
         if sinkpad is None:
-            raise RuntimeError("failed to request webrtcbin sink pad from 'sink_%u'")
+            raise RuntimeError("failed to request webrtcbin sink pad")
 
         if q_src.link(sinkpad) != Gst.PadLinkReturn.OK:
-            raise RuntimeError("failed to link queue -> webrtcbin request pad")
+            raise RuntimeError("failed to link queue -> webrtcbin")
 
         logger.info("webrtc pipeline built successfully")
-        return pipeline
+        return pipeline, webrtc
 
     def _set_state(self, state: WebRTCState, reason: str) -> None:
         """내부 상태 설정"""
@@ -335,5 +502,5 @@ class WebRTCService:
             pass
 
 
-# 싱글톤 인스턴스 (mqtt_service와 동일한 패턴)
+# 싱글톤 인스턴스
 webrtc_service = WebRTCService()

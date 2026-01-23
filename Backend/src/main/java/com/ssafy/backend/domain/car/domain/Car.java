@@ -1,5 +1,6 @@
 package com.ssafy.backend.domain.car.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.ssafy.backend.domain.member.domain.Member;
 import com.ssafy.backend.domain.map.domain.SlamMap;
 import jakarta.persistence.*;
@@ -22,12 +23,17 @@ public class Car {
     @Column(name = "device_id", nullable = false, unique = true, length = 64)
     private String deviceId;
 
+    @Column(name = "nickname", length = 50)
+    private String nickname;
+
     // 소유자 (nullable = true -> 등록 전엔 주인 없을 수 있음)
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "owner_id")
     private Member owner;
 
     // 현재 선택된 지도 (Map 엔티티와 연결)
+    @JsonIgnore
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "current_map_id")
     private SlamMap currentMap;
@@ -67,6 +73,11 @@ public class Car {
         this.owner = null;
     }
 
+    // 닉네임 변경 메서드
+    public void updateNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
     // 현재 지도 변경 메서드
     public void updateCurrentMap(SlamMap map) {
         if (map != null && map.getCar() != null && !Objects.equals(map.getCar().getId(), this.id)) {
@@ -77,6 +88,7 @@ public class Car {
 
     // 양방향 매핑 추가
     // orphanRemoval: 리스트에서 제거하면 DB에서도 삭제됨
+    @JsonIgnore
     @OneToMany(mappedBy = "car", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SlamMap> maps = new ArrayList<>();
 

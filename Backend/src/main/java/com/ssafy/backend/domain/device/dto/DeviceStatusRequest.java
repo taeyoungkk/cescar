@@ -6,7 +6,42 @@ import lombok.ToString;
 @Getter
 @ToString
 public class DeviceStatusRequest {
-    private String id;       // 로봇 ID
-    private Integer battery; // 배터리 잔량
-    private String status;   // 현재 상태 (IDLE, MOVING 등)
+    private Double cpu_usage;
+    private MemoryInfo memory;
+    private DiskInfo disk;
+    private Double temperature;
+    private GpuInfo gpu;
+    private BatteryInfo battery;
+
+    @Getter
+    @ToString
+    public static class MemoryInfo {
+        private Long total;
+        private Long available;
+        private Double percent;
+    }
+
+    @Getter
+    @ToString
+    public static class DiskInfo {
+        private Long total;
+        private Long used;
+        private Double percent;
+    }
+
+    @Getter
+    @ToString
+    public static class GpuInfo {
+        private Integer usage;
+        private Double temp;
+    }
+
+    @Getter
+    @ToString
+    public static class BatteryInfo {
+        private Integer percent;
+        private Boolean power_plugged;
+        private Long secsleft;
+        private String note;
+    }
 }

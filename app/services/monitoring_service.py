@@ -27,9 +27,34 @@ class MonitoringService:
                 "percent": psutil.disk_usage('/').percent
             },
             "temperature": self._get_temperature(),
-            "gpu": self._get_gpu_stats()
+            "gpu": self._get_gpu_stats(),
+            "battery": self._get_battery_stats()
         }
         return stats
+
+    def _get_battery_stats(self):
+        """
+        배터리 잔량 및 충전 상태를 가져옵니다.
+        """
+        try:
+            battery = psutil.sensors_battery()
+            if battery:
+                return {
+                    "percent": battery.percent,
+                    "power_plugged": battery.power_plugged,
+                    "secsleft": battery.secsleft
+                }
+            
+            # Jetson Nano에서 특정 I2C 배터리 보드를 사용 중이라면 
+            # 여기서 해당 센서 값을 읽는 로직을 구현해야 합니다.
+            # 예: INA219 센서 등 사용 시
+            return {
+                "percent": 100, # 기본값 (전원 연결됨)
+                "power_plugged": True,
+                "note": "Standard DC Power"
+            }
+        except Exception:
+            return None
 
     def _get_temperature(self):
         """

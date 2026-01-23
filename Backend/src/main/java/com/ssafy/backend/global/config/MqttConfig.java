@@ -40,6 +40,8 @@ public class MqttConfig {
 
         // EMQX 브로커 주소 (Docker로 띄운 경우 localhost:1883)
         options.setServerURIs(new String[] { "tcp://localhost:1883" });
+        options.setUserName("bdad3b84eb0fec45"); // API Key와 별개로 MQTT 계정이 있다면 입력
+        options.setPassword("BlodPLv9BiKEPkJrImPhYzlgwc0I8tgDPBoxHa0sczIF".toCharArray());
         options.setCleanSession(true);
         options.setKeepAliveInterval(60);
 
@@ -61,24 +63,18 @@ public class MqttConfig {
     }
 
     @Bean
-    public MessageChannel mqttInboundChannel() {
+    public MessageChannel mqttInputChannel() {
         return new DirectChannel();
     }
 
     @Bean
     public MessageProducer inbound() {
-        // "spring-server-in" 이라는 ID로 브로커에 접속하여 "jetson/status" 토픽을 구독함
         MqttPahoMessageDrivenChannelAdapter adapter =
-                new MqttPahoMessageDrivenChannelAdapter(
-                        "tcp://localhost:1883",
-                        "spring-server-in",
-                        mqttClientFactory(),
-                        "jetson/status"); // <-- 여기가 바로 구독할 토픽 설정!
-
+                new MqttPahoMessageDrivenChannelAdapter("serverClient", mqttClientFactory(), "robot/robot-01/status");
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
-        adapter.setOutputChannel(mqttInboundChannel()); // 수신한 메시지를 위 채널로 전달
+        adapter.setOutputChannel(mqttInputChannel()); // 받은 메시지를 위에서 만든 채널로 보냄
         return adapter;
     }
 }

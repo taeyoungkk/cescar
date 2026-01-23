@@ -5,7 +5,16 @@ from app.services.hardware import hardware_service
 from app.services.mqtt_service import mqtt_service
 from app.core.config import settings
 
+from app.services.monitoring_service import monitoring_service
+
 router = APIRouter()
+
+@router.get("/system-stats")
+async def get_system_stats():
+    """
+    Jetson Nano의 시스템 상태(CPU, GPU, RAM, 온도 등)를 반환합니다.
+    """
+    return monitoring_service.get_system_stats()
 
 @router.post("/move")
 async def move_robot(command: MovementCommand):

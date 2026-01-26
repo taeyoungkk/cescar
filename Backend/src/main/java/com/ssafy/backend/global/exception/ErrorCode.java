@@ -20,6 +20,7 @@ public enum ErrorCode {
     // Member 관련 에러
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."),
     ALREADY_REGISTERED_MEMBER(HttpStatus.CONFLICT, "이미 가입된 이메일입니다."),
+    WRONG_PASSWORD(HttpStatus.UNAUTHORIZED, "비밀번호가 일치하지 않습니다."),
 
     // 공통 에러
     INVALID_INPUT_VALUE(HttpStatus.BAD_REQUEST, "입력값이 올바르지 않습니다."),

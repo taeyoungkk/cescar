@@ -8,6 +8,7 @@ import com.ssafy.backend.domain.member.dto.MemberResponse;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,6 +18,7 @@ public class MemberService {
 
     private final MemberRepository memberRepository;
     private final CarRepository carRepository;
+    private final PasswordEncoder passwordEncoder;
 
     /**
      * 🏁 1단계: 회원가입 로직
@@ -30,7 +32,7 @@ public class MemberService {
 
         Member member = Member.create(
                 request.email(),
-                request.password(), // 2단계에서 암호화 적용 예정
+                passwordEncoder.encode(request.password()), // 비밀번호 암호화 저장
                 request.name(),
                 request.nickname());
 
@@ -46,9 +48,9 @@ public class MemberService {
         Member member = memberRepository.findByEmail(request.email())
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 
-        // 암호화 전이므로 단순 비교 (2단계에서 BCrypt 적용)
-        if (!member.getPassword().equals(request.password())) {
-            throw new CustomException(ErrorCode.INVALID_INPUT_VALUE); // 혹은 전용 에러 코드
+        // 암호화된 비밀번호 비교
+        if (!passwordEncoder.matches(request.password(), member.getPassword())) {
+            throw new CustomException(ErrorCode.WRONG_PASSWORD);
         }
 
         // 임시 토큰 발행 (3단계에서 진짜 JWT 적용)

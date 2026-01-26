@@ -11,25 +11,39 @@ class Settings(BaseSettings):
     # Robot Identification
     ROBOT_ID: str = "robot-01"
     
-    # MQTT Topics
-    @property
-    def TOPIC_MOTOR_COMMAND(self) -> str:
-        """모터 제어 명령 수신 토픽"""
-        return f"robot/{self.ROBOT_ID}/motor"
+    # Watchdog timeout (ms)
+    WATCHDOG_MS: int = 300
     
+    # === MQTT Topics ===
+    
+    # 모드 제어 (MANUAL/AUTO)
+    @property
+    def TOPIC_MODE(self) -> str:
+        return "ui/mode"
+    
+    # UI에서 오는 명령 (MANUAL 모드용)
+    @property
+    def TOPIC_UI_CMD(self) -> str:
+        return "ui/cmd_vel"
+    
+    # Jetson에서 오는 명령 (AUTO 모드용)
+    @property
+    def TOPIC_JETSON_CMD(self) -> str:
+        return "jetson/cmd_vel"
+    
+    # 비상정지
+    @property
+    def TOPIC_ESTOP(self) -> str:
+        return "system/estop"
+    
+    # 모터 상태 발행
     @property
     def TOPIC_MOTOR_STATUS(self) -> str:
-        """모터 상태 발행 토픽"""
         return f"robot/{self.ROBOT_ID}/motor/status"
     
-    @property
-    def TOPIC_COMMAND(self) -> str:
-        """일반 명령 수신 토픽 (Jetson과 동일)"""
-        return f"robot/{self.ROBOT_ID}/command"
-    
+    # 일반 상태 발행
     @property
     def TOPIC_STATUS(self) -> str:
-        """상태 발행 토픽"""
         return f"robot/{self.ROBOT_ID}/status"
 
     model_config = SettingsConfigDict(
@@ -40,3 +54,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+

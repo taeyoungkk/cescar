@@ -1,6 +1,6 @@
 """
 MQTT Service for Raspberry Pi Motor Control
-Jetson의 mqtt_service.py와 동일한 구조로 구현
+MQTT 연결/구독/발행 담당. 수신 메시지는 control_service로 전달.
 """
 import json
 import logging
@@ -15,6 +15,12 @@ class MQTTService:
     def __init__(self):
         self.client: Optional[mqtt_client.Client] = None
         self.message_handlers: Dict[str, Callable] = {}
+        self._control_service = None  # control_service 주입용
+    
+    def set_control_service(self, control_service):
+        """ControlService 인스턴스 주입"""
+        self._control_service = control_service
+        logger.info("ControlService connected to MQTTService")
     
     def initialize(self):
         """MQTT 클라이언트 초기화"""
@@ -49,18 +55,22 @@ class MQTTService:
             logger.info("MQTT Service Stopped")
     
     def on_connect(self, client, userdata, flags, rc, properties=None):
-        """연결 성공 시 콜백"""
+        """연결 성공 시 콜백 - 제어 관련 토픽 구독"""
         if rc == 0:
             print(f"[*] MQTT Connected to {settings.MQTT_BROKER}!")
             logger.info(f"Connected to MQTT Broker: {settings.MQTT_BROKER}")
             
-            # 모터 명령 토픽 구독
-            client.subscribe(settings.TOPIC_MOTOR_COMMAND)
-            print(f"[*] Subscribed to: {settings.TOPIC_MOTOR_COMMAND}")
+            # 제어 토픽 구독
+            topics = [
+                settings.TOPIC_MODE,        # 모드 변경 (MANUAL/AUTO)
+                settings.TOPIC_UI_CMD,      # UI 명령
+                settings.TOPIC_JETSON_CMD,  # Jetson 명령
+                settings.TOPIC_ESTOP,       # 비상정지
+            ]
             
-            # 일반 명령 토픽 구독 (Jetson으로부터 받을 수 있음)
-            client.subscribe(settings.TOPIC_COMMAND)
-            print(f"[*] Subscribed to: {settings.TOPIC_COMMAND}")
+            for topic in topics:
+                client.subscribe(topic)
+                print(f"[*] Subscribed to: {topic}")
         else:
             print(f"[!] MQTT Connection Failed with code: {rc}")
             logger.error(f"Failed to connect, return code {rc}")
@@ -71,45 +81,40 @@ class MQTTService:
         print(f"[!] MQTT Disconnected with code: {rc}")
     
     def on_message(self, client, userdata, msg):
-        """메시지 수신 시 콜백"""
+        """메시지 수신 시 콜백 - control_service로 전달"""
         try:
-            payload = msg.payload.decode()
-            print(f"\n[>>>] Message Received on {msg.topic}: {payload}")
-            logger.info(f"MQTT Received: {msg.topic} -> {payload}")
+            payload_str = msg.payload.decode()
+            print(f"\n[>>>] Message Received on {msg.topic}: {payload_str}")
+            logger.info(f"MQTT Received: {msg.topic} -> {payload_str}")
             
-            # 등록된 핸들러가 있으면 호출
-            if msg.topic in self.message_handlers:
-                self.message_handlers[msg.topic](payload)
+            # JSON 파싱
+            try:
+                payload = json.loads(payload_str)
+            except json.JSONDecodeError:
+                logger.warning(f"Invalid JSON received: {payload_str}")
+                return
+            
+            # control_service로 전달
+            if self._control_service:
+                self._dispatch_to_control(msg.topic, payload)
             else:
-                self._handle_default(msg.topic, payload)
+                logger.warning("ControlService not connected")
                 
         except Exception as e:
             logger.error(f"Message processing error: {e}")
     
-    def _handle_default(self, topic: str, payload: str):
-        """기본 메시지 핸들러"""
-        try:
-            data = json.loads(payload)
-            command = data.get("command", "")
-            
-            if topic == settings.TOPIC_MOTOR_COMMAND:
-                self._handle_motor_command(data)
-            elif topic == settings.TOPIC_COMMAND:
-                self._handle_general_command(data)
-                
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid JSON received: {payload}")
-    
-    def _handle_motor_command(self, data: Dict[str, Any]):
-        """모터 명령 처리 (TODO: 실제 모터 제어 로직 연결)"""
-        command = data.get("command", "")
-        print(f"[MOTOR] Command received: {command}")
-        # TODO: motor_service.execute(command, data)
-    
-    def _handle_general_command(self, data: Dict[str, Any]):
-        """일반 명령 처리"""
-        command = data.get("command", "")
-        print(f"[GENERAL] Command received: {command}")
+    def _dispatch_to_control(self, topic: str, payload: Dict[str, Any]):
+        """토픽에 따라 control_service 메서드 호출"""
+        if topic == settings.TOPIC_MODE:
+            self._control_service.on_mode(payload)
+        elif topic == settings.TOPIC_ESTOP:
+            self._control_service.on_estop(payload)
+        elif topic == settings.TOPIC_UI_CMD:
+            self._control_service.on_cmd_vel("ui", payload)
+        elif topic == settings.TOPIC_JETSON_CMD:
+            self._control_service.on_cmd_vel("jetson", payload)
+        else:
+            logger.debug(f"Unknown topic: {topic}")
     
     def register_handler(self, topic: str, handler: Callable):
         """특정 토픽에 대한 커스텀 핸들러 등록"""

@@ -1,7 +1,7 @@
 package com.ssafy.backend.domain.device.application;
 
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -62,7 +62,7 @@ public class JetsonStatusService {
     /**
      * MQTT로 들어오는 실시간 상태 메시지 처리 및 캐시 업데이트
      */
-    @ServiceActivator(inputChannel = "mqttInputChannel")
+    @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleMqttMessage(Message<String> message) {
         String payload = message.getPayload();
         String topic = (String) message.getHeaders().get("mqtt_receivedTopic");

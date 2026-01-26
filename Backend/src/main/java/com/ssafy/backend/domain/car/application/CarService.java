@@ -12,11 +12,14 @@ import com.ssafy.backend.domain.member.dao.MemberRepository;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
 import com.ssafy.backend.infrastructure.mqtt.MqttGateway;
+import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -32,6 +35,7 @@ public class CarService {
     private final CarStatusRepository carStatusRepository;
     private final MemberRepository memberRepository;
     private final MqttGateway mqttGateway;
+    private final ObjectMapper objectMapper;
 
     /**
      * 1️⃣ 차량 소유 연결
@@ -132,9 +136,18 @@ public class CarService {
 
         status.changeMode(request.mode());
 
-        // MQTT 알림 전송: jetson/{deviceId}/mode
-        String topic = "jetson/" + car.getDeviceId() + "/mode";
-        mqttGateway.sendToMqtt(request.mode().name(), topic);
+        try {
+            // MQTT 알림 전송: jetson/{deviceId}/mode
+            // 기기 규격에 맞춰 JSON 형식으로 전송: {"mode": "MANUAL"}
+            Map<String, String> payload = new HashMap<>();
+            payload.put("mode", request.mode().name());
+            String jsonPayload = objectMapper.writeValueAsString(payload);
+
+            String topic = "pi/" + car.getDeviceId() + "/mode";
+            mqttGateway.sendToMqtt(jsonPayload, topic);
+        } catch (Exception e) {
+            // 로그 기록 등을 추가할 수 있으나 현재는 단순 예외 처리
+        }
 
         return CarResponse.ModeChangeResponse.ok();
     }
@@ -231,10 +244,82 @@ public class CarService {
             throw new CustomException(ErrorCode.INVALID_CAR_MODE);
         }
 
-        // MQTT 명령 전송: jetson/{deviceId}/control
-        String topic = "jetson/" + car.getDeviceId() + "/control";
-        mqttGateway.sendToMqtt(request.command(), topic);
+        try {
+            // 방향 명령을 기기용 속도 데이터(v, w)로 변환
+            // v: 선속도(전진/후진), w: 각속도(좌/우 회전)
+            Map<String, Double> payload = new HashMap<>();
+            switch (request.command().toUpperCase()) {
+                case "UP":
+                    payload.put("v", 0.5);
+                    payload.put("w", 0.0);
+                    break;
+                case "DOWN":
+                    payload.put("v", -0.5);
+                    payload.put("w", 0.0);
+                    break;
+                case "LEFT":
+                    payload.put("v", 0.0);
+                    payload.put("w", 1.0);
+                    break;
+                case "RIGHT":
+                    payload.put("v", 0.0);
+                    payload.put("w", -1.0);
+                    break;
+                case "STOP":
+                    payload.put("v", 0.0);
+                    payload.put("w", 0.0);
+                    break;
+                default:
+                    payload.put("v", 0.0);
+                    payload.put("w", 0.0);
+                    break;
+            }
+
+            String jsonPayload = objectMapper.writeValueAsString(payload);
+
+            // MQTT 명령 전송: jetson/{deviceId}/control
+            String topic = "pi/" + car.getDeviceId() + "/control";
+            mqttGateway.sendToMqtt(jsonPayload, topic);
+        } catch (Exception e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
 
         return CarResponse.ControlResponse.of(request.command());
+    }
+
+    /**
+     * 🔟 자율 주행 미션 부여 (구역 탐사)
+     * - 지정된 구역(좌표 리스트)을 젯슨에게 전달
+     * - AUTO 모드일 때만 작동 가능
+     */
+    @Transactional
+    public CarResponse.SuccessResponse assignMission(Long carId, CarRequest.MissionRequest request, Long memberId) {
+        Car car = carRepository.findById(carId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CAR_NOT_FOUND));
+
+        if (car.getOwner() == null || !car.getOwner().getId().equals(memberId)) {
+            throw new CustomException(ErrorCode.INVALID_CAR_OWNER);
+        }
+
+        CarStatus status = carStatusRepository.findById(carId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
+
+        if (status.getMode() != CarMode.AUTO) {
+            throw new CustomException(ErrorCode.INVALID_CAR_MODE);
+        }
+
+        try {
+            // 미션 데이터를 JSON 문자열로 변환
+            String missionJson = objectMapper.writeValueAsString(request);
+
+            // MQTT 미션 전송: jetson/{deviceId}/mission
+            String topic = "jetson/" + car.getDeviceId() + "/mission";
+            mqttGateway.sendToMqtt(missionJson, topic);
+
+        } catch (Exception e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        return CarResponse.SuccessResponse.of("Mission has been assigned successfully");
     }
 }

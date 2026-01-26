@@ -197,4 +197,25 @@ public class CarController {
                 CarResponse.ControlResponse response = carService.controlCar(carId, request, memberId);
                 return ResponseEntity.ok(response);
         }
+
+        /**
+         * 🔟 자율 주행 미션 부여 (PATCH /api/cars/{carId}/mission)
+         * - 구역 탐사를 위한 좌표 리스트 전달
+         * - 차량 소유자만 가능
+         */
+        @Operation(summary = "자율 주행 미션 부여", description = "차량에 구역 탐사를 위한 자율 주행 미션을 부여합니다.")
+        @ApiResponses(value = {
+                        @ApiResponse(responseCode = "200", description = "성공"),
+                        @ApiResponse(responseCode = "400", description = "수동 모드가 아님"),
+                        @ApiResponse(responseCode = "403", description = "권한 없음"),
+                        @ApiResponse(responseCode = "404", description = "차량을 찾을 수 없음")
+        })
+        @PatchMapping("/{carId}/mission")
+        public ResponseEntity<CarResponse.SuccessResponse> assignMission(
+                        @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
+                        @Parameter(description = "미션 요청 정보", required = true) @Valid @RequestBody CarRequest.MissionRequest request,
+                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                CarResponse.SuccessResponse response = carService.assignMission(carId, request, memberId);
+                return ResponseEntity.ok(response);
+        }
 }

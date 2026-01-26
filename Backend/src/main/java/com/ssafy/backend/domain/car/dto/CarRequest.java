@@ -4,6 +4,7 @@ import com.ssafy.backend.domain.car.domain.CarMode;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import java.util.List;
 
 import java.math.BigDecimal;
 
@@ -58,5 +59,17 @@ public class CarRequest {
          */
         public record UpdateCarRequest(
                         String nickname) {
+        }
+
+        /**
+         * 자율 주행 미션 요청 (PATCH /api/cars/{carId}/mission)
+         */
+        public record MissionRequest(
+                        @NotNull(message = "area is required") List<Point> area) {
+        }
+
+        public record Point(
+                        @NotNull BigDecimal x,
+                        @NotNull BigDecimal y) {
         }
 }

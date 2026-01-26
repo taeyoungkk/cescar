@@ -1,6 +1,6 @@
 "use client"
 
-import React from "react"
+import React, { useEffect } from "react"
 import Link from "next/link"
 import {
   Wifi,
@@ -33,11 +33,14 @@ import { Progress } from "@/components/ui/progress"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
 import { useRobotStatus } from "@/hooks/useRobotStatus"
+import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
 import { useAlerts } from "@/hooks/useAlerts"
 import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
 
 import type { RobotStatus, Detection, SystemAlert, DetectionStats } from "@/core/types"
+import { DetectionControls } from "@/components/robot/DetectionControls"
+
 
 // ✅ DEMO MODE
 import { DEMO_MODE } from "@/core/demo/config"
@@ -470,21 +473,21 @@ function MapGenerationSection({
   return (
     <Card className="bg-card border-border overflow-hidden">
       <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <CardTitle className="text-base font-medium">지도 생성 및 내비게이션</CardTitle>
-            <Badge variant="secondary" className="text-xs">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            <CardTitle className="text-base font-medium truncate">지도 생성 및 내비게이션</CardTitle>
+            <Badge variant="secondary" className="text-xs shrink-0">
               <Target className="h-3 w-3 mr-1" />
               SLAM
             </Badge>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
             {maps.length > 0 && onSelectMap && onDeleteMap && (
               <MapHistoryDialog maps={maps} onSelect={onSelectMap} onDelete={onDeleteMap} />
             )}
             {mapStatus === "completed" && (
-              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">완료됨</Badge>
+              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shrink-0">완료됨</Badge>
             )}
           </div>
         </div>
@@ -695,10 +698,11 @@ export default function HomePage() {
   const realStatus = useRobotStatus()
   const realDetections = useRecentDetections()
   const realAlerts = useAlerts()
-
   const mapStore = useMapStore()
+  const { isOnline: networkOnline } = useNetworkStatus()
 
   const isDemo = DEMO_MODE
+
 
   // DEMO: derive same data you already used
   let robotStatus: RobotStatus | null = null
@@ -764,6 +768,8 @@ export default function HomePage() {
     }
 
     statusLoading = robotStatus == null
+    detectionsLoading = false
+    alertsLoading = false
   } else {
     robotStatus = realStatus.robotStatus
     recentDetections = realDetections.recentDetections
@@ -774,6 +780,41 @@ export default function HomePage() {
     detectionsLoading = realDetections.isLoading
     alertsLoading = realAlerts.isLoading
   }
+
+  const robotOnline = robotStatus?.isOnline ?? false
+  const mapReady = mapStore.status === "completed"
+
+  const isDetecting = isDemo
+    ? robotStatus?.mode === "detecting"
+    : realStatus.isDetecting
+
+  const detectionLoading = isDemo
+    ? statusLoading
+    : realStatus.isLoading
+
+  const onStart = React.useCallback(async () => {
+    if (isDemo) {
+      robotDemoEngine.startDetection()
+      return true
+    }
+    return realStatus.startDetection()
+  }, [isDemo, realStatus])
+
+  const onStop = React.useCallback(async () => {
+    if (isDemo) {
+      robotDemoEngine.stopDetection()
+      return true
+    }
+    return realStatus.stopDetection()
+  }, [isDemo, realStatus])
+
+  // must be above early return
+  useEffect(() => {
+    if (mapStore.status === "generating" && isDetecting) {
+      onStop()
+    }
+  }, [mapStore.status, isDetecting, onStop])
+
 
   // Wait for mapStore hydration (prevents flicker + mismatch)
   if (!mapStore.isInitialized) {
@@ -805,11 +846,11 @@ export default function HomePage() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 space-y-4">
             <MapGenerationSection
               mapStatus={mapStore.status}
               progress={mapStore.progress}
-              isOnline={robotStatus?.isOnline ?? false}
+              isOnline={robotOnline}
               generatedAt={mapStore.activeMap?.generatedAt}
               areaSize={mapStore.activeMap?.areaSize}
               robotId={mapStore.activeMap?.robotId}
@@ -819,6 +860,16 @@ export default function HomePage() {
               onSelectMap={mapStore.selectMap}
               onDeleteMap={mapStore.deleteMap}
             />
+
+              <DetectionControls
+                isDetecting={isDetecting}
+                isLoading={detectionLoading}
+                onStart={onStart}
+                onStop={onStop}
+                networkOnline={networkOnline}
+                robotOnline={robotOnline}
+                mapReady={mapReady}
+              />
           </div>
           <div className="space-y-6">
             <SystemAlertsSection alerts={alerts} isLoading={alertsLoading} />

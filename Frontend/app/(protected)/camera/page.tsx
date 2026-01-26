@@ -210,8 +210,6 @@ function LiveCameraView({
 }
 
 interface ControlPanelProps {
-  isDetecting: boolean
-  onToggleDetection: () => void
   showOverlay: boolean
   onToggleOverlay: () => void
   onCapture: () => void
@@ -220,8 +218,6 @@ interface ControlPanelProps {
 }
 
 function ControlPanel({
-  isDetecting,
-  onToggleDetection,
   showOverlay,
   onToggleOverlay,
   onCapture,
@@ -234,31 +230,6 @@ function ControlPanel({
         <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">제어 패널</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 제어</p>
-          <div className="flex gap-2">
-            <OfflineGuardButton
-              className={`flex-1 ${isDetecting ? "bg-secondary hover:bg-secondary/80" : "bg-primary hover:bg-primary/90"}`}
-              onClick={onToggleDetection}
-              disabled={isDetecting || isLoading || !networkOnline}
-              offlineMessage="네트워크에 연결되어야 탐지를 시작할 수 있습니다"
-            >
-              <Play className="mr-2 h-4 w-4" />
-              탐지 시작
-            </OfflineGuardButton>
-            <OfflineGuardButton
-              variant="destructive"
-              className="flex-1"
-              onClick={onToggleDetection}
-              disabled={!isDetecting || isLoading || !networkOnline}
-              offlineMessage="네트워크에 연결되어야 탐지를 중지할 수 있습니다"
-            >
-              <Square className="mr-2 h-4 w-4" />
-              탐지 중지
-            </OfflineGuardButton>
-          </div>
-        </div>
-
         <div className="h-px bg-border" />
 
         <div className="space-y-3">
@@ -449,19 +420,10 @@ export default function CameraPage() {
   const { isOnline } = useNetworkStatus()
 
   // All data fetching via hooks
-  const { robotStatus, cameraEvents, isLoading, isDetecting, startDetection, stopDetection, captureSnapshot } =
-    useRobotStatus()
+  const { robotStatus, cameraEvents, isLoading, isDetecting, captureSnapshot } = useRobotStatus()
 
   // Local UI state only (no data)
   const [showOverlay, setShowOverlay] = useState(true)
-
-  const handleToggleDetection = async () => {
-    if (isDetecting) {
-      await stopDetection()
-    } else {
-      await startDetection()
-    }
-  }
 
   const handleCapture = async () => {
     await captureSnapshot()
@@ -489,8 +451,6 @@ export default function CameraPage() {
 
           <div className="w-full lg:w-80 xl:w-96 space-y-4">
             <ControlPanel
-              isDetecting={isDetecting}
-              onToggleDetection={handleToggleDetection}
               showOverlay={showOverlay}
               onToggleOverlay={setShowOverlay}
               onCapture={handleCapture}

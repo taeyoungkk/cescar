@@ -39,7 +39,8 @@ interface LargeMapVisualizationProps {
 
 function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
   return (
-    <div className="relative w-full aspect-[16/10] bg-zinc-900 rounded-lg overflow-hidden border border-border">
+    <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-border
+                h-[320px] sm:h-auto sm:aspect-[16/10]">
       {/* Grid background */}
       <div
         className="absolute inset-0 opacity-20"
@@ -203,7 +204,7 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
           </div>
 
           {/* Legend */}
-          <div className="absolute top-4 right-4 flex items-center gap-3">
+          <div className="hidden sm:flex absolute top-4 right-4 flex items-center gap-3">
             <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1.5">
               <div className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
               <span className="text-xs text-white/80">로봇</span>
@@ -219,12 +220,12 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
           </div>
 
           {/* Compass */}
-          <div className="absolute top-4 left-4 bg-black/70 rounded-full p-2">
-            <Navigation className="h-5 w-5 text-white/80" />
+          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 bg-black/70 rounded-full p-1.5 sm:p-2">
+            <Navigation className="h-4 w-4 sm:h-5 sm:w-5 text-white/80" />
           </div>
 
           {/* Scale indicator */}
-          <div className="absolute bottom-4 left-4 bg-black/70 rounded px-3 py-2">
+          <div className="hidden sm:block absolute bottom-4 left-4 bg-black/70 rounded px-3 py-2">
             <div className="flex items-center gap-2">
               <div className="w-16 h-1 bg-white/60 rounded" />
               <span className="text-xs text-white/80">1m</span>
@@ -232,7 +233,7 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
           </div>
 
           {/* Coordinates */}
-          <div className="absolute bottom-4 right-4 bg-black/70 rounded px-3 py-2">
+          <div className="hidden sm:block absolute bottom-4 right-4 bg-black/70 rounded px-3 py-2">
             <span className="text-xs text-white/60 font-mono">X: 6.2m | Y: 4.1m</span>
           </div>
         </>
@@ -333,8 +334,8 @@ function MapHistoryDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="bg-transparent">
-          <History className="mr-2 h-4 w-4" />
-          기존 지도 보기
+          <History className="h-4 w-4 sm:mr-2" />
+          <span className="hidden sm:inline">기존 지도 보기</span>
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md bg-card border-border">
@@ -405,27 +406,38 @@ export default function MapDetailPage() {
   }
 
   return (
-    <div className="p-4 lg:p-6">
+    <div className="p-4 lg:p-6 overflow-x-hidden">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-4">
-            <Button asChild variant="ghost" size="icon" className="rounded-lg">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-6">
+          {/* Left */}
+          <div className="flex items-start gap-3 min-w-0">
+            <Button asChild variant="ghost" size="icon" className="rounded-lg shrink-0">
               <Link href="/home">
                 <ArrowLeft className="h-5 w-5" />
               </Link>
             </Button>
 
-            <div>
-              <h1 className="text-2xl font-semibold text-foreground">지도 상세 보기</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">SLAM 기반 실내 맵핑 결과</p>
+            <div className="min-w-0">
+              <h1 className="text-xl sm:text-2xl font-semibold text-foreground truncate">
+                <span className="sm:hidden">지도 상세</span>
+                <span className="hidden sm:inline">지도 상세 보기</span>
+              </h1>
+              <p className="text-sm text-muted-foreground mt-0.5 break-words">
+                <span className="sm:hidden">SLAM 맵핑 결과</span>
+                <span className="hidden sm:inline">SLAM 기반 실내 맵핑 결과</span>
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {maps.length > 0 && <MapHistoryDialog maps={maps} onSelect={selectMap} onDelete={deleteMap} />}
+          {/* Right */}
+          <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
+            {maps.length > 0 && (
+              <MapHistoryDialog maps={maps} onSelect={selectMap} onDelete={deleteMap} />
+            )}
+
             {mapStatus === "completed" && (
-              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30">
+              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shrink-0">
                 <MapPin className="h-3 w-3 mr-1" />
                 지도 완료
               </Badge>
@@ -439,22 +451,23 @@ export default function MapDetailPage() {
           <div className="lg:col-span-3">
             <Card className="bg-card border-border overflow-hidden">
               <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CardTitle className="text-base font-medium">지도 시각화</CardTitle>
-                    <Badge variant="secondary" className="text-xs">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CardTitle className="text-base font-medium truncate">지도 시각화</CardTitle>
+                    <Badge variant="secondary" className="text-xs shrink-0">
                       <Target className="h-3 w-3 mr-1" />
                       Occupancy Grid
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-2">
+
+                  <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
                     <Button variant="outline" size="sm" className="bg-transparent">
-                      <Download className="h-4 w-4 mr-1" />
-                      내보내기
+                      <Download className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">내보내기</span>
                     </Button>
                     <Button variant="outline" size="sm" className="bg-transparent">
-                      <RefreshCw className="h-4 w-4 mr-1" />
-                      새로고침
+                      <RefreshCw className="h-4 w-4 sm:mr-1" />
+                      <span className="hidden sm:inline">새로고침</span>
                     </Button>
                   </div>
                 </div>
@@ -485,14 +498,16 @@ export default function MapDetailPage() {
             {/* Map metadata */}
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground px-1">지도 정보</h3>
-              <MapMetadataCard label="생성 시각" value={activeMap?.generatedAt || "-"} icon={Clock} />
-              <MapMetadataCard label="맵 영역" value={activeMap?.areaSize || "-"} icon={Map} />
-              <MapMetadataCard label="로봇 ID" value={activeMap?.robotId || "-"} icon={Target} />
-              <MapMetadataCard
-                label="탐지 지점"
-                value={activeMap ? `${activeMap.detectionsCount}개` : "-"}
-                icon={Bug}
-              />
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+                <MapMetadataCard label="생성 시각" value={activeMap?.generatedAt || "-"} icon={Clock} />
+                <MapMetadataCard label="맵 영역" value={activeMap?.areaSize || "-"} icon={Map} />
+                <MapMetadataCard label="로봇 ID" value={activeMap?.robotId || "-"} icon={Target} />
+                <MapMetadataCard
+                  label="탐지 지점"
+                  value={activeMap ? `${activeMap.detectionsCount}개` : "-"}
+                  icon={Bug}
+                />
+              </div>
             </div>
 
             {/* Detection points list */}

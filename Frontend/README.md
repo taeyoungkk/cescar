@@ -1,9 +1,9 @@
-<!-- 1. npm install
-2. npm run dev -- --webpack -->
+<!-- npm run dev -- --webpack -->
 
 # 실행 방법
 
 ## (웹에서 실행)
+`npm install`<br>
 `npm run build -- --webpack`<br>
 `npm run start` 한 후
 

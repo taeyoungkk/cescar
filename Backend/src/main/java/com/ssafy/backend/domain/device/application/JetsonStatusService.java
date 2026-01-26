@@ -62,9 +62,16 @@ public class JetsonStatusService {
     /**
      * MQTT로 들어오는 실시간 상태 메시지 처리 및 캐시 업데이트
      */
-    @ServiceActivator(inputChannel = "mqttInboundChannel")
-    public void handleMqttMessage(Message<String> message) {
-        String payload = message.getPayload();
+    public void handleMqttMessage(Message<?> message) {
+        Object rawPayload = message.getPayload();
+        String payload;
+
+        if (rawPayload instanceof byte[]) {
+            payload = new String((byte[]) rawPayload, java.nio.charset.StandardCharsets.UTF_8);
+        } else {
+            payload = rawPayload.toString();
+        }
+
         String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
 
         try {

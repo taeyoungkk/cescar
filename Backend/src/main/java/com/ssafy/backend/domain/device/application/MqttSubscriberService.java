@@ -3,6 +3,7 @@ package com.ssafy.backend.domain.device.application;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
@@ -19,7 +20,6 @@ public class MqttSubscriberService {
 
     private final ObjectMapper objectMapper; // Spring이 기본 제공하는 JSON 변환기
 
-
     // 테스트를 위한 최신 데이터 저장소 (로봇ID별)
     private static final Map<String, DeviceStatusRequest> statusCache = new ConcurrentHashMap<>();
     private static final Map<String, DetectionRequest> detectionCache = new ConcurrentHashMap<>();
@@ -32,26 +32,28 @@ public class MqttSubscriberService {
         return detectionCache.get(robotId);
     }
 
-    @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleMessage(Message<?> message) {
-        String payload = (String) message.getPayload();
+        Object rawPayload = message.getPayload();
+        String payload;
+
+        if (rawPayload instanceof byte[]) {
+            payload = new String((byte[]) rawPayload, StandardCharsets.UTF_8);
+        } else {
+            payload = rawPayload.toString();
+        }
+
         String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
 
-        if (topic == null)
+        if (topic == null) {
             return;
+        }
 
         try {
-            System.out.println("\n" + "🚀".repeat(25));
-            System.out.println("📬 [MQTT INCOMING] Topic: " + topic);
-            System.out.println("📦 Payload: " + payload);
-            System.out.println("-".repeat(50));
-
             if (topic.endsWith("/status")) {
                 handleStatusMessage(payload, topic);
             } else if (topic.endsWith("/detection")) {
                 handleDetectionMessage(payload, topic);
             }
-            System.out.println("🚀".repeat(25) + "\n");
         } catch (Exception e) {
             log.error("메시지 처리 실패: {}", e.getMessage());
         }

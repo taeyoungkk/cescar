@@ -14,37 +14,37 @@ class Settings(BaseSettings):
     # Watchdog timeout (ms)
     WATCHDOG_MS: int = 300
     
-    # === MQTT Topics ===
+    # === MQTT Topics (백엔드 구조: pi/{deviceId}/...) ===
     
     # 모드 제어 (MANUAL/AUTO)
     @property
     def TOPIC_MODE(self) -> str:
-        return "ui/mode"
+        return f"pi/{self.ROBOT_ID}/mode"
     
-    # UI에서 오는 명령 (MANUAL 모드용)
+    # UI에서 오는 제어 명령 (MANUAL 모드용)
     @property
     def TOPIC_UI_CMD(self) -> str:
-        return "ui/cmd_vel"
+        return f"pi/{self.ROBOT_ID}/control"
     
     # Jetson에서 오는 명령 (AUTO 모드용)
     @property
     def TOPIC_JETSON_CMD(self) -> str:
-        return "jetson/cmd_vel"
+        return f"jetson/{self.ROBOT_ID}/cmd_vel"
     
     # 비상정지
     @property
     def TOPIC_ESTOP(self) -> str:
-        return "system/estop"
+        return f"pi/{self.ROBOT_ID}/estop"
     
     # 모터 상태 발행
     @property
     def TOPIC_MOTOR_STATUS(self) -> str:
-        return f"robot/{self.ROBOT_ID}/motor/status"
+        return f"pi/{self.ROBOT_ID}/motor/status"
     
     # 일반 상태 발행
     @property
     def TOPIC_STATUS(self) -> str:
-        return f"robot/{self.ROBOT_ID}/status"
+        return f"pi/{self.ROBOT_ID}/status"
 
     model_config = SettingsConfigDict(
         env_file=".env",

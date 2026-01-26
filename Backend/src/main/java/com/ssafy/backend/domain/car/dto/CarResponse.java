@@ -19,15 +19,13 @@ public class CarResponse {
             Long carId,
             String nickname,
             CarMode mode,
-            Boolean isOnline
-    ) {
+            Boolean isOnline) {
         public static ClaimResponse of(Car car, CarStatus status) {
             return new ClaimResponse(
                     car.getId(),
                     car.getNickname() != null ? car.getNickname() : car.getDeviceId(),
                     status != null ? status.getMode() : CarMode.STOP,
-                    status != null ? status.isOnline() : false
-            );
+                    status != null ? status.isOnline() : false);
         }
     }
 
@@ -35,8 +33,7 @@ public class CarResponse {
      * 차량 상태 업데이트 성공 응답
      */
     public record StatusUpdateResponse(
-            boolean success
-    ) {
+            boolean success) {
         public static StatusUpdateResponse ok() {
             return new StatusUpdateResponse(true);
         }
@@ -52,8 +49,7 @@ public class CarResponse {
             Float heading,
             CarMode mode,
             Boolean isOnline,
-            LocalDateTime updatedAt
-    ) {
+            LocalDateTime updatedAt) {
         public static StatusResponse from(CarStatus status) {
             return new StatusResponse(
                     status.getX(),
@@ -61,8 +57,7 @@ public class CarResponse {
                     status.getHeading(),
                     status.getMode(),
                     status.isOnline(),
-                    status.getUpdatedAt()
-            );
+                    status.getUpdatedAt());
         }
     }
 
@@ -70,8 +65,7 @@ public class CarResponse {
      * 차량 모드 변경 성공 응답
      */
     public record ModeChangeResponse(
-            boolean success
-    ) {
+            boolean success) {
         public static ModeChangeResponse ok() {
             return new ModeChangeResponse(true);
         }
@@ -85,15 +79,13 @@ public class CarResponse {
             Long carId,
             String nickname,
             CarMode mode,
-            Boolean isOnline
-    ) {
+            Boolean isOnline) {
         public static CarListResponse of(Car car, CarStatus status) {
             return new CarListResponse(
                     car.getId(),
                     car.getNickname() != null ? car.getNickname() : car.getDeviceId(),
                     status != null ? status.getMode() : CarMode.STOP,
-                    status != null ? status.isOnline() : false
-            );
+                    status != null ? status.isOnline() : false);
         }
     }
 
@@ -108,8 +100,7 @@ public class CarResponse {
             Long ownerId,
             String nickname,
             LocalDateTime createdAt,
-            StatusResponse status
-    ) {
+            StatusResponse status) {
         public static CarDetailResponse of(Car car, CarStatus status) {
             return new CarDetailResponse(
                     car.getId(),
@@ -118,8 +109,7 @@ public class CarResponse {
                     car.getOwner() != null ? car.getOwner().getId() : null,
                     car.getNickname() != null ? car.getNickname() : car.getDeviceId(),
                     car.getCreatedAt(),
-                    status != null ? StatusResponse.from(status) : null
-            );
+                    status != null ? StatusResponse.from(status) : null);
         }
     }
 
@@ -129,8 +119,7 @@ public class CarResponse {
      */
     public record SuccessResponse(
             boolean success,
-            String message
-    ) {
+            String message) {
         public static SuccessResponse of(String message) {
             return new SuccessResponse(true, message);
         }

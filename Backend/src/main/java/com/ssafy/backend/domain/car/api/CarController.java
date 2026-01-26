@@ -77,8 +77,9 @@ public class CarController {
         })
         @GetMapping("/{carId}/status")
         public ResponseEntity<CarResponse.StatusResponse> getCarStatus(
-                        @Parameter(description = "차량 ID", required = true) @PathVariable Long carId) {
-                CarResponse.StatusResponse response = carService.getCarStatus(carId);
+                        @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
+                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                CarResponse.StatusResponse response = carService.getCarStatus(carId, memberId);
                 return ResponseEntity.ok(response);
         }
 
@@ -138,7 +139,7 @@ public class CarController {
         }
 
         /**
-         * 추가: 차량 소유권 해제 (DELETE /api/cars/{carId}/claim)
+         * 7️⃣ 차량 소유권 해제 (DELETE /api/cars/{carId}/claim)
          * - 차량과 소유자의 연결 해제
          * - 현재 소유자만 가능
          */
@@ -157,7 +158,7 @@ public class CarController {
         }
 
         /**
-         * 추가: 차량 닉네임 수정 (PATCH /api/cars/{carId})
+         * 8️⃣ 차량 닉네임 수정 (PATCH /api/cars/{carId})
          * - 차량의 닉네임 변경
          * - 차량 소유자만 가능
          */

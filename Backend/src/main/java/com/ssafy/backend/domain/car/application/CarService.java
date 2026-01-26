@@ -45,6 +45,13 @@ public class CarService {
             throw new CustomException(ErrorCode.CAR_ALREADY_CLAIMED);
         }
 
+        CarStatus status = carStatusRepository.findById(car.getId())
+                .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
+
+        if (!status.isOnline()) {
+            throw new CustomException(ErrorCode.CAR_OFFLINE);
+        }
+
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 
@@ -54,12 +61,6 @@ public class CarService {
         if (request.nickname() != null && !request.nickname().isBlank()) {
             car.updateNickname(request.nickname());
         }
-
-        CarStatus status = carStatusRepository.findById(car.getId())
-                .orElseGet(() -> {
-                    CarStatus newStatus = CarStatus.create(car);
-                    return carStatusRepository.save(newStatus);
-                });
 
         return CarResponse.ClaimResponse.of(car, status);
     }
@@ -94,7 +95,14 @@ public class CarService {
      * - 실시간 차량 위치 및 상태 정보 반환
      * - 지도/대시보드에서 사용
      */
-    public CarResponse.StatusResponse getCarStatus(Long carId) {
+    public CarResponse.StatusResponse getCarStatus(Long carId, Long memberId) {
+        Car car = carRepository.findById(carId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CAR_NOT_FOUND));
+
+        if (car.getOwner() == null || !car.getOwner().getId().equals(memberId)) {
+            throw new CustomException(ErrorCode.UNAUTHORIZED_CAR_ACCESS);
+        }
+
         CarStatus status = carStatusRepository.findById(carId)
                 .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
 

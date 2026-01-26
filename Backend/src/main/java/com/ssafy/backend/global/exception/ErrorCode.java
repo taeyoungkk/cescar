@@ -14,6 +14,7 @@ public enum ErrorCode {
     INVALID_CLAIM_CODE(HttpStatus.BAD_REQUEST, "유효하지 않은 claimCode입니다."),
     UNAUTHORIZED_CAR_ACCESS(HttpStatus.FORBIDDEN, "차량에 대한 권한이 없습니다."),
     INVALID_CAR_OWNER(HttpStatus.FORBIDDEN, "차량 소유자만 접근할 수 있습니다."),
+    CAR_OFFLINE(HttpStatus.BAD_REQUEST, "차량 전원이 꺼져 있어 등록할 수 없습니다."),
 
     // Member 관련 에러
     MEMBER_NOT_FOUND(HttpStatus.NOT_FOUND, "존재하지 않는 회원입니다."),

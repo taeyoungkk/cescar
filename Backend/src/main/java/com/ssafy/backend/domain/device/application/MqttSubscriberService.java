@@ -23,17 +23,21 @@ public class MqttSubscriberService {
             // REST의 @RequestBody 처럼 JSON 문자열을 객체로 변환
             DeviceStatusRequest request = objectMapper.readValue(payload, DeviceStatusRequest.class);
 
+            String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
+            String robotId = topic != null ? topic.split("/")[1] : "unknown";
+
             log.info("----- 로봇 데이터 수신 완료 -----");
-            log.info("로봇 ID: {}", request.getId());
-            log.info("배터리: {}%", request.getBattery());
-            log.info("현재 상태: {}", request.getStatus());
+            log.info("로봇 ID: {}", robotId);
+            log.info("CPU 사용량: {}%", request.getCpu_usage());
+            log.info("배터리: {}%", request.getBattery() != null ? request.getBattery().getPercent() : "N/A");
+            log.info("온도: {}°C", request.getTemperature());
 
             System.out.println("====================================");
-            System.out.println("MQTT 수신 메시지: " + payload);
+            System.out.println("MQTT 수신 메시지 (" + robotId + "): " + payload);
             System.out.println("====================================");
-            // 여기서 비즈니스 로직 실행 (예: 배터리 20% 이하면 알림 생성 등)
-            if (request.getBattery() < 20) {
-                log.warn("경고: {}번 로봇의 배터리가 부족합니다!", request.getId());
+
+            if (request.getBattery() != null && request.getBattery().getPercent() < 20) {
+                log.warn("경고: {}번 로봇의 배터리가 부족합니다!", robotId);
             }
 
         } catch (Exception e) {

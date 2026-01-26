@@ -124,4 +124,15 @@ public class CarResponse {
             return new SuccessResponse(true, message);
         }
     }
+
+    /**
+     * 제어 명령 응답
+     */
+    public record ControlResponse(
+            String message,
+            String command) {
+        public static ControlResponse of(String command) {
+            return new ControlResponse("Command sent successfully", command);
+        }
+    }
 }

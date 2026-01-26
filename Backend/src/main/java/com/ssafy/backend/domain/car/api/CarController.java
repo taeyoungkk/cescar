@@ -177,4 +177,24 @@ public class CarController {
                                 memberId);
                 return ResponseEntity.ok(response);
         }
+
+        /**
+         * 9️⃣ 차량 직접 제어 (PATCH /api/cars/{carId}/control)
+         * - 수동 주행을 위한 이동 명령 전달 (UP, DOWN, LEFT, RIGHT, STOP)
+         * - 차량 소유자만 가능
+         */
+        @Operation(summary = "차량 수동 제어", description = "차량에 실시간 이동 명령을 전달합니다.")
+        @ApiResponses(value = {
+                        @ApiResponse(responseCode = "200", description = "성공"),
+                        @ApiResponse(responseCode = "403", description = "권한 없음"),
+                        @ApiResponse(responseCode = "404", description = "차량을 찾을 수 없음")
+        })
+        @PatchMapping("/{carId}/control")
+        public ResponseEntity<CarResponse.ControlResponse> controlCar(
+                        @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
+                        @Parameter(description = "차량 제어 요청 정보", required = true) @Valid @RequestBody CarRequest.ControlRequest request,
+                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                CarResponse.ControlResponse response = carService.controlCar(carId, request, memberId);
+                return ResponseEntity.ok(response);
+        }
 }

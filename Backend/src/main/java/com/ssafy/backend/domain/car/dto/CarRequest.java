@@ -1,6 +1,7 @@
 package com.ssafy.backend.domain.car.dto;
 
 import com.ssafy.backend.domain.car.domain.CarMode;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 
@@ -42,6 +43,13 @@ public class CarRequest {
          */
         public record ModeChangeRequest(
                         @NotNull(message = "mode is required") CarMode mode) {
+        }
+
+        /**
+         * 차량 제어 요청 (PATCH /api/cars/{carId}/control)
+         */
+        public record ControlRequest(
+                        @Schema(description = "이동 명령 (UP, DOWN, LEFT, RIGHT, STOP)", example = "UP") @NotBlank(message = "command is required") String command) {
         }
 
         /**

@@ -3,6 +3,7 @@ package com.ssafy.backend.domain.car.application;
 import com.ssafy.backend.domain.car.dao.CarRepository;
 import com.ssafy.backend.domain.car.dao.CarStatusRepository;
 import com.ssafy.backend.domain.car.domain.Car;
+import com.ssafy.backend.domain.car.domain.CarMode;
 import com.ssafy.backend.domain.car.domain.CarStatus;
 import com.ssafy.backend.domain.car.dto.CarRequest;
 import com.ssafy.backend.domain.car.dto.CarResponse;
@@ -10,6 +11,7 @@ import com.ssafy.backend.domain.member.domain.Member;
 import com.ssafy.backend.domain.member.dao.MemberRepository;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
+import com.ssafy.backend.infrastructure.mqtt.MqttGateway;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ public class CarService {
     private final CarRepository carRepository;
     private final CarStatusRepository carStatusRepository;
     private final MemberRepository memberRepository;
+    private final MqttGateway mqttGateway;
 
     /**
      * 1️⃣ 차량 소유 연결
@@ -129,6 +132,10 @@ public class CarService {
 
         status.changeMode(request.mode());
 
+        // MQTT 알림 전송: jetson/{deviceId}/mode
+        String topic = "jetson/" + car.getDeviceId() + "/mode";
+        mqttGateway.sendToMqtt(request.mode().name(), topic);
+
         return CarResponse.ModeChangeResponse.ok();
     }
 
@@ -201,5 +208,33 @@ public class CarService {
         car.updateNickname(nickname);
 
         return CarResponse.SuccessResponse.of("Car nickname has been updated");
+    }
+
+    /**
+     * 9️⃣ 차량 직접 제어 (수동 주행)
+     * - 전/후/좌/우 명령을 MQTT로 전달
+     * - MANUAL 모드일 때만 작동 가능 (권장)
+     */
+    @Transactional
+    public CarResponse.ControlResponse controlCar(Long carId, CarRequest.ControlRequest request, Long memberId) {
+        Car car = carRepository.findById(carId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CAR_NOT_FOUND));
+
+        if (car.getOwner() == null || !car.getOwner().getId().equals(memberId)) {
+            throw new CustomException(ErrorCode.INVALID_CAR_OWNER);
+        }
+
+        CarStatus status = carStatusRepository.findById(carId)
+                .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
+
+        if (status.getMode() != CarMode.MANUAL) {
+            throw new CustomException(ErrorCode.INVALID_CAR_MODE);
+        }
+
+        // MQTT 명령 전송: jetson/{deviceId}/control
+        String topic = "jetson/" + car.getDeviceId() + "/control";
+        mqttGateway.sendToMqtt(request.command(), topic);
+
+        return CarResponse.ControlResponse.of(request.command());
     }
 }

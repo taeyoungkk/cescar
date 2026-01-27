@@ -11,6 +11,7 @@ WebSocket으로 Spring 시그널링 서버와 offer/answer/candidate 교환
 """
 
 import json
+import time
 import threading
 import logging
 from dataclasses import dataclass
@@ -99,7 +100,14 @@ class WebRTCService:
         
         # 협상 중 플래그 (무한 루프 방지)
         self._negotiating: bool = False
+        # Viewer 준비 완료 플래그 (파이프라인 준비 전 도착 대비)
+        self._viewer_ready: bool = False
         
+        # 재시작 관련 (쿨다운/락)
+        self._restart_in_progress: bool = False
+        self._last_restart_ts: float = 0.0
+        self._restart_cooldown_sec: float = 1.0  # 너무 연속으로 오면 1초 쿨다운
+
         # 재연결 관련
         self._reconnect_attempts: int = 0
         self._should_reconnect: bool = False
@@ -198,6 +206,9 @@ class WebRTCService:
                     self._handle_answer(data.get("data", {}))
                 elif msg_type == "candidate":
                     self._handle_candidate(data.get("data", {}))
+                elif msg_type == "ready":
+                    # Viewer가 준비됨 → 새 offer 생성
+                    self._handle_ready()
                 else:
                     logger.debug("Received unknown message type: %s", msg_type)
             except Exception as e:
@@ -314,16 +325,25 @@ class WebRTCService:
     # ==================== WebRTC 시그널링 핸들러 ====================
 
     def _on_negotiation_needed(self, element) -> None:
-        """webrtcbin에서 negotiation 필요 시 offer 생성"""
-        # 이미 협상 중이면 무시 (무한 루프 방지)
+        # Viewer의 ready 메시지로만 offer를 생성하도록 통일 (Race Condition 방지)
+        logger.debug("on-negotiation-needed emitted, but waiting for viewer 'ready'")
+        return
+
+    def _create_offer(self) -> bool:
+        """새 offer 생성 (ready 메시지 수신 시 호출)"""
+        if self._webrtc is None:
+            logger.warning("webrtcbin not available")
+            return False
+            
         if self._negotiating:
-            logger.debug("Already negotiating, skipping")
-            return
+            logger.info("Already negotiating - skip create_offer")
+            return False
         
         self._negotiating = True
-        logger.info("Negotiation needed, creating offer...")
-        promise = Gst.Promise.new_with_change_func(self._on_offer_created, element, None)
-        element.emit("create-offer", None, promise)
+        logger.info("Creating new offer for viewer...")
+        promise = Gst.Promise.new_with_change_func(self._on_offer_created, self._webrtc, None)
+        self._webrtc.emit("create-offer", None, promise)
+        return False  # GLib.idle_add 콜백은 False 반환
 
     def _on_offer_created(self, promise, element, _) -> None:
         """offer 생성 완료 콜백"""
@@ -333,6 +353,7 @@ class WebRTCService:
         
         if offer is None:
             logger.error("Failed to create offer")
+            self._negotiating = False
             return
         
         # local description 설정
@@ -376,9 +397,8 @@ class WebRTCService:
             promise.interrupt()
             logger.info("Set remote description (answer)")
             
-            # 협상 완료 - True 유지하여 추가 offer 방지
-            # (연결 완료 후에는 더 이상 offer 생성 안 함)
-            self._negotiating = True
+            # 협상 완료 - False로 변경하여 재시도/Renegotiation 허용
+            self._negotiating = False
 
     def _handle_candidate(self, data: dict) -> None:
         """ICE candidate 수신 처리"""
@@ -389,7 +409,74 @@ class WebRTCService:
             self._webrtc.emit("add-ice-candidate", sdp_mline_index, candidate)
             logger.debug("Added ICE candidate")
 
+    def _handle_ready(self) -> None:
+        """Viewer ready 메시지 처리 - 파이프라인 재시작 및 새 offer 생성"""
+        logger.info("Received ready from viewer")
+        self._viewer_ready = True
+        
+        if self._loop is None:
+            logger.warning("MainLoop not running yet")
+            return
+            
+        # ✅ ready가 오면 파이프라인을 fresh하게 재시작하고 offer를 새로 만든다
+        GLib.idle_add(self._restart_pipeline_and_offer)
+
     # ==================== GStreamer 파이프라인 ====================
+
+    def _restart_pipeline_and_offer(self) -> bool:
+        """파이프라인 재시작 및 offer 생성 (GLib 스레드)"""
+        now = time.time()
+        if self._restart_in_progress:
+            logger.info("Restart already in progress - skip")
+            return False
+        if now - self._last_restart_ts < self._restart_cooldown_sec:
+            logger.info("Restart cooldown active - skip")
+            return False
+
+        self._restart_in_progress = True
+        self._last_restart_ts = now
+        # 이미 처리 중이므로 플래그 리셋 (중복 offer 방지)
+        self._viewer_ready = False
+
+        try:
+            logger.info("Restarting WebRTC pipeline for fresh viewer session...")
+
+            # 1) 기존 파이프라인 정리
+            self._cleanup_pipeline()
+
+            # 2) 새 파이프라인 생성
+            self._pipeline, self._webrtc = self._build_pipeline()
+
+            # 3) 시그널 연결
+            self._webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
+            self._webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+
+            # 4) bus watch
+            bus = self._pipeline.get_bus()
+            bus.add_signal_watch()
+            self._bus_watch_id = bus.connect("message", self._on_bus_message)
+
+            # 5) PLAYING
+            ret = self._pipeline.set_state(Gst.State.PLAYING)
+            if ret == Gst.StateChangeReturn.FAILURE:
+                raise RuntimeError("failed to set pipeline PLAYING (restart)")
+
+            self._set_state(WebRTCState.RUNNING, "playing")
+            logger.info("Pipeline restarted and PLAYING - creating offer")
+
+            # 6) 새 offer 생성
+            self._negotiating = False
+            GLib.idle_add(self._create_offer)
+
+        except Exception as e:
+            msg = f"restart failed: {e}"
+            logger.error(msg)
+            self._set_state(WebRTCState.ERROR, msg)
+            self._notify_error(msg)
+        finally:
+            self._restart_in_progress = False
+
+        return False
 
     def _run_loop(self) -> None:
         """GLib MainLoop 실행 (별도 스레드)"""
@@ -425,6 +512,11 @@ class WebRTCService:
 
             self._set_state(WebRTCState.RUNNING, "playing")
             logger.info("webrtc pipeline PLAYING for room: %s", self._room_id)
+            
+            # 파이프라인이 준비되면 초기 Offer를 무조건 생성 (Viewer-First 상황 대응)
+            logger.info("Pipeline ready -> creating initial offer")
+            self._negotiating = False
+            GLib.idle_add(self._create_offer)
         except Exception as e:
             self._set_state(WebRTCState.ERROR, str(e))
             self._notify_error(str(e))

@@ -8,6 +8,7 @@ import json
 import logging
 from app.services.mqtt_service import mqtt_service
 from app.services.monitoring_service import monitoring_service
+from app.services.webrtc_service import webrtc_service
 from app.core.config import settings
 
 # 로깅 설정
@@ -73,6 +74,10 @@ async def lifespan(app: FastAPI):
     print("\n[*] Starting MQTT Service...")
     mqtt_service.connect()
     
+    # Startup: WebRTC 송출 시작
+    print("[*] Starting WebRTC Service...")
+    webrtc_service.start(settings.ROBOT_ID)
+    
     # 시스템 상태 발행 백그라운드 태스크 시작
     status_task = asyncio.create_task(system_status_publisher())
     
@@ -84,6 +89,10 @@ async def lifespan(app: FastAPI):
         await status_task
     except asyncio.CancelledError:
         print("[*] System Status Publisher Task Stopped")
+    
+    # Shutdown: WebRTC 중지
+    print("[*] Stopping WebRTC Service...")
+    webrtc_service.stop()
     
     mqtt_service.disconnect()
 

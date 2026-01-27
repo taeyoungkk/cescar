@@ -1,4 +1,5 @@
 package com.ssafy.backend.global.config;
+
 // Spring Core & Context
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.context.annotation.Bean;
@@ -54,8 +55,7 @@ public class MqttConfig {
     @ServiceActivator(inputChannel = "mqttOutboundChannel") // 위에서 만든 채널과 연결
     public MessageHandler mqttOutbound() {
         // "spring-server-out"은 브로커에서 식별할 클라이언트 ID입니다.
-        MqttPahoMessageHandler messageHandler =
-                new MqttPahoMessageHandler("spring-server-out", mqttClientFactory());
+        MqttPahoMessageHandler messageHandler = new MqttPahoMessageHandler("spring-server-out", mqttClientFactory());
 
         messageHandler.setAsync(true);
         messageHandler.setDefaultTopic("jetson/command"); // 기본 토픽 설정
@@ -69,8 +69,8 @@ public class MqttConfig {
 
     @Bean
     public MessageProducer inbound() {
-        MqttPahoMessageDrivenChannelAdapter adapter =
-                new MqttPahoMessageDrivenChannelAdapter("serverClient", mqttClientFactory(), "robot/robot-01/status");
+        MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter("serverClient",
+                mqttClientFactory(), "robot/robot-01/status");
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);

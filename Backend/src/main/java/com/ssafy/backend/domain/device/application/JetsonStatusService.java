@@ -56,7 +56,8 @@ public class JetsonStatusService {
                     handleRobotStatus(robotId, statusDto);
                     break;
             }
-            Map<String, Object> dict = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> dict = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {
+            });
 
             // 꺼내 쓸 때는 (타입) 으로 형변환!
             System.out.println("🤖 인식된 로봇: " + robotId);
@@ -77,11 +78,15 @@ public class JetsonStatusService {
     }
 
     private void handleRobotStatus(String robotId, DeviceStatusRequest status) {
-        System.out.println("📊 [STATUS] " + robotId + " - 배터리: " + status.getBattery().getPercent() + "%, 온도: " + status.getTemperature());
+        System.out.println("📊 [STATUS] " + robotId + " - 배터리: " + status.getBattery().getPercent() + "%, 온도: "
+                + status.getTemperature());
 
+        // 🎯 핵심: 이 코드가 있어야 프론트엔드 HTML이 데이터를 받습니다!
+        String destination = "/topic/robot/" + robotId + "/status";
+        messagingTemplate.convertAndSend(destination, (Object) status);
+
+        System.out.println("🚀 [Websocket] Sent to: " + destination);
     }
-
-
 
     // 로봇 ID별 최신 상세 상태를 메모리에 저장 (캐싱)
     private final Map<String, DeviceStatusRequest> statusCache = new ConcurrentHashMap<>();

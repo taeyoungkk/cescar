@@ -42,8 +42,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
             SecurityContextHolder.getContext().setAuthentication(authentication);
 
-            // 💡 하위 호환성을 위해 Request Attribute에도 memberId를 저장해줍니다 (Mock 필터 대체용)
-            request.setAttribute("memberId", memberId);
         }
 
         filterChain.doFilter(request, response);

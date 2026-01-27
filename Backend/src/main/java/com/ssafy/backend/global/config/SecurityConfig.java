@@ -1,9 +1,16 @@
 package com.ssafy.backend.global.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.ssafy.backend.global.auth.JwtAuthenticationFilter;
+import com.ssafy.backend.global.exception.ErrorCode;
+import com.ssafy.backend.global.exception.ErrorResponse;
 import lombok.RequiredArgsConstructor;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -21,6 +28,9 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final ObjectMapper objectMapper = new ObjectMapper()
+            .registerModule(new JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
     @Bean
     public PasswordEncoder passwordEncoder() {
@@ -30,28 +40,52 @@ public class SecurityConfig {
     @Bean
     public UserDetailsService userDetailsService() {
         return username -> {
-            throw new UsernameNotFoundException("기본 인증을 사용하지 않습니다.");
+            throw new UsernameNotFoundException("UserDetailsService를 사용하지 않습니다.");
         };
     }
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
-                // CSRF 비활성화 (Stateless 방식이므로 필요 없음)
+                // Stateless API이므로 CSRF 비활성화
                 .csrf(AbstractHttpConfigurer::disable)
-                // 기본 폼 로그인 및 HttpBasic 비활성화
+                // 기본 로그인/HTTP Basic 비활성화
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
-                // 로그아웃 비활성화
+                // 로그아웃 엔드포인트 비활성화
                 .logout(AbstractHttpConfigurer::disable)
                 // 세션 정책: STATELESS
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                // HTTP 요청 권한 설정 (현재는 2단계이므로 모두 허용)
+                // 미인증은 401, 권한 부족은 403으로 응답
+                .exceptionHandling(exception -> exception
+                        .authenticationEntryPoint((request, response, authException) ->
+                                writeErrorResponse(response, ErrorCode.UNAUTHORIZED))
+                        .accessDeniedHandler((request, response, accessDeniedException) ->
+                                writeErrorResponse(response, ErrorCode.ACCESS_DENIED)))
+                // HTTP 인가 규칙
                 .authorizeHttpRequests(auth -> auth
-                        .anyRequest().permitAll())
+                        .requestMatchers(
+                                "/api/members/signup",
+                                "/api/members/login",
+                                "/swagger-ui/**",
+                                "/swagger-ui.html",
+                                "/api-docs/**"
+                        ).permitAll()
+                        .anyRequest().authenticated())
                 // JWT 필터 추가
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    private void writeErrorResponse(HttpServletResponse response, ErrorCode errorCode) {
+        try {
+            response.setStatus(errorCode.getStatus().value());
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.setCharacterEncoding("UTF-8");
+            objectMapper.writeValue(response.getWriter(), ErrorResponse.of(errorCode));
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to write error response", e);
+        }
     }
 }

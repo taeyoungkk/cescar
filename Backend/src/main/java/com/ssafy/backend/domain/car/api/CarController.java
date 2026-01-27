@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -42,7 +43,7 @@ public class CarController {
         @PostMapping("/claim")
         public ResponseEntity<CarResponse.ClaimResponse> claimCar(
                         @Parameter(description = "차량 클레임 요청 정보", required = true) @Valid @RequestBody CarRequest.ClaimRequest request,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.ClaimResponse response = carService.claimCar(request, memberId);
                 return ResponseEntity.ok(response);
         }
@@ -78,7 +79,7 @@ public class CarController {
         @GetMapping("/{carId}/status")
         public ResponseEntity<CarResponse.StatusResponse> getCarStatus(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.StatusResponse response = carService.getCarStatus(carId, memberId);
                 return ResponseEntity.ok(response);
         }
@@ -98,7 +99,7 @@ public class CarController {
         public ResponseEntity<CarResponse.ModeChangeResponse> changeCarMode(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
                         @Parameter(description = "모드 변경 요청 정보", required = true) @Valid @RequestBody CarRequest.ModeChangeRequest request,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.ModeChangeResponse response = carService.changeCarMode(carId, request, memberId);
                 return ResponseEntity.ok(response);
         }
@@ -114,7 +115,7 @@ public class CarController {
         })
         @GetMapping
         public ResponseEntity<List<CarResponse.CarListResponse>> getCarList(
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 List<CarResponse.CarListResponse> response = carService.getCarList(memberId);
                 return ResponseEntity.ok(response);
         }
@@ -133,7 +134,7 @@ public class CarController {
         @GetMapping("/{carId}")
         public ResponseEntity<CarResponse.CarDetailResponse> getCarDetail(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.CarDetailResponse response = carService.getCarDetail(carId, memberId);
                 return ResponseEntity.ok(response);
         }
@@ -152,7 +153,7 @@ public class CarController {
         @DeleteMapping("/{carId}/claim")
         public ResponseEntity<CarResponse.SuccessResponse> releaseCar(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.SuccessResponse response = carService.releaseCar(carId, memberId);
                 return ResponseEntity.ok(response);
         }
@@ -172,7 +173,7 @@ public class CarController {
         public ResponseEntity<CarResponse.SuccessResponse> updateCarNickname(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
                         @Parameter(description = "차량 닉네임 업데이트 정보", required = true) @Valid @RequestBody CarRequest.UpdateCarRequest request,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.SuccessResponse response = carService.updateCarNickname(carId, request.nickname(),
                                 memberId);
                 return ResponseEntity.ok(response);
@@ -193,7 +194,7 @@ public class CarController {
         public ResponseEntity<CarResponse.ControlResponse> controlCar(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
                         @Parameter(description = "차량 제어 요청 정보", required = true) @Valid @RequestBody CarRequest.ControlRequest request,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.ControlResponse response = carService.controlCar(carId, request, memberId);
                 return ResponseEntity.ok(response);
         }
@@ -214,7 +215,7 @@ public class CarController {
         public ResponseEntity<CarResponse.SuccessResponse> assignMission(
                         @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
                         @Parameter(description = "미션 요청 정보", required = true) @Valid @RequestBody CarRequest.MissionRequest request,
-                        @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+                        @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
                 CarResponse.SuccessResponse response = carService.assignMission(carId, request, memberId);
                 return ResponseEntity.ok(response);
         }

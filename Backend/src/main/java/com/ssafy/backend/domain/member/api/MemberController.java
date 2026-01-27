@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 @Tag(name = "Member", description = "회원 관리 API")
@@ -23,7 +24,9 @@ public class MemberController {
     private final MemberService memberService;
 
     /**
-     * 🏁 1단계: 회원가입 API
+     * 1️⃣ 회원가입 API
+     * - 이메일/비밀번호/이름/닉네임으로 회원 등록
+     * - 중복 이메일은 예외 처리
      */
     @Operation(summary = "회원가입", description = "새로운 회원을 등록합니다.")
     @ApiResponses(value = {
@@ -39,7 +42,9 @@ public class MemberController {
     }
 
     /**
-     * 🏁 1단계: 기초 로그인 API
+     * 2️⃣ 기본 로그인 API
+     * - 이메일/비밀번호로 로그인
+     * - 로그인 성공 시 JWT 발급
      */
     @Operation(summary = "로그인", description = "이메일과 비밀번호로 로그인합니다.")
     @PostMapping("/login")
@@ -49,35 +54,39 @@ public class MemberController {
     }
 
     /**
-     * 🏁 1단계: 내 정보 조회 API
+     * 3️⃣ 내 정보 조회 API
+     * - 현재 로그인한 회원 정보 조회
      */
     @Operation(summary = "내 정보 조회", description = "현재 로그인한 회원의 정보를 조회합니다.")
     @GetMapping("/me")
     public ResponseEntity<MemberResponse.MemberInfoResponse> getMyInfo(
-            @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
         MemberResponse.MemberInfoResponse response = memberService.getMyInfo(memberId);
         return ResponseEntity.ok(response);
     }
 
     /**
-     * 🏁 1단계: 정보 수정 API
+     * 4️⃣ 회원 정보 수정 API
+     * - 이름/닉네임 수정
      */
     @Operation(summary = "회원 정보 수정", description = "이름, 닉네임 등 회원 정보를 수정합니다.")
     @PatchMapping("/me")
     public ResponseEntity<MemberResponse.MemberInfoResponse> updateMember(
-            @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId,
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId,
             @Valid @RequestBody MemberRequest.UpdateMemberRequest request) {
         MemberResponse.MemberInfoResponse response = memberService.updateMember(memberId, request);
         return ResponseEntity.ok(response);
     }
 
     /**
-     * 🏁 1단계: 회원 탈퇴 API
+     * 5️⃣ 회원 탈퇴 API
+     * - 회원 계정 삭제
+     * - 소유 차량 연동 해제
      */
     @Operation(summary = "회원 탈퇴", description = "회원 계정을 삭제하고 연동된 차량 정보를 정리합니다.")
     @DeleteMapping("/me")
     public ResponseEntity<CarResponse.SuccessResponse> withdraw(
-            @Parameter(hidden = true) @RequestAttribute("memberId") Long memberId) {
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
         memberService.withdraw(memberId);
         return ResponseEntity.ok(CarResponse.SuccessResponse.of("회원 탈퇴가 완료되었습니다."));
     }

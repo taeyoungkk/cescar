@@ -1,6 +1,5 @@
 package com.ssafy.backend.domain.member.api;
 
-import com.ssafy.backend.domain.car.dto.CarResponse;
 import com.ssafy.backend.domain.member.application.MemberService;
 import com.ssafy.backend.domain.member.dto.MemberRequest;
 import com.ssafy.backend.domain.member.dto.MemberResponse;
@@ -79,15 +78,30 @@ public class MemberController {
     }
 
     /**
-     * 5️⃣ 회원 탈퇴 API
+     * 5️⃣ 비밀번호 변경 API
+     * - 현재 비밀번호 확인
+     * - 새 비밀번호로 변경
+     */
+    @Operation(summary = "비밀번호 변경", description = "현재 비밀번호 확인 후 새 비밀번호로 변경합니다.")
+    @PatchMapping("/me/password")
+    public ResponseEntity<MemberResponse.SuccessResponse> changePassword(
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId,
+            @Valid @RequestBody MemberRequest.ChangePasswordRequest request) {
+        memberService.changePassword(memberId, request);
+        return ResponseEntity.ok(MemberResponse.SuccessResponse.of("비밀번호가 변경되었습니다."));
+    }
+
+    /**
+     * 6️⃣ 회원 탈퇴 API
      * - 회원 계정 삭제
      * - 소유 차량 연동 해제
      */
     @Operation(summary = "회원 탈퇴", description = "회원 계정을 삭제하고 연동된 차량 정보를 정리합니다.")
     @DeleteMapping("/me")
-    public ResponseEntity<CarResponse.SuccessResponse> withdraw(
-            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
-        memberService.withdraw(memberId);
-        return ResponseEntity.ok(CarResponse.SuccessResponse.of("회원 탈퇴가 완료되었습니다."));
+    public ResponseEntity<MemberResponse.SuccessResponse> withdraw(
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId,
+            @Valid @RequestBody MemberRequest.WithdrawRequest request) {
+        memberService.withdraw(memberId, request);
+        return ResponseEntity.ok(MemberResponse.SuccessResponse.of("회원 탈퇴가 완료되었습니다."));
     }
 }

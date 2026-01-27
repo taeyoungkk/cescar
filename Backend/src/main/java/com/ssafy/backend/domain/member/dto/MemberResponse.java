@@ -34,4 +34,15 @@ public class MemberResponse {
             return new LoginResponse(token, MemberInfoResponse.from(member));
         }
     }
+
+    /**
+     * 공통 성공 응답
+     */
+    public record SuccessResponse(
+            boolean success,
+            String message) {
+        public static SuccessResponse of(String message) {
+            return new SuccessResponse(true, message);
+        }
+    }
 }

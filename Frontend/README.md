@@ -1,8 +1,8 @@
-<!-- npm run dev -- --webpack -->
-
 # 실행 방법
 
 ## (웹에서 실행)
+`cd Frontend` 후
+
 `npm install`<br>
 `npm run build -- --webpack`<br>
 `npm run start` 한 후

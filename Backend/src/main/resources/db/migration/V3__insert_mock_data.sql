@@ -4,12 +4,12 @@
 -- ========================================================
 
 -- 1. 테스트 유저 생성
--- 유저 1 (본인 역할)
+-- 유저 1 (본인 역할, 비밀번호: 1234)
 INSERT INTO users (id, email, password, name, nickname, created_at)
 VALUES (1, 'test@ssafy.com', '1234', '유저1', '유저1', NOW())
 ON CONFLICT (id) DO NOTHING;
 
--- 유저 2 (타인 역할)
+-- 유저 2 (타인 역할, 비밀번호: 1234)
 INSERT INTO users (id, email, password, name, nickname, created_at)
 VALUES (2, 'other@ssafy.com', '1234', '유저2', '유저2', NOW())
 ON CONFLICT (id) DO NOTHING;

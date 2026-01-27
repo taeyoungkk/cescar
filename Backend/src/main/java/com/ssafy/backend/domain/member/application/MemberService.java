@@ -5,13 +5,16 @@ import com.ssafy.backend.domain.member.dao.MemberRepository;
 import com.ssafy.backend.domain.member.domain.Member;
 import com.ssafy.backend.domain.member.dto.MemberRequest;
 import com.ssafy.backend.domain.member.dto.MemberResponse;
+import com.ssafy.backend.global.auth.JwtTokenProvider;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MemberService {
@@ -19,6 +22,7 @@ public class MemberService {
     private final MemberRepository memberRepository;
     private final CarRepository carRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtTokenProvider jwtTokenProvider;
 
     /**
      * 🏁 1단계: 회원가입 로직
@@ -53,9 +57,9 @@ public class MemberService {
             throw new CustomException(ErrorCode.WRONG_PASSWORD);
         }
 
-        // 임시 토큰 발행 (3단계에서 진짜 JWT 적용)
-        String mockToken = "mock-jwt-token-for-" + member.getEmail();
-        return MemberResponse.LoginResponse.of(mockToken, member);
+        // 진짜 토큰 발행 (3단계 적용)
+        String accessToken = jwtTokenProvider.createAccessToken(member.getId(), member.getEmail());
+        return MemberResponse.LoginResponse.of(accessToken, member);
     }
 
     /**

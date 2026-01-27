@@ -55,17 +55,245 @@ function ConnectionQualityIndicator({ quality }: ConnectionQualityIndicatorProps
 
 interface LiveCameraViewProps {
   isOnline: boolean
+  networkOnline: boolean
   isDetecting: boolean
   showOverlay: boolean
   connectionQuality: ConnectionQuality
+  wsUrl: string
+  roomId: string
 }
 
 function LiveCameraView({
   isOnline,
+  networkOnline,
   isDetecting,
   showOverlay,
   connectionQuality,
+  wsUrl,
+  roomId,
 }: LiveCameraViewProps) {
+    const [hasStream, setHasStream] = React.useState(false)
+    const showVideo = hasStream
+    const closingRef = React.useRef(false)
+
+    const videoRef = React.useRef<HTMLVideoElement | null>(null)
+
+    const wsRef = React.useRef<WebSocket | null>(null)
+    const pcRef = React.useRef<RTCPeerConnection | null>(null)
+    const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([])
+
+    const connectingRef = React.useRef(false)
+
+    const cleanupWebRTC = React.useCallback(() => {
+      connectingRef.current = false
+      closingRef.current = true
+
+      const pc = pcRef.current
+      const ws = wsRef.current
+
+      // 핸들러 제거
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        // ws.onclose = null
+      }
+      if (pc) {
+        pc.onicecandidate = null
+        pc.ontrack = null
+        pc.oniceconnectionstatechange = null
+        pc.onconnectionstatechange = null
+      }
+
+      try { pc?.close() } catch {}
+      try { ws?.close() } catch {}
+
+      pcRef.current = null
+      wsRef.current = null
+      pendingCandidatesRef.current = []
+      setHasStream(false)
+      if (videoRef.current) videoRef.current.srcObject = null
+
+      // 다음 connect를 위해 복구
+      // setTimeout(() => { closingRef.current = false }, 0)
+    }, [])
+
+    const ICE_SERVERS: RTCIceServer[] = [
+      { urls: "stun:stun.l.google.com:19302" },
+      { urls: "stun:stun1.l.google.com:19302" },
+      // TURN 있으면 여기에 추가
+    ]
+
+    const send = (msg: any) => {
+      const ws = wsRef.current
+      if (!ws || ws.readyState !== WebSocket.OPEN) return
+      ws.send(JSON.stringify(msg))
+    }
+
+    const createPeerConnection = () => {
+      const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+      pcRef.current = pc
+
+      pc.oniceconnectionstatechange = () => console.log("[ice]", pc.iceConnectionState)
+      pc.onconnectionstatechange = () => console.log("[pc]", pc.connectionState)
+
+      pc.addTransceiver("video", { direction: "recvonly" })
+
+      pc.onicecandidate = (ev) => {
+        if (!ev.candidate) return
+        // Jetson이 기대하는 candidate 포맷으로 보냄
+        send({
+          type: "candidate",
+          roomId,
+          candidate: ev.candidate.candidate,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex,
+          sdpMid: ev.candidate.sdpMid,
+          data: {
+            candidate: ev.candidate.candidate,
+            sdpMLineIndex: ev.candidate.sdpMLineIndex,
+            sdpMid: ev.candidate.sdpMid,
+          },
+        })
+      }
+
+      pc.ontrack = (ev) => {
+        console.log("[ontrack]", ev.track.kind, ev.streams)
+
+        const stream = ev.streams?.[0] ?? new MediaStream([ev.track])
+        setHasStream(true)
+
+        const video = videoRef.current
+
+        if (!video) return
+        console.log("before set, srcObject?", !!videoRef.current?.srcObject)
+        video.srcObject = stream
+        console.log("after set, srcObject?", !!videoRef.current?.srcObject)
+        video.play().catch(() => {})
+
+        // if (ev.streams?.[0]) {
+        //   setHasStream(true)
+        //   videoRef.current.srcObject = ev.streams[0]
+        //   videoRef.current.play().catch(() => {})
+        // }
+      }
+    }
+
+    const handleOffer = async (payload: any) => {
+      const pc = pcRef.current
+      if (!pc) return
+      const sdp = payload?.sdp
+      if (!sdp) return
+
+      await pc.setRemoteDescription({ type: "offer", sdp })
+
+      // offer 전에 쌓인 candidate 처리
+      for (const c of pendingCandidatesRef.current) {
+        await pc.addIceCandidate(new RTCIceCandidate(c))
+      }
+      pendingCandidatesRef.current = []
+
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+
+      // Jetson이 기대하는 answer 포맷 (data.sdp를 뽑아씀)
+      send({
+        type: "answer",
+        roomId,
+        sdp: answer.sdp,
+        data: { type: "answer", sdp: answer.sdp },
+      })
+    }
+
+    const handleCandidate = async (payload: any) => {
+      const pc = pcRef.current
+      if (!pc) return
+
+      const cand: RTCIceCandidateInit = {
+        candidate: payload?.candidate,
+        sdpMLineIndex: payload?.sdpMLineIndex ?? 0,
+        sdpMid: payload?.sdpMid,
+      }
+      if (!cand.candidate) return
+
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(new RTCIceCandidate(cand))
+      } else {
+        pendingCandidatesRef.current.push(cand)
+      }
+    }
+
+    const connectWebRTC = React.useCallback(() => {
+      if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+        return
+      }
+
+      if (!wsUrl || !roomId) return
+
+      // 이전 pc가 남아있으면 닫고 새로 시작
+      if (pcRef.current) {
+        try { pcRef.current.close() } catch {}
+        pcRef.current = null
+      }
+      pendingCandidatesRef.current = []
+      setHasStream(false)
+      if (videoRef.current) videoRef.current.srcObject = null
+
+
+      const ws = new WebSocket(wsUrl)
+      wsRef.current = ws
+
+      ws.onopen = () => {
+        send({ type: "join", roomId })
+        createPeerConnection()
+        send({ type: "ready", roomId })
+      }
+
+      ws.onmessage = async (ev) => {
+        const msg = JSON.parse(ev.data)
+
+        // Spring이 릴레이만 하니까 msg.data가 있든 없든 방어
+        if (msg.type === "offer") await handleOffer(msg.data ?? msg)
+        if (msg.type === "candidate") await handleCandidate(msg.data ?? msg)
+        // answer는 viewer가 받는 쪽이면 보통 안 옴(offer 주도 Jetson이라서)
+      }
+
+      ws.onerror = () => {
+        connectingRef.current = false
+      }
+
+      ws.onclose = () => {
+        if (closingRef.current) {
+          closingRef.current = false
+          return
+        }
+
+        connectingRef.current = false
+        pcRef.current = null
+        wsRef.current = null
+        pendingCandidatesRef.current = []
+        setHasStream(false)
+        if (videoRef.current) videoRef.current.srcObject = null
+      }
+    }, [cleanupWebRTC, roomId, wsUrl])
+
+      React.useEffect(() => {
+        if (!networkOnline) {
+          connectingRef.current = false
+          cleanupWebRTC()
+          return
+        }
+
+        if (connectingRef.current) return
+        connectingRef.current = true
+
+        connectWebRTC()
+
+        return () =>{
+          connectingRef.current = false
+          cleanupWebRTC()
+        }
+      }, [networkOnline, connectWebRTC, cleanupWebRTC])
+
   const [currentTime, setCurrentTime] = useState(new Date())
 
   React.useEffect(() => {
@@ -75,10 +303,18 @@ function LiveCameraView({
 
   return (
     <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
-      {isOnline ? (
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`absolute inset-0 z-10 w-full h-full object-cover transition-opacity ${hasStream ? "opacity-100" : "opacity-0"}`}
+      />
+
+      {showVideo ? (
         <>
           <div
-            className="absolute inset-0 bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900"
+            className="absolute inset-0 z-0 bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900"
             style={{
               backgroundImage: `
                 radial-gradient(circle at 30% 40%, rgba(50, 50, 55, 0.8) 0%, transparent 50%),
@@ -89,7 +325,7 @@ function LiveCameraView({
           />
 
           <div
-            className="absolute inset-0 opacity-[0.03] pointer-events-none"
+            className="absolute inset-0 z-20 opacity-[0.03] pointer-events-none"
             style={{
               backgroundImage: `repeating-linear-gradient(
                 0deg,
@@ -101,7 +337,7 @@ function LiveCameraView({
             }}
           />
 
-          <div className="absolute inset-0 flex items-center justify-center">
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
             <div className="text-center space-y-2 opacity-20">
               <Camera className="h-20 w-20 text-white/40 mx-auto" />
               <p className="text-xs text-white/40 font-mono tracking-wider">CESCAR-CAM-01</p>
@@ -134,8 +370,8 @@ function LiveCameraView({
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
           <div className="text-center space-y-3">
             <WifiOff className="h-16 w-16 text-red-400/50 mx-auto" />
-            <p className="text-sm text-red-400">연결이 끊겼습니다</p>
-            <p className="text-xs text-muted-foreground">로봇 연결 상태를 확인하세요</p>
+            <p className="text-sm text-red-400">카메라 스트림 대기 중</p>
+            <p className="text-xs text-muted-foreground">WebRTC 연결 중...</p>
           </div>
         </div>
       )}
@@ -144,14 +380,14 @@ function LiveCameraView({
       <div className="absolute top-4 left-4 flex items-center gap-3">
         <Badge
           className={
-            isOnline ? "bg-red-500/90 text-white border-transparent" : "bg-muted/90 text-muted-foreground border-transparent"
+            showVideo ? "bg-red-500/90 text-white border-transparent" : "bg-muted/90 text-muted-foreground border-transparent"
           }
         >
-          <Circle className={`h-2 w-2 mr-1.5 ${isOnline ? "fill-white animate-pulse" : "fill-muted-foreground"}`} />
-          {isOnline ? "LIVE" : "OFFLINE"}
+          <Circle className={`h-2 w-2 mr-1.5 ${showVideo ? "fill-white animate-pulse" : "fill-muted-foreground"}`} />
+          {showVideo ? "LIVE" : "OFFLINE"}
         </Badge>
 
-        {isOnline && (
+        {showVideo && (
           <div className="bg-black/70 rounded px-2.5 py-1">
             <ConnectionQualityIndicator quality={connectionQuality} />
           </div>
@@ -160,7 +396,7 @@ function LiveCameraView({
 
       {/* Top right badges */}
       <div className="absolute top-4 right-4 flex items-center gap-2">
-        {isOnline && (
+        {showVideo && (
           <>
             <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1">
               <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
@@ -195,7 +431,7 @@ function LiveCameraView({
       </div>
 
       {/* Center crosshair */}
-      {isOnline && (
+      {showVideo && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
           <div className="w-40 h-40 border border-white/10 rounded-lg" />
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-6 bg-white/20" />
@@ -417,7 +653,7 @@ function WarningMessages({ hasLowBattery, batteryLevel }: WarningMessagesProps) 
 // ============================================
 
 export default function CameraPage() {
-  const { isOnline } = useNetworkStatus()
+  const { isOnline: networkOnline } = useNetworkStatus()
 
   // All data fetching via hooks
   const { robotStatus, cameraEvents, isLoading, isDetecting, captureSnapshot } = useRobotStatus()
@@ -443,9 +679,12 @@ export default function CameraPage() {
           <div className="flex-1 min-h-[400px] lg:min-h-[600px]">
             <LiveCameraView
               isOnline={robotStatus?.isOnline ?? false}
+              networkOnline={networkOnline}
               isDetecting={isDetecting}
               showOverlay={showOverlay}
               connectionQuality={robotStatus?.connectionQuality ?? "good"}
+              wsUrl={process.env.NEXT_PUBLIC_SIGNALING_URL ?? "ws://I14B201.p.ssafy.io/ws/webrtc"}
+              roomId={process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"}
             />
           </div>
 
@@ -455,7 +694,7 @@ export default function CameraPage() {
               onToggleOverlay={setShowOverlay}
               onCapture={handleCapture}
               isLoading={isLoading}
-              networkOnline={isOnline}
+              networkOnline={networkOnline}
             />
 
             <RobotStatusPanel status={robotStatus} isLoading={isLoading} />

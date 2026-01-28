@@ -19,7 +19,6 @@ import java.util.List;
 /**
  * 차량 관련 API 컨트롤러
  * - 차량 소유 연결, 상태 조회/업데이트, 모드 변경 등의 기능 제공
- * - TODO: 인증 필터 연동 필요 (memberId 자동 주입)
  */
 @Tag(name = "Car", description = "차량 관리 API")
 @RestController

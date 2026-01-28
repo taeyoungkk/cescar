@@ -69,8 +69,39 @@ public class DetectionHistoryService {
         return storageService.generateSignedUrl(objectPath, SIGNED_URL_TTL);
     }
 
+    /**
+     * 감지 내역 삭제
+     */
+    @Transactional
+    public void deleteDetection(Long detectionId) {
+        if (!detectionRepository.existsById(detectionId)) {
+            throw new IllegalArgumentException("해당 감지 내역을 찾을 수 없습니다. (ID: " + detectionId + ")");
+        }
+        detectionRepository.deleteById(detectionId);
+    }
+
     private Detection findDetectionById(Long detectionId) {
         return detectionRepository.findById(detectionId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 감지 내역을 찾을 수 없습니다. (ID: " + detectionId + ")"));
+    }
+
+    /**
+     * 감지 통계 조회 (라벨별 카운트)
+     */
+    public java.util.List<com.ssafy.backend.domain.history.dto.DetectionStatisticsResponse> getDetectionStatistics(
+            Long logId) {
+        return detectionRepository.countByLabel(logId);
+    }
+
+    /**
+     * 감지 통합 검색 (기간, 라벨)
+     */
+    public Page<DetectionListItemResponse> searchAllDetections(
+            java.time.LocalDateTime startDate,
+            java.time.LocalDateTime endDate,
+            String label,
+            Pageable pageable) {
+        return detectionRepository.searchDetections(startDate, endDate, label, pageable)
+                .map(DetectionListItemResponse::from);
     }
 }

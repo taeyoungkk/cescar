@@ -69,4 +69,34 @@ public class DetectionHistoryController {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
         }
     }
+
+    @Operation(summary = "감지 내역 삭제", description = "특정 감지 내역을 삭제합니다.")
+    @DeleteMapping("/detections/{id}")
+    public ResponseEntity<Void> deleteDetection(
+            @Parameter(description = "감지 ID", required = true) @PathVariable Long id) {
+        detectionHistoryService.deleteDetection(id);
+        return ResponseEntity.ok().build();
+    }
+
+    @Operation(summary = "감지 통계 조회", description = "특정 운행 기록의 라벨별 감지 횟수를 조회합니다.")
+    @GetMapping("/logs/{logId}/statistics")
+    public ResponseEntity<java.util.List<com.ssafy.backend.domain.history.dto.DetectionStatisticsResponse>> getStatistics(
+            @Parameter(description = "운행 기록 ID", required = true) @PathVariable Long logId) {
+        return ResponseEntity.ok(detectionHistoryService.getDetectionStatistics(logId));
+    }
+
+    @Operation(summary = "감지 통합 검색", description = "기간 및 라벨 조건으로 감지 내역을 검색합니다.")
+    @GetMapping("/detections/search")
+    public ResponseEntity<Page<DetectionListItemResponse>> searchDetections(
+            @Parameter(description = "시작 일시 (예: 2024-01-01T00:00:00)", required = true) @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime startDate,
+            @Parameter(description = "종료 일시 (예: 2024-01-31T23:59:59)", required = true) @RequestParam @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME) java.time.LocalDateTime endDate,
+            @Parameter(description = "라벨 (선택)", required = false) @RequestParam(required = false) String label,
+            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+        try {
+            return ResponseEntity.ok(detectionHistoryService.searchAllDetections(startDate, endDate, label, pageable));
+        } catch (Exception e) {
+            e.printStackTrace(); // 서버 콘솔에 에러 로그 출력 (디버깅용)
+            throw e;
+        }
+    }
 }

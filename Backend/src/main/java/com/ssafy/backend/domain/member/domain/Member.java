@@ -46,6 +46,20 @@ public class Member {
                 .build();
     }
 
+    // 정보 수정 메서드
+    public void update(String name, String nickname) {
+        if (name != null && !name.isBlank()) {
+            this.name = name;
+        }
+        if (nickname != null && !nickname.isBlank()) {
+            this.nickname = nickname;
+        }
+    }
+
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();

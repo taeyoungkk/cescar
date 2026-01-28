@@ -48,14 +48,6 @@ public class MqttConfig {
     private MqttClient outClient;
 
     @Bean
-    public ObjectMapper objectMapper() {
-        ObjectMapper mapper = new ObjectMapper();
-        mapper.registerModule(new JavaTimeModule());
-        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        return mapper;
-    }
-
-    @Bean
     public MessageChannel mqttInboundChannel() {
         return new PublishSubscribeChannel();
     }

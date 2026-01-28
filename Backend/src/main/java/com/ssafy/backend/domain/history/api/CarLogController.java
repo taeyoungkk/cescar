@@ -25,7 +25,8 @@ public class CarLogController {
     @GetMapping("/cars/{carId}/logs")
     public ResponseEntity<Page<CarLogListItemResponse>> getCarLogs(
             @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
-            @PageableDefault(size = 20, sort = "startAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(carLogService.searchCarLogs(carId, pageable));
+            @PageableDefault(size = 20, sort = "startAt", direction = Sort.Direction.DESC) Pageable pageable,
+            @Parameter(hidden = true) @org.springframework.security.core.annotation.AuthenticationPrincipal Long memberId) {
+        return ResponseEntity.ok(carLogService.searchCarLogs(carId, pageable, memberId));
     }
 }

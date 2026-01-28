@@ -1,5 +1,6 @@
 package com.ssafy.backend.domain.map.domain;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.ssafy.backend.domain.car.domain.Car;
 import jakarta.persistence.*;
 import lombok.*;
@@ -11,9 +12,11 @@ import java.time.LocalDateTime;
 @Table(name = "maps")
 public class SlamMap {
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "car_id", nullable = false)
     private Car car;
@@ -43,7 +46,8 @@ public class SlamMap {
     private LocalDateTime createdAt;
 
     @Builder
-    private SlamMap(Car car, String name, String imageUrl, int width, int height, float resolution, float originX, float originY) {
+    private SlamMap(Car car, String name, String imageUrl, int width, int height, float resolution, float originX,
+            float originY) {
         this.car = car;
         this.name = name;
         this.imageUrl = imageUrl;
@@ -55,7 +59,8 @@ public class SlamMap {
     }
 
     // 팩토리 메서드
-    public static SlamMap create(Car car, String name, String imageUrl, int width, int height, float resolution, float originX, float originY) {
+    public static SlamMap create(Car car, String name, String imageUrl, int width, int height, float resolution,
+            float originX, float originY) {
         return SlamMap.builder()
                 .car(car)
                 .name(name)

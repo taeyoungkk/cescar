@@ -11,7 +11,8 @@ import java.time.LocalDateTime;
 @Table(name = "detections")
 public class Detection {
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     // 어떤 운행 기록에서 발견된 건지 연결
@@ -35,21 +36,27 @@ public class Detection {
     @Column(name = "image_url")
     private String imageUrl; // 탐지된 순간의 스냅샷
 
+    @Column(name = "video_url")
+    private String videoUrl; // 탐지 영상 (짧은 클립)
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
     @Builder
-    private Detection(CarLog carLog, String label, float confidence, BigDecimal x, BigDecimal y, String imageUrl) {
+    private Detection(CarLog carLog, String label, float confidence, BigDecimal x, BigDecimal y, String imageUrl,
+            String videoUrl) {
         this.carLog = carLog;
         this.label = label;
         this.confidence = confidence;
         this.x = x;
         this.y = y;
         this.imageUrl = imageUrl;
+        this.videoUrl = videoUrl;
     }
 
     // 팩토리 메서드
-    public static Detection create(CarLog carLog, String label, float confidence, BigDecimal x, BigDecimal y, String imageUrl) {
+    public static Detection create(CarLog carLog, String label, float confidence, BigDecimal x, BigDecimal y,
+            String imageUrl, String videoUrl) {
         return Detection.builder()
                 .carLog(carLog)
                 .label(label)
@@ -57,6 +64,7 @@ public class Detection {
                 .x(x)
                 .y(y)
                 .imageUrl(imageUrl)
+                .videoUrl(videoUrl)
                 .build();
     }
 

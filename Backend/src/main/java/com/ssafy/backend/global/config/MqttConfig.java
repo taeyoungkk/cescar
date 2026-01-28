@@ -9,6 +9,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 import org.springframework.beans.factory.annotation.Value;
+
+// Spring Core & Context
+import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.integration.annotation.IntegrationComponentScan;
@@ -82,6 +85,7 @@ public class MqttConfig {
             public void connectionLost(Throwable cause) {
                 log.error("❌ MQTT Connection Lost: {}", cause.getMessage());
             }
+
 
             @Override
             public void messageArrived(String topic, MqttMessage message) {

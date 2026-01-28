@@ -70,7 +70,8 @@ public class SecurityConfig {
                                 "/api/members/login",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
-                                "/api-docs/**")
+                                "/api-docs/**",
+                                "/ws/**") // WebSocket 허용
                         .permitAll()
                         .anyRequest().authenticated())
                 // JWT 필터 추가

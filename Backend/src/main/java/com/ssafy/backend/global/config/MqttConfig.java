@@ -62,19 +62,42 @@ public class MqttConfig {
         return messageHandler;
     }
 
+    // ---------- Inbound: STATUS ----------
     @Bean
-    public MessageChannel mqttInputChannel() {
+    public MessageChannel mqttStatusChannel() {
         return new DirectChannel();
     }
 
     @Bean
-    public MessageProducer inbound() {
-        MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter("serverClient",
-                mqttClientFactory(), "robot/robot-01/status");
+    public MessageProducer statusInbound() {
+        // clientId는 유니크해야 함 (기존 serverClient 유지/변경 가능)
+        MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
+                "spring-server-in-status",
+                mqttClientFactory(),
+                "robot/+/status");
         adapter.setCompletionTimeout(5000);
         adapter.setConverter(new DefaultPahoMessageConverter());
         adapter.setQos(1);
-        adapter.setOutputChannel(mqttInputChannel()); // 받은 메시지를 위에서 만든 채널로 보냄
+        adapter.setOutputChannel(mqttStatusChannel());
+        return adapter;
+    }
+
+    // ---------- Inbound: DETECTIONS ----------
+    @Bean
+    public MessageChannel mqttDetectionsChannel() {
+        return new DirectChannel();
+    }
+
+    @Bean
+    public MessageProducer detectionsInbound() {
+        MqttPahoMessageDrivenChannelAdapter adapter = new MqttPahoMessageDrivenChannelAdapter(
+                "spring-server-in-detections",
+                mqttClientFactory(),
+                "robot/robot-01/detections");
+        adapter.setCompletionTimeout(5000);
+        adapter.setConverter(new DefaultPahoMessageConverter());
+        adapter.setQos(1);
+        adapter.setOutputChannel(mqttDetectionsChannel());
         return adapter;
     }
 }

@@ -1,11 +1,9 @@
 package com.ssafy.backend.infrastructure.mqtt;
 
 import org.springframework.integration.annotation.MessagingGateway;
-import org.springframework.stereotype.Component;
-
-import org.springframework.integration.annotation.MessagingGateway;
-import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.integration.mqtt.support.MqttHeaders;
+import org.springframework.messaging.handler.annotation.Header;
+import org.springframework.stereotype.Component;
 
 @MessagingGateway(defaultRequestChannel = "mqttOutboundChannel")
 public interface MqttGateway {

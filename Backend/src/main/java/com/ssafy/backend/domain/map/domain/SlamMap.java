@@ -45,6 +45,9 @@ public class SlamMap {
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
     @Builder
     private SlamMap(Car car, String name, String imageUrl, int width, int height, float resolution, float originX,
             float originY) {
@@ -73,7 +76,7 @@ public class SlamMap {
                 .build();
     }
 
-    // 정보 수정 메서드 (이름 변경 등)
+    // 정보 수정 메서드(이름 변경)
     public void updateInfo(String name, String imageUrl) {
         if (name != null && !name.isBlank()) {
             this.name = name;
@@ -81,6 +84,10 @@ public class SlamMap {
         if (imageUrl != null && !imageUrl.isBlank()) {
             this.imageUrl = imageUrl;
         }
+    }
+
+    public void softDelete() {
+        this.deletedAt = LocalDateTime.now();
     }
 
     @PrePersist

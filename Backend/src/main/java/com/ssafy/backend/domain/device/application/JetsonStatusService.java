@@ -1,7 +1,8 @@
 package com.ssafy.backend.domain.device.application;
 
+import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
-import tools.jackson.databind.ObjectMapper;
+import com.ssafy.backend.domain.notification.application.FcmService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -12,7 +13,11 @@ import org.springframework.messaging.Message;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import tools.jackson.databind.ObjectMapper;
 
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -22,6 +27,69 @@ public class JetsonStatusService {
 
     private final String EMQX_API_URL = "http://localhost:18083/api/v5/clients/";
     private final ObjectMapper objectMapper;
+    private final FcmService fcmService;
+
+    @ServiceActivator(inputChannel = "mqttInboundChannel")
+    public void handleDeviceStatus(Message<byte[]> message) {
+        try {
+            // byte[]를 String으로 변환
+            String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
+            // 해결 포인트: TypeReference를 정확히 명시해야 합니다.
+
+            Map<String, Object> headerDict = new HashMap<>(message.getHeaders());
+            System.out.println("header:" + headerDict.get("mqtt_receivedTopic").getClass().getName());
+            String fullTopic = (String) headerDict.get("mqtt_receivedTopic");
+            String[] topicParts = fullTopic.split("/");
+            System.out.println(Arrays.toString(topicParts));
+
+            String robotId = topicParts[1];
+            System.out.println("robot " + robotId);
+
+            String command = topicParts[2];
+            System.out.println("command " + command);
+
+            switch (command) {
+                case "status":
+                    DeviceStatusRequest statusDto = objectMapper.readValue(payload, DeviceStatusRequest.class);
+                    handleRobotStatus(robotId, statusDto);
+                    break;
+
+                case "detection":
+                    DetectionRequest detectionDto = objectMapper.readValue(payload, DetectionRequest.class);
+                    handleRobotDetection(robotId, detectionDto);
+                    break;
+            }
+            // 🤖 인식된 로봇: robotId
+            System.out.println("🤖 인식된 로봇: " + robotId);
+            System.out.println("✅ [데이터 수신] Robot: " + robotId + " | Payload: " + payload);
+
+        } catch (Exception e) {
+            // 저장하신 규칙: 잘못된 답(에러)이 나오면 알려달라고 하셨으므로 출력!
+            System.err.println("❌ 에러 발생: readValue 메서드 실행 중 문제 발생 - " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void handleRobotStatus(String robotId, DeviceStatusRequest status) {
+        System.out.println("📊 [STATUS] " + robotId + " - 배터리: " + status.getBattery().getPercent() + "%, 온도: "
+                + status.getTemperature());
+
+        // 캐시 업데이트
+        statusCache.put(robotId, status);
+    }
+
+    private void handleRobotDetection(String robotId, DetectionRequest detect) {
+        System.out.println("🔍 [DETECTION] " + robotId + " - 감지된 물체: " + detect.getObject_type()
+                + " (신뢰도: " + detect.getConfidence() + "%)");
+
+        // 🎯 FCM 브로드캐스트 전송
+        String title = "🚨 [" + robotId + "] 물체 감지!";
+        String body = String.format("%s 물체가 %.1f%% 확률로 감지되었습니다.",
+                detect.getObject_type(), detect.getConfidence());
+
+        fcmService.broadcastMessage(title, body);
+        System.out.println("🚀 [FCM Alert Sent] " + title);
+    }
 
     // 로봇 ID별 최신 상세 상태를 메모리에 저장 (캐싱)
     private final Map<String, DeviceStatusRequest> statusCache = new ConcurrentHashMap<>();
@@ -37,11 +105,13 @@ public class JetsonStatusService {
         HttpEntity<String> entity = new HttpEntity<>(headers);
 
         try {
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    EMQX_API_URL + clientId, HttpMethod.GET, entity, Map.class);
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                    EMQX_API_URL + clientId, HttpMethod.GET, entity,
+                    new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {
+                    });
 
             if (response.getStatusCode().is2xxSuccessful()) {
-                Map body = response.getBody();
+                Map<String, Object> body = response.getBody();
                 return body != null && (boolean) body.get("connected");
             }
         } catch (HttpClientErrorException.NotFound e) {
@@ -62,9 +132,16 @@ public class JetsonStatusService {
     /**
      * MQTT로 들어오는 실시간 상태 메시지 처리 및 캐시 업데이트
      */
-    @ServiceActivator(inputChannel = "mqttInputChannel")
-    public void handleMqttMessage(Message<String> message) {
-        String payload = message.getPayload();
+    public void handleMqttMessage(Message<?> message) {
+        Object rawPayload = message.getPayload();
+        String payload;
+
+        if (rawPayload instanceof byte[]) {
+            payload = new String((byte[]) rawPayload, java.nio.charset.StandardCharsets.UTF_8);
+        } else {
+            payload = rawPayload.toString();
+        }
+
         String topic = (String) message.getHeaders().get("mqtt_receivedTopic");
 
         try {

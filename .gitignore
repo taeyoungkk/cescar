@@ -745,5 +745,5 @@ AMENT_IGNORE
 # Ignore all local history of files
 .history
 .ionide
-
+backend/src/main/resources/firebase-service-account.json
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,ros,ros2,opencv,reactnative,cmake,intellij,flask,react

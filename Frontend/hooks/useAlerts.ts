@@ -1,8 +1,8 @@
+// hooks/useAlerts.ts
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
 import type { SystemAlert } from "@/core/types"
-import * as robotApi from "@/core/api/robot"
 
 interface UseAlertsReturn {
   alerts: SystemAlert[]
@@ -21,17 +21,12 @@ export function useAlerts(): UseAlertsReturn {
   const unreadCount = alerts.filter((a) => !a.isRead).length
 
   const fetchAlerts = useCallback(async () => {
-    try {
-      const response = await robotApi.getAlerts()
-      if (response.success && response.data) {
-        setAlerts(response.data)
-      }
-      setError(null)
-    } catch {
-      setError("알림을 불러오는데 실패했습니다.")
-    } finally {
-      setIsLoading(false)
-    }
+    // 현재 robot alerts API 제거 상태이므로
+    // UI는 "알림 없음"으로 두고 빌드만 안전하게 통과시킴
+    setIsLoading(true)
+    setAlerts([])
+    setError(null)
+    setIsLoading(false)
   }, [])
 
   useEffect(() => {
@@ -39,18 +34,8 @@ export function useAlerts(): UseAlertsReturn {
   }, [fetchAlerts])
 
   const markAsRead = useCallback(async (alertId: string) => {
-    try {
-      const response = await robotApi.markAlertAsRead(alertId)
-      if (response.success) {
-        setAlerts((prev) =>
-          prev.map((alert) =>
-            alert.id === alertId ? { ...alert, isRead: true } : alert
-          )
-        )
-      }
-    } catch {
-      setError("알림 읽음 처리에 실패했습니다.")
-    }
+    // 현재 서버 연동 없으니 로컬에서만 처리(선택사항)
+    setAlerts((prev) => prev.map((a) => (a.id === alertId ? { ...a, isRead: true } : a)))
   }, [])
 
   return {

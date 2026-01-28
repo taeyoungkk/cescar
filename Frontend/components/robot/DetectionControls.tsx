@@ -6,6 +6,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { OfflineGuardButton } from "@/components/offline-guard-button"
 
 type Props = {
+  // 기능 자체 활성/비활성 (MVP/점진적 오픈용)
+  featureEnabled?: boolean
+  disabledReason?: string
+
   isDetecting: boolean
   isLoading: boolean
   onStart: () => Promise<boolean> | void
@@ -17,6 +21,8 @@ type Props = {
 }
 
 export function DetectionControls({
+  featureEnabled,
+  disabledReason,
   isDetecting,
   isLoading,
   onStart,
@@ -25,11 +31,14 @@ export function DetectionControls({
   robotOnline,
   mapReady,
 }: Props) {
-  // ✅ 시작 가능 조건: 네트워크 + 로봇 + 지도 완료
-  const canStart = networkOnline && robotOnline && mapReady
-  const canStop = networkOnline && robotOnline // (탐지 중지는 지도 여부와 무관하게 허용하는 게 보통 자연스러움)
+  // 시작 가능 조건: 네트워크 + 로봇 + 지도 완료
+  const enabled = featureEnabled ?? true
+  const canStart = enabled && networkOnline && robotOnline && mapReady
+  const canStop = enabled && networkOnline && robotOnline
 
-  const startBlockMessage = !networkOnline
+  const startBlockMessage = !enabled
+    ? (disabledReason ?? "현재 이 기능은 사용할 수 없습니다.")
+    : !networkOnline
     ? "네트워크에 연결되어야 탐지를 시작할 수 있습니다"
     : !robotOnline
     ? "로봇이 오프라인 상태입니다. 로봇 연결 후 다시 시도해 주세요"
@@ -37,7 +46,9 @@ export function DetectionControls({
     ? "지도가 생성 완료된 이후에 탐지를 시작할 수 있습니다"
     : "탐지를 시작할 수 없습니다"
 
-  const stopBlockMessage = !networkOnline
+  const stopBlockMessage = !enabled
+    ? (disabledReason ?? "현재 이 기능은 사용할 수 없습니다.")
+    : !networkOnline
     ? "네트워크에 연결되어야 탐지를 중지할 수 있습니다"
     : "로봇이 오프라인 상태입니다. 로봇 연결 후 다시 시도해 주세요."
 

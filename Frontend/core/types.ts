@@ -27,23 +27,35 @@ export interface LoginRequest {
   password: string
 }
 
-// ============================================
-// Robot Types
-// ============================================
-export type RobotMode = "detecting" | "idle" | "moving"
-export type ConnectionQuality = "excellent" | "good" | "poor"
+export type CarMode = "STOP" | "MANUAL" | "AUTO"
 
-export interface RobotStatus {
-  id: string
-  name: string
-  isOnline: boolean
-  batteryLevel: number
-  mode: RobotMode
-  connectionQuality: ConnectionQuality
-  lastSeen: string
-  speed: number
-  isMoving: boolean
+
+export interface CarStatus {
+  x: number | null;
+  y: number | null;
+  heading: number;
+  mode: CarMode;
+  isOnline: boolean;
+  updatedAt: string;
 }
+
+export interface CarSummary {
+  carId: number;
+  nickname: string;
+  mode: CarMode;
+  isOnline: boolean;
+}
+
+export interface CarDetail {
+  carId: number;
+  deviceId: string;
+  claimCode: string;
+  ownerId: number | null;
+  nickname: string;
+  createdAt: string;
+  status: CarStatus;
+}
+
 
 // ============================================
 // Detection Types

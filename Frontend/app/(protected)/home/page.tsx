@@ -5,8 +5,6 @@ import Link from "next/link"
 import {
   Wifi,
   WifiOff,
-  Battery,
-  BatteryLow,
   Activity,
   Bug,
   AlertTriangle,
@@ -32,20 +30,20 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 
-import { useRobotStatus } from "@/hooks/useRobotStatus"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
 import { useAlerts } from "@/hooks/useAlerts"
 import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
 
-import type { RobotStatus, Detection, SystemAlert, DetectionStats } from "@/core/types"
+import type { Detection, SystemAlert, DetectionStats, CarStatus, CarDetail, CarMode } from "@/core/types"
 import { DetectionControls } from "@/components/robot/DetectionControls"
 
 
-// ✅ DEMO MODE
+// DEMO MODE
 import { DEMO_MODE } from "@/core/demo/config"
 import { robotDemoEngine } from "@/core/demo/robotDemoEngine"
 import { useHomeDemoSummary } from "@/hooks/useHomeDemoSummary"
+import { useCarStatus } from "@/hooks/useCarStatus"
 
 // ============================================
 // Presentational Components (UI Only)
@@ -94,7 +92,7 @@ function RobotStatusSection({
   stats,
   isLoading,
 }: {
-  status: RobotStatus | null
+  status: CarStatus | null
   stats: DetectionStats | null
   isLoading: boolean
 }) {
@@ -110,17 +108,12 @@ function RobotStatusSection({
     )
   }
 
-  const modeLabels = { detecting: "탐지 중", idle: "대기 중", moving: "이동 중" } as const
-  const modeVariants: Record<string, "default" | "success" | "warning" | "danger"> = {
-    detecting: "success",
-    idle: "default",
-    moving: "warning",
-  }
-  const getBatteryVariant = (level: number) => {
-    if (level > 50) return "success"
-    if (level > 20) return "warning"
-    return "danger"
-  }
+  const modeLabels: Record<CarMode, string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
+  
+  const lastSeenLabel = new Date(status.updatedAt).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  })
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -132,17 +125,18 @@ function RobotStatusSection({
         subtitle={status.isOnline ? "정상 연결됨" : "연결 끊김"}
       />
       <StatusCard
-        title="배터리"
-        value={`${status.batteryLevel}%`}
-        icon={status.batteryLevel > 20 ? Battery : BatteryLow}
-        variant={getBatteryVariant(status.batteryLevel)}
-        subtitle={status.batteryLevel > 50 ? "충분함" : "충전 필요"}
+        title="마지막 신호"
+        value={lastSeenLabel}
+        icon={Clock}
+        variant="default"
+        subtitle="마지막 수신 시각"
       />
       <StatusCard
         title="현재 모드"
         value={modeLabels[status.mode]}
         icon={Activity}
-        variant={modeVariants[status.mode]}
+        variant={status.mode === "AUTO" ? "success" : status.mode === "MANUAL" ? "warning" : "default"}
+        subtitle={status.mode === "AUTO" ? "자율 주행" : status.mode === "MANUAL" ? "수동 조작" : "정지 상태"}
       />
       <StatusCard
         title="오늘 탐지"
@@ -693,19 +687,18 @@ function RecentDetectionsSection({ detections, isLoading }: { detections: Detect
 // ============================================
 
 export default function HomePage() {
-  // Always call hooks (avoid conditional hooks)
+  const isDemo = DEMO_MODE
+
   const demoSummary = useHomeDemoSummary()
-  const realStatus = useRobotStatus()
+  const carId = 1
+  const carStatus = useCarStatus(carId, { enabled: !isDemo, intervalMs: 1000 })
+
   const realDetections = useRecentDetections()
   const realAlerts = useAlerts()
   const mapStore = useMapStore()
   const { isOnline: networkOnline } = useNetworkStatus()
 
-  const isDemo = DEMO_MODE
-
-
-  // DEMO: derive same data you already used
-  let robotStatus: RobotStatus | null = null
+  let status: CarStatus | null = null
   let recentDetections: Detection[] = []
   let stats: DetectionStats | null = null
   let alerts: SystemAlert[] = []
@@ -716,12 +709,18 @@ export default function HomePage() {
 
   if (isDemo) {
     const snap = robotDemoEngine.getSnapshot()
-
-    const mode: RobotStatus["mode"] =
-      snap.isDetecting ? "detecting" : snap.robotStatus.isMoving ? "moving" : "idle"
-
     const base = demoSummary.status
-    robotStatus = base ? { ...base, mode } : null
+
+    status = base
+      ? {
+          x: null,
+          y: null,
+          heading: 0,
+          mode: "AUTO",
+          isOnline: base.isOnline,
+          updatedAt: new Date().toISOString(),
+        }
+      : null
 
     recentDetections = snap.cameraEvents.slice(0, 5).map((e) => ({
       id: e.id,
@@ -732,6 +731,7 @@ export default function HomePage() {
       robotId: "CESCAR-01",
       confidence: Math.round(70 + Math.random() * 25),
       notes: "",
+      timestamp: new Date().toISOString(),
     }))
 
     stats = {
@@ -742,77 +742,59 @@ export default function HomePage() {
     }
 
     alerts = []
-    if (robotStatus && !robotStatus.isOnline) {
+    if (status && !status.isOnline) {
       alerts.push({
         id: "offline",
         type: "error",
         title: "로봇 연결 끊김",
         message: "로봇이 오프라인입니다. 네트워크/전원을 확인하세요.",
-      })
-    }
-    if (robotStatus && robotStatus.batteryLevel <= 20) {
-      alerts.push({
-        id: "low-battery",
-        type: "warning",
-        title: "배터리 부족",
-        message: `배터리 잔량이 ${robotStatus.batteryLevel}% 입니다. 충전이 필요합니다.`,
-      })
-    }
-    if (recentDetections.length > 0) {
-      alerts.push({
-        id: "recent-detection",
-        type: "info",
-        title: "최근 탐지 이벤트",
-        message: `가장 최근 탐지: ${recentDetections[0].type} (${recentDetections[0].time})`,
+        timestamp: new Date().toISOString(),
+        isRead: false,
       })
     }
 
-    statusLoading = robotStatus == null
+    statusLoading = status == null
     detectionsLoading = false
     alertsLoading = false
   } else {
-    robotStatus = realStatus.robotStatus
+    status = carStatus.data
+    statusLoading = carStatus.isLoading
+
     recentDetections = realDetections.recentDetections
     stats = realDetections.stats
     alerts = realAlerts.alerts
 
-    statusLoading = realStatus.isLoading
     detectionsLoading = realDetections.isLoading
     alertsLoading = realAlerts.isLoading
   }
 
-  const robotOnline = robotStatus?.isOnline ?? false
+
+  const robotOnline = status?.isOnline ?? false
   const mapReady = mapStore.status === "completed"
 
-  const isDetecting = isDemo
-    ? robotStatus?.mode === "detecting"
-    : realStatus.isDetecting
-
-  const detectionLoading = isDemo
-    ? statusLoading
-    : realStatus.isLoading
+  // MVP: real에서는 탐지 컨트롤 비활성 (추후 API 확정 후 연결)
+  const demoSnap = isDemo ? robotDemoEngine.getSnapshot() : null
+  const isDetecting = isDemo ? (demoSnap?.isDetecting ?? false) : false
+  const detectionLoading = isDemo ? statusLoading : false
 
   const onStart = React.useCallback(async () => {
     if (isDemo) {
       robotDemoEngine.startDetection()
       return true
     }
-    return realStatus.startDetection()
-  }, [isDemo, realStatus])
+    return false
+  }, [isDemo])
 
   const onStop = React.useCallback(async () => {
     if (isDemo) {
       robotDemoEngine.stopDetection()
       return true
     }
-    return realStatus.stopDetection()
-  }, [isDemo, realStatus])
+    return false
+  }, [isDemo])
 
-  // must be above early return
   useEffect(() => {
-    if (mapStore.status === "generating" && isDetecting) {
-      onStop()
-    }
+    if (mapStore.status === "generating" && isDetecting) onStop()
   }, [mapStore.status, isDetecting, onStop])
 
 
@@ -842,7 +824,7 @@ export default function HomePage() {
         </div>
 
         <div className="mb-6">
-          <RobotStatusSection status={robotStatus} stats={stats} isLoading={statusLoading} />
+          <RobotStatusSection status={status} stats={stats} isLoading={statusLoading} />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -862,13 +844,15 @@ export default function HomePage() {
             />
 
               <DetectionControls
-                isDetecting={isDetecting}
-                isLoading={detectionLoading}
-                onStart={onStart}
-                onStop={onStop}
-                networkOnline={networkOnline}
-                robotOnline={robotOnline}
-                mapReady={mapReady}
+                  featureEnabled={isDemo} // REAL에서는 “준비중” 처리
+                  disabledReason="현재 MVP에서는 탐지 제어가 데모 모드에서만 동작합니다."
+                  isDetecting={isDetecting}
+                  isLoading={isDemo ? statusLoading : detectionLoading}
+                  onStart={isDemo ? onStart : async () => false}
+                  onStop={isDemo ? onStop : async () => false}
+                  networkOnline={networkOnline}
+                  robotOnline={robotOnline}
+                  mapReady={mapReady}
               />
           </div>
           <div className="space-y-6">

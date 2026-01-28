@@ -1,6 +1,8 @@
 package com.ssafy.backend.domain.device.application;
 
+import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
+import com.ssafy.backend.domain.notification.application.FcmService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -8,12 +10,10 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.messaging.Message;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.core.type.TypeReference;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -21,15 +21,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
-import static org.springframework.data.util.TypeUtils.type;
-
 @Service
 @RequiredArgsConstructor
 public class JetsonStatusService {
 
     private final String EMQX_API_URL = "http://localhost:18083/api/v5/clients/";
-    private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper;
+    private final FcmService fcmService;
 
     @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleDeviceStatus(Message<byte[]> message) {
@@ -55,20 +53,15 @@ public class JetsonStatusService {
                     DeviceStatusRequest statusDto = objectMapper.readValue(payload, DeviceStatusRequest.class);
                     handleRobotStatus(robotId, statusDto);
                     break;
+
+                case "detection":
+                    DetectionRequest detectionDto = objectMapper.readValue(payload, DetectionRequest.class);
+                    handleRobotDetection(robotId, detectionDto);
+                    break;
             }
-            Map<String, Object> dict = objectMapper.readValue(payload, new TypeReference<Map<String, Object>>() {
-            });
-
-            // 꺼내 쓸 때는 (타입) 으로 형변환!
+            // 🤖 인식된 로봇: robotId
             System.out.println("🤖 인식된 로봇: " + robotId);
-
-            String destination = "/topic/robot/" + robotId;
-
-            // 모니터링 출력
-            System.out.println("✅ [데이터 수신] Robot: " + robotId + " | Status: " + dict.get("status"));
-
-            // 클라이언트로 전송
-            messagingTemplate.convertAndSend(destination, (Object) dict);
+            System.out.println("✅ [데이터 수신] Robot: " + robotId + " | Payload: " + payload);
 
         } catch (Exception e) {
             // 저장하신 규칙: 잘못된 답(에러)이 나오면 알려달라고 하셨으므로 출력!
@@ -81,11 +74,21 @@ public class JetsonStatusService {
         System.out.println("📊 [STATUS] " + robotId + " - 배터리: " + status.getBattery().getPercent() + "%, 온도: "
                 + status.getTemperature());
 
-        // 🎯 핵심: 이 코드가 있어야 프론트엔드 HTML이 데이터를 받습니다!
-        String destination = "/topic/robot/" + robotId + "/status";
-        messagingTemplate.convertAndSend(destination, (Object) status);
+        // 캐시 업데이트
+        statusCache.put(robotId, status);
+    }
 
-        System.out.println("🚀 [Websocket] Sent to: " + destination);
+    private void handleRobotDetection(String robotId, DetectionRequest detect) {
+        System.out.println("🔍 [DETECTION] " + robotId + " - 감지된 물체: " + detect.getObject_type()
+                + " (신뢰도: " + detect.getConfidence() + "%)");
+
+        // 🎯 FCM 브로드캐스트 전송
+        String title = "🚨 [" + robotId + "] 물체 감지!";
+        String body = String.format("%s 물체가 %.1f%% 확률로 감지되었습니다.",
+                detect.getObject_type(), detect.getConfidence());
+
+        fcmService.broadcastMessage(title, body);
+        System.out.println("🚀 [FCM Alert Sent] " + title);
     }
 
     // 로봇 ID별 최신 상세 상태를 메모리에 저장 (캐싱)
@@ -102,11 +105,13 @@ public class JetsonStatusService {
         HttpEntity<String> entity = new HttpEntity<>(headers);
 
         try {
-            ResponseEntity<Map> response = restTemplate.exchange(
-                    EMQX_API_URL + clientId, HttpMethod.GET, entity, Map.class);
+            ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+                    EMQX_API_URL + clientId, HttpMethod.GET, entity,
+                    new org.springframework.core.ParameterizedTypeReference<Map<String, Object>>() {
+                    });
 
             if (response.getStatusCode().is2xxSuccessful()) {
-                Map body = response.getBody();
+                Map<String, Object> body = response.getBody();
                 return body != null && (boolean) body.get("connected");
             }
         } catch (HttpClientErrorException.NotFound e) {

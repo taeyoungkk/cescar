@@ -24,6 +24,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
+@org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity
 @RequiredArgsConstructor
 public class SecurityConfig {
 
@@ -58,10 +59,10 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 // 미인증은 401, 권한 부족은 403으로 응답
                 .exceptionHandling(exception -> exception
-                        .authenticationEntryPoint((request, response, authException) ->
-                                writeErrorResponse(response, ErrorCode.UNAUTHORIZED))
-                        .accessDeniedHandler((request, response, accessDeniedException) ->
-                                writeErrorResponse(response, ErrorCode.ACCESS_DENIED)))
+                        .authenticationEntryPoint((request, response, authException) -> writeErrorResponse(response,
+                                ErrorCode.UNAUTHORIZED))
+                        .accessDeniedHandler((request, response, accessDeniedException) -> writeErrorResponse(response,
+                                ErrorCode.ACCESS_DENIED)))
                 // HTTP 인가 규칙
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
@@ -69,8 +70,9 @@ public class SecurityConfig {
                                 "/api/members/login",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",
-                                "/api-docs/**"
-                        ).permitAll()
+                                "/api-docs/**",
+                                "/ws/**") // WebSocket 허용
+                        .permitAll()
                         .anyRequest().authenticated())
                 // JWT 필터 추가
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);

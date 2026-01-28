@@ -1,10 +1,13 @@
 package com.ssafy.backend.global.config;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.ssafy.backend.domain.detection.ws.DetectionWsBroadcaster;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.eclipse.paho.client.mqttv3.*;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
@@ -30,6 +33,7 @@ import java.nio.charset.StandardCharsets;
 @Configuration
 @EnableIntegration
 @IntegrationComponentScan(basePackages = "com.ssafy.backend")
+@RequiredArgsConstructor
 public class MqttConfig {
 
     @Value("${mqtt.broker.url}")
@@ -43,6 +47,10 @@ public class MqttConfig {
 
     @Value("${mqtt.inbound.topic}")
     private String inboundTopic;
+
+    // [New] 탐지 데이터 처리를 위한 의존성 주입
+    private final DetectionWsBroadcaster detectionWsBroadcaster;
+    private final ObjectMapper objectMapper;
 
     private MqttClient mqttClient;
     private MqttClient outClient;
@@ -69,7 +77,8 @@ public class MqttConfig {
 
     @PostConstruct
     public void initMqttClient() throws MqttException {
-        String clientId = "DirectPaho_" + System.currentTimeMillis();
+        // 충돌 방지용 랜덤 ID
+        String clientId = "SpringIn_" + System.currentTimeMillis();
         mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
 
         mqttClient.setCallback(new MqttCallback() {
@@ -78,40 +87,71 @@ public class MqttConfig {
                 log.error("❌ MQTT Connection Lost: {}", cause.getMessage());
             }
 
-
             @Override
             public void messageArrived(String topic, MqttMessage message) {
-                Message<byte[]> springMessage = MessageBuilder.withPayload(message.getPayload())
-                        .setHeader("mqtt_receivedTopic", topic)
-                        .build();
+                try {
+                    Message<byte[]> springMessage = MessageBuilder.withPayload(message.getPayload())
+                            .setHeader("mqtt_receivedTopic", topic)
+                            .build();
 
-                // 1. 페이로드를 byte[]에서 String으로 변환 (인코딩 주의)
-                String payloadString = new String((byte[]) springMessage.getPayload(), StandardCharsets.UTF_8);
+                    // 1. 페이로드를 byte[]에서 String으로 변환 (인코딩 주의)
+                    String payloadString = new String((byte[]) springMessage.getPayload(), StandardCharsets.UTF_8);
 
-// 2. 헤더 정보 가져오기
-                String receivedTopic = (String) springMessage.getHeaders().get("mqtt_receivedTopic");
+                    // [New] 탐지 데이터(detections)인 경우 웹소켓으로 전송 (기능 추가)
+                    if (topic.endsWith("detections")) {
+                        processDetectionMessage(payloadString);
+                    }
 
-// 3. 로그 출력 (f-string 스타일이 아니므로 + 결합 또는 printf 사용)
-                System.out.println("==========================================");
-                System.out.println("📬 Spring Message Arrived!");
-                System.out.println("📍 Topic: " + receivedTopic);
-                System.out.println("📝 Payload: " + payloadString);
-                System.out.println("⚙️ Headers: " + springMessage.getHeaders());
-                System.out.println("==========================================");
+                    // 2. 헤더 정보 가져오기
+                    String receivedTopic = (String) springMessage.getHeaders().get("mqtt_receivedTopic");
 
-                mqttInboundChannel().send(springMessage);
-                log.debug("📬 [MQTT -> CHANNEL] Forwarded: {}", topic);
+                    // 3. 로그 출력 (팀원분 코드 복구)
+                    System.out.println("==========================================");
+                    System.out.println("📬 Spring Message Arrived!");
+                    System.out.println("📍 Topic: " + receivedTopic);
+                    System.out.println("📝 Payload: " + payloadString);
+                    System.out.println("⚙️ Headers: " + springMessage.getHeaders());
+                    System.out.println("==========================================");
+
+                    mqttInboundChannel().send(springMessage);
+                    log.debug("📬 [MQTT -> CHANNEL] Forwarded: {}", topic);
+
+                } catch (Exception e) {
+                    log.error("Error processing MQTT message", e);
+                }
             }
 
             @Override
             public void deliveryComplete(IMqttDeliveryToken token) {
             }
         });
-        System.out.println(inboundTopic);
-        mqttClient.connect(getMqttConnectOptions());
-        mqttClient.subscribe(inboundTopic, 0);
 
-        log.info("🔥 [MQTT] Inbound Client Started (ID: {}, Topic: {})", clientId, inboundTopic);
+        mqttClient.connect(getMqttConnectOptions());
+
+        // 1. 기본 인바운드 토픽 구독
+        if (inboundTopic != null && !inboundTopic.isBlank()) {
+            mqttClient.subscribe(inboundTopic, 0);
+        }
+
+        // [New] 2. 탐지 데이터용 토픽 명시적 구독
+        // application.properties에 없어도 동작하도록 강제 구독
+        mqttClient.subscribe("robot/+/detections", 0);
+
+        log.info("🔥 [MQTT] Client Started. ID: {}, Subscribed to: {}, robot/+/detections", clientId, inboundTopic);
+    }
+
+    // [New] JSON 파싱 및 웹소켓 전송 헬퍼 메서드
+    private void processDetectionMessage(String payload) {
+        try {
+            JsonNode root = objectMapper.readTree(payload);
+            String roomId = root.path("roomId").asText(null);
+
+            if (roomId != null && !roomId.isBlank()) {
+                detectionWsBroadcaster.broadcastToRoom(roomId, payload);
+            }
+        } catch (Exception e) {
+            log.error("Failed to parse detection payload for WS broadcast", e);
+        }
     }
 
     @Bean
@@ -127,7 +167,7 @@ public class MqttConfig {
             try {
                 String topic = (String) message.getHeaders().get("mqtt_topic");
                 if (topic == null)
-                    topic = "default/topic";
+                    topic = "jetson/command";
 
                 MqttMessage mqttMessage = new MqttMessage(message.getPayload().toString().getBytes());
                 mqttMessage.setQos(0);

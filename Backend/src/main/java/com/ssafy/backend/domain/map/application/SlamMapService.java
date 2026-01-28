@@ -8,10 +8,13 @@ import com.ssafy.backend.domain.map.dto.SlamMapRequest;
 import com.ssafy.backend.domain.map.dto.SlamMapResponse;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
+import com.ssafy.backend.global.storage.StorageService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -22,6 +25,10 @@ public class SlamMapService {
 
     private final CarRepository carRepository;
     private final SlamMapRepository slamMapRepository;
+    private final StorageService storageService;
+
+    @Value("${storage.signed-url-ttl}")
+    private Duration signedUrlTtl;
 
     @Transactional
     public SlamMapResponse.MapDetailResponse createMap(Long carId, Long memberId, SlamMapRequest.CreateRequest request) {
@@ -41,7 +48,7 @@ public class SlamMapService {
         SlamMap savedMap = slamMapRepository.save(map);
         car.updateCurrentMap(savedMap);
 
-        return SlamMapResponse.MapDetailResponse.from(savedMap);
+        return toMapDetailResponse(savedMap);
     }
 
     public List<SlamMapResponse.MapListResponse> getMapList(Long carId, Long memberId) {
@@ -49,7 +56,7 @@ public class SlamMapService {
 
         return slamMapRepository.findAllByCarIdAndDeletedAtIsNullOrderByCreatedAtDesc(carId)
                 .stream()
-                .map(SlamMapResponse.MapListResponse::from)
+                .map(this::toMapListResponse)
                 .collect(Collectors.toList());
     }
 
@@ -61,7 +68,7 @@ public class SlamMapService {
             throw new CustomException(ErrorCode.MAP_NOT_FOUND);
         }
 
-        return SlamMapResponse.MapDetailResponse.from(map);
+        return toMapDetailResponse(map);
     }
 
     public SlamMapResponse.MapDetailResponse getMapDetail(Long carId, Long memberId, Long mapId) {
@@ -70,7 +77,7 @@ public class SlamMapService {
         SlamMap map = slamMapRepository.findByIdAndCarIdAndDeletedAtIsNull(mapId, carId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
 
-        return SlamMapResponse.MapDetailResponse.from(map);
+        return toMapDetailResponse(map);
     }
 
     @Transactional
@@ -83,7 +90,7 @@ public class SlamMapService {
 
         map.updateInfo(request.name(), null);
 
-        return SlamMapResponse.MapDetailResponse.from(map);
+        return toMapDetailResponse(map);
     }
 
     @Transactional
@@ -113,7 +120,7 @@ public class SlamMapService {
 
         car.updateCurrentMap(map);
 
-        return SlamMapResponse.MapDetailResponse.from(map);
+        return toMapDetailResponse(map);
     }
 
     private Car getOwnedCar(Long carId, Long memberId) {
@@ -125,5 +132,36 @@ public class SlamMapService {
         }
 
         return car;
+    }
+
+    private SlamMapResponse.MapDetailResponse toMapDetailResponse(SlamMap map) {
+        return new SlamMapResponse.MapDetailResponse(
+                map.getId(),
+                map.getCar().getId(),
+                map.getName(),
+                resolveImageUrl(map.getImageUrl()),
+                map.getWidth(),
+                map.getHeight(),
+                map.getResolution(),
+                map.getOriginX(),
+                map.getOriginY(),
+                map.getCreatedAt()
+        );
+    }
+
+    private SlamMapResponse.MapListResponse toMapListResponse(SlamMap map) {
+        return new SlamMapResponse.MapListResponse(
+                map.getId(),
+                map.getName(),
+                resolveImageUrl(map.getImageUrl()),
+                map.getCreatedAt()
+        );
+    }
+
+    private String resolveImageUrl(String objectPath) {
+        if (objectPath == null || objectPath.isBlank()) {
+            return null;
+        }
+        return storageService.generateSignedUrl(objectPath, signedUrlTtl);
     }
 }

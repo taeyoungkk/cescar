@@ -25,4 +25,11 @@ public class SlamMapRequest {
     public record UpdateRequest(
             @NotBlank(message = "지도 이름은 필수입니다.") String name) {
     }
+
+    /**
+     * 현재 지도 선택 요청 (PATCH /api/cars/{carId}/maps/current)
+     */
+    public record SetCurrentRequest(
+            @NotNull(message = "지도 ID는 필수입니다.") Long mapId) {
+    }
 }

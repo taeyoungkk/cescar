@@ -53,11 +53,13 @@ public class SlamMapService {
                 .collect(Collectors.toList());
     }
 
-    public SlamMapResponse.MapDetailResponse getLatestMap(Long carId, Long memberId) {
-        getOwnedCar(carId, memberId);
+    public SlamMapResponse.MapDetailResponse getCurrentMap(Long carId, Long memberId) {
+        Car car = getOwnedCar(carId, memberId);
 
-        SlamMap map = slamMapRepository.findFirstByCarIdAndDeletedAtIsNullOrderByCreatedAtDesc(carId)
-                .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
+        SlamMap map = car.getCurrentMap();
+        if (map == null || map.getDeletedAt() != null) {
+            throw new CustomException(ErrorCode.MAP_NOT_FOUND);
+        }
 
         return SlamMapResponse.MapDetailResponse.from(map);
     }
@@ -100,6 +102,18 @@ public class SlamMapService {
         }
 
         return SlamMapResponse.SuccessResponse.of("지도 삭제가 완료되었습니다.");
+    }
+
+    @Transactional
+    public SlamMapResponse.MapDetailResponse setCurrentMap(Long carId, Long memberId, SlamMapRequest.SetCurrentRequest request) {
+        Car car = getOwnedCar(carId, memberId);
+
+        SlamMap map = slamMapRepository.findByIdAndCarIdAndDeletedAtIsNull(request.mapId(), carId)
+                .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
+
+        car.updateCurrentMap(map);
+
+        return SlamMapResponse.MapDetailResponse.from(map);
     }
 
     private Car getOwnedCar(Long carId, Long memberId) {

@@ -57,14 +57,14 @@ public class SlamMapController {
     }
 
     /**
-     * 3️⃣ 최신 지도 조회 API
+     * 3️⃣ 현재 지도 조회 API
      */
-    @Operation(summary = "최신 지도 조회", description = "차량의 최신 지도를 조회합니다.")
-    @GetMapping("/latest")
-    public ResponseEntity<SlamMapResponse.MapDetailResponse> getLatestMap(
+    @Operation(summary = "현재 지도 조회", description = "차량의 현재 지도를 조회합니다.")
+    @GetMapping("/current")
+    public ResponseEntity<SlamMapResponse.MapDetailResponse> getCurrentMap(
             @Parameter(hidden = true) @AuthenticationPrincipal Long memberId,
             @Parameter(description = "차량 ID", required = true) @PathVariable Long carId) {
-        SlamMapResponse.MapDetailResponse response = slamMapService.getLatestMap(carId, memberId);
+        SlamMapResponse.MapDetailResponse response = slamMapService.getCurrentMap(carId, memberId);
         return ResponseEntity.ok(response);
     }
 
@@ -106,6 +106,19 @@ public class SlamMapController {
             @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
             @Parameter(description = "지도 ID", required = true) @PathVariable Long mapId) {
         SlamMapResponse.SuccessResponse response = slamMapService.deleteMap(carId, memberId, mapId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * 7️⃣ 현재 지도 선택 API
+     */
+    @Operation(summary = "현재 지도 선택", description = "차량의 현재 지도를 선택합니다.")
+    @PatchMapping("/current")
+    public ResponseEntity<SlamMapResponse.MapDetailResponse> setCurrentMap(
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId,
+            @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
+            @Valid @RequestBody SlamMapRequest.SetCurrentRequest request) {
+        SlamMapResponse.MapDetailResponse response = slamMapService.setCurrentMap(carId, memberId, request);
         return ResponseEntity.ok(response);
     }
 }

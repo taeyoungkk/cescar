@@ -21,6 +21,8 @@ class MQTTService:
         """ControlService 인스턴스 주입"""
         self._control_service = control_service
         logger.info("ControlService connected to MQTTService")
+        if hasattr(control_service, "set_status_publisher"):
+            control_service.set_status_publisher(self.publish_status)
     
     def initialize(self):
         """MQTT 클라이언트 초기화"""

@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 def signal_handler(sig, frame):
     """Ctrl+C 핸들러"""
     print("\n[*] Shutting down...")
+    control_service.cleanup()
     mqtt_service.disconnect()
     sys.exit(0)
 
@@ -66,6 +67,7 @@ def main():
         signal_handler(None, None)
     except Exception as e:
         logger.error(f"Error: {e}")
+        control_service.cleanup()
         mqtt_service.disconnect()
         sys.exit(1)
 

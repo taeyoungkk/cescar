@@ -1,6 +1,7 @@
 package com.ssafy.backend.domain.notification.api;
 
 import com.ssafy.backend.domain.notification.application.FcmService;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -18,16 +19,17 @@ public class FcmController {
 
     // 클라이언트로부터 토큰을 받아 등록
     @PostMapping("/register")
-    public String registerToken(@RequestBody Map<String, String> request) {
+    public String registerToken(@RequestBody Map<String, String> request,
+                                @AuthenticationPrincipal Long memberId) {
         String token = request.get("token");
-        fcmService.registerToken(token);
+        fcmService.registerToken(memberId, token);
         return "토큰 등록 완료";
     }
 
     // 수동 테스트용
     @PostMapping("/test")
     public String sendTestNotification(@RequestParam String token, @RequestParam String title,
-            @RequestParam String body) {
+                                       @RequestParam String body) {
         fcmService.sendMessage(token, title, body);
         return "전송 요청 완료";
     }

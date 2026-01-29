@@ -37,7 +37,7 @@ import { useAlerts } from "@/hooks/useAlerts"
 import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
 
 import type { Detection, SystemAlert, DetectionStats, CarStatus, CarDetail, CarMode } from "@/core/types"
-import { DetectionControls } from "@/components/robot/DetectionControls"
+import { OfflineGuardButton } from "@/components/offline-guard-button"
 
 
 // DEMO MODE
@@ -357,7 +357,7 @@ function MapMetadataPanel({
         <p className="text-sm font-medium text-foreground">{areaSize || "-"}</p>
       </div>
       <div className="bg-secondary/50 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground mb-1">로봇 ID</p>
+        <p className="text-xs text-muted-foreground mb-1">차량 ID</p>
         <p className="text-sm font-medium text-foreground font-mono">{robotId || "-"}</p>
       </div>
     </div>
@@ -450,6 +450,15 @@ function MapGenerationSection({
   onStopGeneration,
   onSelectMap,
   onDeleteMap,
+  detectionEnabled,
+  detectionDisabledReason,
+  isDetecting,
+  detectionLoading,
+  onStartDetect,
+  onStopDetect,
+  networkOnline,
+  robotOnline,
+  mapReady,
 }: {
   mapStatus: MapStatus
   progress?: number
@@ -462,8 +471,34 @@ function MapGenerationSection({
   onStopGeneration?: () => void
   onSelectMap?: (mapId: string) => void
   onDeleteMap?: (mapId: string) => void
+  detectionEnabled?: boolean
+  detectionDisabledReason?: string
+  isDetecting: boolean
+  detectionLoading: boolean
+  onStartDetect: () => Promise<boolean> | void
+  onStopDetect: () => Promise<boolean> | void
+  networkOnline: boolean
+  robotOnline: boolean
+  mapReady: boolean
 }) {
   const isDisabled = !isOnline
+  const enabled = detectionEnabled ?? true
+  const canStart = enabled && networkOnline && robotOnline && mapReady
+  const canStop = enabled && networkOnline && robotOnline
+  const startBlockMessage = !enabled
+    ? (detectionDisabledReason ?? "현재 이 기능은 사용할 수 없습니다.")
+    : !networkOnline
+    ? "네트워크에 연결되어야 탐지를 시작할 수 있습니다"
+    : !robotOnline
+    ? "로봇이 오프라인 상태입니다. 로봇 연결 후 다시 시도해 주세요"
+    : !mapReady
+    ? "지도가 생성 완료된 이후에 탐지를 시작할 수 있습니다"
+    : "탐지를 시작할 수 없습니다"
+  const stopBlockMessage = !enabled
+    ? (detectionDisabledReason ?? "현재 이 기능은 사용할 수 없습니다.")
+    : !networkOnline
+    ? "네트워크에 연결되어야 탐지를 중지할 수 있습니다"
+    : "로봇이 오프라인 상태입니다. 로봇 연결 후 다시 시도해 주세요."
 
   return (
     <Card className="bg-card border-border overflow-hidden">
@@ -481,6 +516,29 @@ function MapGenerationSection({
             {maps.length > 0 && onSelectMap && onDeleteMap && (
               <MapHistoryDialog maps={maps} onSelect={onSelectMap} onDelete={onDeleteMap} />
             )}
+            <div className="flex items-center gap-2">
+              <OfflineGuardButton
+                className={`h-8 px-3 text-xs ${
+                  isDetecting ? "bg-secondary hover:bg-secondary/80" : "bg-primary hover:bg-primary/90"
+                }`}
+                onClick={() => onStartDetect()}
+                disabled={isDetecting || detectionLoading || !canStart}
+                offlineMessage={startBlockMessage}
+              >
+                <Play className="mr-1.5 h-3.5 w-3.5" />
+                탐지 시작
+              </OfflineGuardButton>
+              <OfflineGuardButton
+                variant="destructive"
+                className="h-8 px-3 text-xs"
+                onClick={() => onStopDetect()}
+                disabled={!isDetecting || detectionLoading || !canStop}
+                offlineMessage={stopBlockMessage}
+              >
+                <Square className="mr-1.5 h-3.5 w-3.5" />
+                탐지 중지
+              </OfflineGuardButton>
+            </div>
             {mapStatus === "completed" && (
               <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shrink-0">완료됨</Badge>
             )}
@@ -540,7 +598,13 @@ function MapGenerationSection({
 // Alerts & Detections (same as your code)
 // ============================================
 
-function AlertItem({ alert }: { alert: SystemAlert }) {
+function AlertItem({
+  alert,
+  onRead,
+}: {
+  alert: SystemAlert
+  onRead?: (id: string) => void
+}) {
   const alertConfig = {
     warning: {
       bg: "bg-amber-500/10 border-amber-500/30",
@@ -563,25 +627,50 @@ function AlertItem({ alert }: { alert: SystemAlert }) {
   const Icon = config.icon
 
   return (
-    <div className={`flex items-start gap-3 p-3 rounded-lg border ${config.bg}`}>
+    <div className={`flex items-start justify-between gap-3 p-3 rounded-lg border ${config.bg}`}>
       <Icon className={`h-4 w-4 mt-0.5 ${config.iconColor}`} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-foreground">{alert.title}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-foreground">{alert.title}</p>
+          {!alert.isRead && <Badge variant="secondary" className="text-[10px]">NEW</Badge>}
+        </div>
         <p className="text-xs text-muted-foreground mt-0.5">{alert.message}</p>
       </div>
+      {!alert.isRead && onRead && (
+        <Button variant="outline" size="sm" onClick={() => onRead(alert.id)}>
+          읽음
+        </Button>
+      )}
     </div>
   )
 }
 
-function SystemAlertsSection({ alerts, isLoading }: { alerts: SystemAlert[]; isLoading: boolean }) {
+function SystemAlertsSection({
+  alerts,
+  isLoading,
+  onRead,
+  onReadAll,
+}: {
+  alerts: SystemAlert[]
+  isLoading: boolean
+  onRead?: (id: string) => void
+  onReadAll?: () => void
+}) {
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-medium">시스템 알림</CardTitle>
-          <Badge variant="secondary" className="text-xs">
-            {alerts.length}개
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary" className="text-xs">
+              {alerts.filter((a) => !a.isRead).length}개
+            </Badge>
+            {onReadAll && alerts.some((a) => !a.isRead) && (
+              <Button variant="ghost" size="sm" className="text-xs" onClick={onReadAll}>
+                전체 읽음
+              </Button>
+            )}
+          </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -591,10 +680,12 @@ function SystemAlertsSection({ alerts, isLoading }: { alerts: SystemAlert[]; isL
               <div key={i} className="h-16 bg-secondary/20 rounded-lg animate-pulse" />
             ))}
           </div>
-        ) : alerts.length === 0 ? (
+        ) : alerts.filter((a) => !a.isRead).length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-4">알림이 없습니다</p>
         ) : (
-          alerts.slice(0, 3).map((alert) => <AlertItem key={alert.id} alert={alert} />)
+          alerts.filter((a) => !a.isRead).slice(0, 3).map((alert) => (
+            <AlertItem key={alert.id} alert={alert} onRead={onRead} />
+          ))
         )}
       </CardContent>
     </Card>
@@ -648,40 +739,7 @@ function DetectionItem({ detection }: { detection: Detection }) {
   )
 }
 
-function RecentDetectionsSection({ detections, isLoading }: { detections: Detection[]; isLoading: boolean }) {
-  return (
-    <Card className="bg-card border-border">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-medium">최근 탐지 이벤트</CardTitle>
-          <Link href="/dashboard">
-            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground">
-              전체 보기
-              <ChevronRight className="ml-1 h-3 w-3" />
-            </Button>
-          </Link>
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        {isLoading ? (
-          <div className="divide-y divide-border">
-            {[...Array(3)].map((_, i) => (
-              <div key={i} className="px-4 py-3 h-16 animate-pulse bg-secondary/10" />
-            ))}
-          </div>
-        ) : detections.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-8">오늘 탐지된 항목이 없습니다</p>
-        ) : (
-          <div className="divide-y divide-border">
-            {detections.map((d) => (
-              <DetectionItem key={d.id} detection={d} />
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
-}
+// RecentDetectionsSection removed per request
 
 // ============================================
 // Page Component (DEMO/REAL merge)
@@ -696,6 +754,7 @@ export default function HomePage() {
 
   const realDetections = useRecentDetections(carId, 5)
   const realAlerts = useAlerts()
+  const { setExternalAlerts } = realAlerts
   const mapStore = useMapStore()
   const { isOnline: networkOnline } = useNetworkStatus()
 
@@ -742,18 +801,6 @@ export default function HomePage() {
       lastDetectionTime: recentDetections[0]?.time ?? "-",
     }
 
-    alerts = []
-    if (status && !status.isOnline) {
-      alerts.push({
-        id: "offline",
-        type: "error",
-        title: "로봇 연결 끊김",
-        message: "로봇이 오프라인입니다. 네트워크/전원을 확인하세요.",
-        timestamp: new Date().toISOString(),
-        isRead: false,
-      })
-    }
-
     statusLoading = status == null
     detectionsLoading = false
     alertsLoading = false
@@ -768,6 +815,53 @@ export default function HomePage() {
     detectionsLoading = realDetections.isLoading
     alertsLoading = realAlerts.isLoading
   }
+
+  const computedAlerts = React.useMemo(() => {
+    const list: SystemAlert[] = []
+    const now = Date.now()
+    if (status && !status.isOnline) {
+      list.push({
+        id: "offline",
+        type: "error",
+        title: isDemo ? "로봇 연결 끊김" : "차량 오프라인",
+        message: isDemo
+          ? "로봇이 오프라인입니다. 네트워크/전원을 확인하세요."
+          : "차량이 오프라인입니다. 전원/네트워크를 확인하세요.",
+        timestamp: new Date().toISOString(),
+        isRead: false,
+      })
+    }
+    if (status?.updatedAt) {
+      const updated = new Date(status.updatedAt).getTime()
+      if (!Number.isNaN(updated) && now - updated > 2 * 60 * 1000) {
+        list.push({
+          id: "stale",
+          type: "warning",
+          title: "상태 갱신 지연",
+          message: "차량 상태 갱신이 지연되고 있습니다.",
+          timestamp: new Date().toISOString(),
+          isRead: false,
+        })
+      }
+    }
+    if (mapStore.status !== "completed") {
+      list.push({
+        id: "map",
+        type: "info",
+        title: "지도 준비 필요",
+        message: "지도 생성 또는 선택이 필요합니다.",
+        timestamp: new Date().toISOString(),
+        isRead: false,
+      })
+    }
+    return list
+  }, [status?.isOnline, status?.updatedAt, mapStore.status, isDemo])
+
+  React.useEffect(() => {
+    setExternalAlerts(computedAlerts)
+  }, [computedAlerts, setExternalAlerts])
+
+  alerts = realAlerts.alerts
 
 
   const robotOnline = status?.isOnline ?? false
@@ -836,33 +930,33 @@ export default function HomePage() {
               isOnline={robotOnline}
               generatedAt={mapStore.activeMap?.generatedAt}
               areaSize={mapStore.activeMap?.areaSize}
-              robotId={mapStore.activeMap?.robotId}
+              robotId={carId ? String(carId) : undefined}
               maps={mapStore.maps}
               onStartGeneration={mapStore.startGeneration}
               onStopGeneration={mapStore.stopGeneration}
               onSelectMap={mapStore.selectMap}
               onDeleteMap={mapStore.deleteMap}
+              detectionEnabled
+              isDetecting={isDetecting}
+              detectionLoading={isDemo ? statusLoading : detectionLoading}
+              onStartDetect={onStart}
+              onStopDetect={onStop}
+              networkOnline={networkOnline}
+              robotOnline={robotOnline}
+              mapReady={mapReady}
             />
-
-              <DetectionControls
-                  featureEnabled={isDemo} // REAL에서는 “준비중” 처리
-                  disabledReason="현재 MVP에서는 탐지 제어가 데모 모드에서만 동작합니다."
-                  isDetecting={isDetecting}
-                  isLoading={isDemo ? statusLoading : detectionLoading}
-                  onStart={isDemo ? onStart : async () => false}
-                  onStop={isDemo ? onStop : async () => false}
-                  networkOnline={networkOnline}
-                  robotOnline={robotOnline}
-                  mapReady={mapReady}
-              />
           </div>
           <div className="space-y-6">
-            <SystemAlertsSection alerts={alerts} isLoading={alertsLoading} />
+            <SystemAlertsSection
+              alerts={alerts}
+              isLoading={alertsLoading}
+              onRead={realAlerts.markAsRead}
+              onReadAll={realAlerts.markAllAsRead}
+            />
           </div>
         </div>
 
         <div className="mt-6">
-          <RecentDetectionsSection detections={recentDetections} isLoading={detectionsLoading} />
         </div>
       </div>
     </div>

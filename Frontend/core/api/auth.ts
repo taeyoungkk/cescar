@@ -1,5 +1,7 @@
 import type { AuthResponse, LoginRequest, SignupRequest, User } from "../types"
 import { mockUser } from "../mockData"
+import { apiFetch } from "./http"
+import { DEMO_MODE } from "@/core/demo/config"
 
 const AUTH_TOKEN_KEY = "accessToken"
 const MOCK_DELAY = 800
@@ -30,57 +32,100 @@ export function isAuthenticated(): boolean {
 // Auth API Functions
 // ============================================
 export async function login(request: LoginRequest): Promise<AuthResponse> {
-  await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
-  
-  // Mock validation - accept any credentials for demo
-  if (!request.email || !request.password) {
+  if (DEMO_MODE) {
+    await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
+    
+    if (!request.email || !request.password) {
+      return {
+        success: false,
+        error: "이메일과 비밀번호를 입력해주세요.",
+      }
+    }
+
+    const token = `mock-token-${Date.now()}`
+    setAuthToken(token)
+
     return {
-      success: false,
-      error: "이메일과 비밀번호를 입력해주세요.",
+      success: true,
+      token,
+      user: mockUser,
     }
   }
 
-  const token = `mock-token-${Date.now()}`
-  setAuthToken(token)
+  try {
+    const res: any = await apiFetch<any>("/api/members/login", {
+      method: "POST",
+      body: JSON.stringify(request),
+    })
 
-  return {
-    success: true,
-    token,
-    user: mockUser,
+    const accessToken = res?.accessToken ?? res?.token ?? res?.data?.accessToken ?? res?.data?.token
+    if (accessToken) setAuthToken(accessToken)
+
+    const user: User | undefined = res?.user ?? res?.data?.user ?? res?.data ?? undefined
+
+    return {
+      success: Boolean(accessToken),
+      token: accessToken,
+      user: user
+        ? {
+            id: String((user as any).id ?? ""),
+            email: String((user as any).email ?? request.email ?? ""),
+            name: String((user as any).name ?? ""),
+            nickname: (user as any).nickname ?? undefined,
+            role: (user as any).role ?? "viewer",
+            createdAt: String((user as any).createdAt ?? ""),
+          }
+        : undefined,
+    }
+  } catch (e: any) {
+    return { success: false, error: e?.message ?? "로그인에 실패했습니다." }
   }
 }
 
 export async function signup(request: SignupRequest): Promise<AuthResponse> {
-  await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
+  if (DEMO_MODE) {
+    await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
 
-  if (!request.name || !request.email || !request.password) {
+    if (!request.name || !request.email || !request.password) {
+      return {
+        success: false,
+        error: "모든 필드를 입력해주세요.",
+      }
+    }
+
+    if (request.password.length < 8) {
+      return {
+        success: false,
+        error: "비밀번호는 8자 이상이어야 합니다.",
+      }
+    }
+
     return {
-      success: false,
-      error: "모든 필드를 입력해주세요.",
+      success: true,
+      user: {
+        ...mockUser,
+        id: `user-${Date.now()}`,
+        email: request.email,
+        name: request.name,
+      },
     }
   }
 
-  if (request.password.length < 8) {
-    return {
-      success: false,
-      error: "비밀번호는 8자 이상이어야 합니다.",
-    }
-  }
-
-  // Mock signup success - don't auto-login
-  return {
-    success: true,
-    user: {
-      ...mockUser,
-      id: `user-${Date.now()}`,
-      email: request.email,
-      name: request.name,
-    },
+  try {
+    await apiFetch<any>("/api/members/signup", {
+      method: "POST",
+      body: JSON.stringify(request),
+    })
+    return { success: true }
+  } catch (e: any) {
+    return { success: false, error: e?.message ?? "회원가입에 실패했습니다." }
   }
 }
 
 export async function logout(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 300))
+  if (DEMO_MODE) {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
   removeAuthToken()
 }
 
@@ -88,8 +133,24 @@ export async function getCurrentUser(): Promise<User | null> {
   const token = getAuthToken()
   if (!token) return null
 
-  await new Promise((resolve) => setTimeout(resolve, 200))
-  return mockUser
+  if (DEMO_MODE) {
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    return mockUser
+  }
+
+  try {
+    const res: any = await apiFetch<any>("/api/members/me")
+    return {
+      id: String(res?.id ?? ""),
+      email: String(res?.email ?? ""),
+      name: String(res?.name ?? ""),
+      nickname: res?.nickname ?? undefined,
+      role: res?.role ?? "viewer",
+      createdAt: String(res?.createdAt ?? ""),
+    }
+  } catch {
+    return null
+  }
 }
 
 export async function requestPasswordReset(email: string): Promise<AuthResponse> {
@@ -105,4 +166,33 @@ export async function requestPasswordReset(email: string): Promise<AuthResponse>
   return {
     success: true,
   }
+}
+
+// ============================================
+// Settings API
+// ============================================
+export async function updateMe(request: { name: string; nickname?: string }): Promise<User | null> {
+  const res: any = await apiFetch<any>("/api/members/me", {
+    method: "PATCH",
+    body: JSON.stringify(request),
+  })
+  return {
+    id: String(res?.id ?? ""),
+    email: String(res?.email ?? ""),
+    name: String(res?.name ?? ""),
+    nickname: res?.nickname ?? undefined,
+    role: res?.role ?? "viewer",
+    createdAt: String(res?.createdAt ?? ""),
+  }
+}
+
+export async function updatePassword(request: { currentPassword: string; newPassword: string }): Promise<void> {
+  await apiFetch<any>("/api/members/me/password", {
+    method: "PATCH",
+    body: JSON.stringify(request),
+  })
+}
+
+export async function deleteMe(): Promise<void> {
+  await apiFetch<any>("/api/members/me", { method: "DELETE" })
 }

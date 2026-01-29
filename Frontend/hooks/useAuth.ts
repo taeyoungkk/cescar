@@ -47,14 +47,19 @@ export function useAuth(): UseAuthReturn {
     try {
       const response = await authApi.login(request)
 
-      if (response.success && response.user) {
-        setUser(response.user)
+      if (response.success) {
+        if (response.user) {
+          setUser(response.user)
+        } else {
+          const currentUser = await authApi.getCurrentUser()
+          setUser(currentUser)
+        }
         router.push("/home")
         return true
-      } else {
-        setError(response.error || "로그인에 실패했습니다.")
-        return false
       }
+
+      setError(response.error || "로그인에 실패했습니다.")
+      return false
     } catch {
       setError("로그인 중 오류가 발생했습니다.")
       return false

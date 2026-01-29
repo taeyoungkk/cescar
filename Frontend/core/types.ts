@@ -5,6 +5,7 @@ export interface User {
   id: string
   email: string
   name: string
+  nickname?: string
   role: "admin" | "operator" | "viewer"
   createdAt: string
 }

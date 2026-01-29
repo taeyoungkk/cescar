@@ -462,7 +462,7 @@ function LiveCameraView({
       {isManual && (
         <div className="absolute bottom-16 right-4 z-30 rounded-lg border border-white/10 bg-black/60 p-1.5 backdrop-blur-sm">
           <div className="grid grid-cols-3 gap-2 place-items-center">
-            <div />
+            <div aria-hidden="true" />
             <Button
               variant="outline"
               size="icon"
@@ -549,8 +549,6 @@ function ControlPanel({
   onDriveStop,
   modeError,
 }: ControlPanelProps) {
-  const isManual = driveMode === "MANUAL"
-
   return (
     <Card className="bg-card border-border">
       <CardContent className="space-y-5">
@@ -581,11 +579,6 @@ function ControlPanel({
           </div>
           {modeError && <p className="text-xs text-red-400">{modeError}</p>}
         </div>
-
-        <>
-          <div className="h-px bg-border" />
-          <div className="min-h-[0px]" />
-        </>
       </CardContent>
     </Card>
   )

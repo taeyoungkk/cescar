@@ -1,6 +1,7 @@
 package com.ssafy.backend.domain.car.dao;
 
 import com.ssafy.backend.domain.car.domain.Car;
+import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -17,7 +18,8 @@ public interface CarRepository extends JpaRepository<Car, Long> {
     @Query("SELECT c FROM Car c WHERE c.owner.id = :ownerId")
     List<Car> findAllByOwnerId(@Param("ownerId") Long ownerId);
 
-    // deviceId로 차량 조회 (Jetson 인증용)
+    // deviceId로 차량 조회 (owner까지 함께 조회)
+    @EntityGraph(attributePaths = "owner")
     Optional<Car> findByDeviceId(String deviceId);
 
     // 소유자가 있는지 확인

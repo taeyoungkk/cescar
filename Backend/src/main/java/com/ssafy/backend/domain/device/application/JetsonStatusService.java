@@ -1,5 +1,7 @@
 package com.ssafy.backend.domain.device.application;
 
+import com.ssafy.backend.domain.car.dao.CarRepository;
+import com.ssafy.backend.domain.car.domain.Car;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
 import com.ssafy.backend.domain.notification.application.FcmService;
@@ -13,7 +15,7 @@ import org.springframework.messaging.Message;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
-import tools.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -28,6 +30,7 @@ public class JetsonStatusService {
     private final String EMQX_API_URL = "http://localhost:18083/api/v5/clients/";
     private final ObjectMapper objectMapper;
     private final FcmService fcmService;
+    private final CarRepository carRepository;
 
     @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleDeviceStatus(Message<byte[]> message) {
@@ -87,7 +90,13 @@ public class JetsonStatusService {
         String body = String.format("%s 물체가 %.1f%% 확률로 감지되었습니다.",
                 detect.getObject_type(), detect.getConfidence());
 
-        fcmService.broadcastMessage(title, body);
+        Car car = carRepository.findByDeviceId(robotId).orElse(null);
+        if (car == null || car.getOwner() == null) {
+            System.out.println("⚠️ 등록된 소유자가 없어 알림을 보내지 않았습니다. deviceId=" + robotId);
+            return;
+        }
+
+        fcmService.sendToMember(car.getOwner().getId(), title, body);
         System.out.println("🚀 [FCM Alert Sent] " + title);
     }
 

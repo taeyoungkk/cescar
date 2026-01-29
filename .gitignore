@@ -747,3 +747,4 @@ AMENT_IGNORE
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,ros,ros2,opencv,reactnative,cmake,intellij,flask,react
+/data

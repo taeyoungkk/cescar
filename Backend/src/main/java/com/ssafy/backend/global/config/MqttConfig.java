@@ -60,6 +60,13 @@ public class MqttConfig {
         return new PublishSubscribeChannel();
     }
 
+    private boolean isDetectionTopic(String topic) {
+        if (topic == null) {
+            return false;
+        }
+        return topic.endsWith("/detections") || topic.endsWith("detections");
+    }
+
     @Bean
     public MessageChannel mqttOutboundChannel() {
         return new DirectChannel();
@@ -98,8 +105,8 @@ public class MqttConfig {
                     String payloadString = new String((byte[]) springMessage.getPayload(), StandardCharsets.UTF_8);
 
                     // [New] 탐지 데이터(detections)인 경우 웹소켓으로 전송 (기능 추가)
-                    if (topic.endsWith("detections")) {
-                        processDetectionMessage(payloadString);
+                    if (isDetectionTopic(topic)) {
+                        processDetectionMessage(payloadString, topic);
                     }
 
                     // 2. 헤더 정보 가져오기
@@ -137,17 +144,33 @@ public class MqttConfig {
         // application.properties에 없어도 동작하도록 강제 구독
         mqttClient.subscribe("robot/+/detections", 0);
 
-        log.info("🔥 [MQTT] Client Started. ID: {}, Subscribed to: {}, robot/+/detections", clientId, inboundTopic);
+        log.info("🔥 [MQTT] Client Started. ID: {}, Subscribed to: {}, robot/+/detections",
+                clientId, inboundTopic);
     }
 
     // [New] JSON 파싱 및 웹소켓 전송 헬퍼 메서드
-    private void processDetectionMessage(String payload) {
+    private void processDetectionMessage(String payload, String topic) {
         try {
             JsonNode root = objectMapper.readTree(payload);
             String roomId = root.path("roomId").asText(null);
 
+            if (roomId == null || roomId.isBlank()) {
+                roomId = root.path("robotId").asText(null);
+            }
+            if (roomId == null || roomId.isBlank()) {
+                roomId = root.path("robot_id").asText(null);
+            }
+            if ((roomId == null || roomId.isBlank()) && topic != null) {
+                String[] parts = topic.split("/");
+                if (parts.length >= 2) {
+                    roomId = parts[1];
+                }
+            }
+
             if (roomId != null && !roomId.isBlank()) {
                 detectionWsBroadcaster.broadcastToRoom(roomId, payload);
+            } else {
+                log.warn("[MQTT][DETECTIONS] roomId missing. topic={}, payload={}", topic, payload);
             }
         } catch (Exception e) {
             log.error("Failed to parse detection payload for WS broadcast", e);

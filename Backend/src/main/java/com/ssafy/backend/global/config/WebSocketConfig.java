@@ -22,9 +22,9 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(webrtcHandler, "/ws/webrtc")
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns("*");
 
         registry.addHandler(detectionHandler, "/ws/detections")
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns("*");
     }
 }

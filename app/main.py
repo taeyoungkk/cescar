@@ -1,4 +1,4 @@
-
+import platform
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
@@ -8,8 +8,16 @@ import json
 import logging
 from app.services.mqtt_service import mqtt_service
 from app.services.monitoring_service import monitoring_service
-from app.services.webrtc_service import webrtc_service
+from app.services.detection_service import detection_service
 from app.core.config import settings
+
+# WebRTC 서비스는 Linux(Jetson) 환경에서만 로드 (gi 모듈 의존성 때문)
+webrtc_service = None
+if platform.system() == 'Linux':
+    try:
+        from app.services.webrtc_service import webrtc_service
+    except ImportError:
+        logging.warning("Linux 환경이지만 gi 또는 관련 모듈을 찾을 수 없어 WebRTC 서비스를 로드하지 못했습니다.")
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:     %(message)s')
@@ -68,31 +76,59 @@ async def system_status_publisher():
 
         await asyncio.sleep(2)  # 2초마다 변화 체크 (발행은 위 조건에 해당할 때만)
 
+async def detection_publisher():
+    """
+    주기적으로 벌레 탐지 시뮬레이션을 수행하고 MQTT로 발행합니다.
+    실제 AI 기능 탑재 시 카메라 프레임을 지속적으로 읽는 루프로 대체됩니다.
+    """
+    print("[*] Bug Detection Monitor Started")
+    detection_service.start_monitoring()
+    
+    while True:
+        try:
+            # 10 FPS로 카메라 프레임 처리 및 탐지 수행
+            detection_service.process_frame()
+        except Exception as e:
+            logger.error(f"Error in detection monitor: {e}")
+        
+        await asyncio.sleep(0.1)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    
     # Startup: MQTT 연결
     print("\n[*] Starting MQTT Service...")
     mqtt_service.connect()
     
     # Startup: WebRTC 송출 시작
-    print("[*] Starting WebRTC Service...")
-    webrtc_service.start(settings.ROBOT_ID)
+    if webrtc_service:
+        print("[*] Starting WebRTC Service...")
+        webrtc_service.start(settings.ROBOT_ID)
+    else:
+        print(f"[*] {platform.system()} 환경이거나 WebRTC 서비스를 로드할 수 없어 건너뜁니다.")
     
     # 시스템 상태 발행 백그라운드 태스크 시작
     status_task = asyncio.create_task(system_status_publisher())
+    # 벌레 탐지 시뮬레이션 태스크 시작
+    detection_task = asyncio.create_task(detection_publisher())
     
     yield
     
     # Shutdown: 태스크 취소 및 MQTT 연결 해제
     status_task.cancel()
-    try:
-        await status_task
-    except asyncio.CancelledError:
-        print("[*] System Status Publisher Task Stopped")
+    detection_task.cancel()
+    detection_service.stop_monitoring()
     
+    try:
+        await asyncio.gather(status_task, detection_task, return_exceptions=True)
+    except Exception as e:
+        print(f"[*] Error during shutdown: {e}")
+    
+    print("[*] Background Tasks Stopped")
     # Shutdown: WebRTC 중지
-    print("[*] Stopping WebRTC Service...")
-    webrtc_service.stop()
+    if webrtc_service:
+        print("[*] Stopping WebRTC Service...")
+        webrtc_service.stop()
     
     mqtt_service.disconnect()
 

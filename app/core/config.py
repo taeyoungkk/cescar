@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     def TOPIC_STATUS(self) -> str:
         return f"robot/{self.ROBOT_ID}/status"
 
+    @property
+    def TOPIC_DETECTION(self) -> str:
+        return f"robot/{self.ROBOT_ID}/detection"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

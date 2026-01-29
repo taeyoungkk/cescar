@@ -84,7 +84,7 @@ class DetectionService:
             logger.info(f"📸 [SCREENSHOT] Saved: {screenshot_path}")
             
             # 녹화 시작 의도적 blocking 시작 (10초)
-            video_url = self._start_recording(frame, timestamp)
+            video_url = self._start_recording(timestamp)
             
             # 클라우드 업로드
             screenshot_url = storage_service.upload_file(screenshot_path)
@@ -105,55 +105,44 @@ class DetectionService:
 
         return None
 
-    def _start_recording(self, frame, timestamp):
-        actual_h, actual_w = frame.shape[:2]
-    
-    # 2. 현재 설정되어 있는 VideoWriter의 크기 확인
-        logger.info(f"📊 [SIZE CHECK] 실제 프레임: {actual_w}x{actual_h} | 설정된 크기: {self.frame_width}x{self.frame_height}")
-
-        # 만약 두 값이 다르다면 강제로 맞춰줘야 합니다.
-        if actual_w != self.frame_width or actual_h != self.frame_height:
-            logger.warning(f"⚠️ 크기 불일치 발생! {actual_w}x{actual_h} -> {self.frame_width}x{self.frame_height}로 리사이즈합니다.")
-            
-        """녹화 시작 및 디버깅"""
+    def _start_recording(self, timestamp): # frame 인자 대신 함수 내에서 읽기
+        """녹화 시작: 실제 카메라 프레임을 FPS에 맞춰 10초간 기록"""
         file_path = os.path.join(self.video_dir, f"record_{timestamp}.mp4")
         self.current_video_path = file_path
         
-        # [디버깅] 현재 프레임 정보 확인
-        h, w = frame.shape[:2]
-        logger.info(f"🔍 디버깅: 입력 프레임 크기 ({w}x{h}), 설정된 크기 ({self.frame_width}x{self.frame_height})")
+        fps = 20.0
+        frame_duration = 1.0 / fps # 프레임당 필요한 시간 (0.05초)
         
-        # FFMPEG는 GStreamer 파이프라인 문자열을 이해 못하므로 file_path만 넣어야 합니다.
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
-
-        # [디버깅] 최종 Writer 상태 확인
-        if not self.writer.isOpened():
-            logger.error(f"❌ 최종 실패: VideoWriter를 초기화할 수 없습니다. 경로: {file_path}")
-            return None
-
-        logger.info(f"🎥 [RECORDING] 시작됨: {file_path}")
+        self.writer = cv2.VideoWriter(file_path, fourcc, fps, (self.frame_width, self.frame_height))
+        logger.info(f"🎥 [RECORDING] 5초간 시작됨: {file_path}")
         
-        start_time = time.time()
-        frames_written = 0
-
+        frames_to_record = int(fps * 5) # 5초 동안 필요한 총 프레임 수 (100개)
         try:
-            while time.time() - start_time < 10:
+            for _ in range(frames_to_record):
+                loop_start = time.time()
+                
+                # 1. 카메라에서 새로운 프레임 읽기 (실시간 기록)
+                ret, frame = self.cap.read()
+                if not ret:
+                    break
+                
+                # 2. 크기 맞추기
                 if frame.shape[1] != self.frame_width or frame.shape[0] != self.frame_height:
                     frame = cv2.resize(frame, (self.frame_width, self.frame_height))
-
+                # 3. 프레임 쓰기
                 self.writer.write(frame)
-                frames_written += 1
-
-            logger.info(f"✅ 녹화 종료. 총 {frames_written} 프레임 기록됨.")
+                
+                # 4. FPS 유지를 위한 정밀한 지연 시간 계산
+                elapsed = time.time() - loop_start
+                wait_time = max(0, frame_duration - elapsed)
+                time.sleep(wait_time)
+            logger.info(f"✅ 5초 녹화 완료.")
         
         except Exception as e:
-            logger.error(f"🔥 녹화 루프 중 에러 발생: {e}")
-        
+            logger.error(f"🔥 녹화 중 에러: {e}")
         finally:
-            # 반드시 정지 로직 호출
             video_url = self._stop_recording()
-
         return video_url
 
 

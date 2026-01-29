@@ -5,6 +5,11 @@ class Settings(BaseSettings):
     MQTT_PORT: int = 1883
     ROBOT_ID: str = "robot_default"
     
+    # GCS Settings
+    GCS_BUCKET_NAME: str = ""
+    GOOGLE_CLOUD_PROJECT: str = ""
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
+    
     # WebRTC 시그널링 서버 URL
     SIGNALING_WS_URL: str = "ws://localhost:8080/ws/webrtc"
     

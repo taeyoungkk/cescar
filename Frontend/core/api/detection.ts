@@ -66,6 +66,7 @@ function mapToUiDetection(raw: DetectionListItemResponse, opts?: { robotId?: str
     date,
     time,
     snapshotUrl: raw.imageUrl ?? undefined,
+    videoUrl: (raw as any).videoUrl ?? undefined,
     notes: "",
   }
 }
@@ -99,48 +100,42 @@ export async function getRecentDetections(carId: number, limit: number = 5): Pro
   }
 }
 
-export async function getDetectionHistory(filters?: DetectionHistoryFilters): Promise<ApiResponse<Detection[]>> {
+export async function getDetectionHistory(
+  carId: number | null,
+  filters?: DetectionHistoryFilters
+): Promise<ApiResponse<Detection[]>> {
   try {
-    const now = new Date()
-    const endDate = filters?.dateTo ?? now.toISOString().slice(0, 10)
-    const startDate =
-      filters?.dateFrom ??
-      (() => {
-        const d = new Date(now)
-        d.setDate(d.getDate() - 7)
-        return d.toISOString().slice(0, 10)
-      })()
+    if (!carId) return ok([])
 
-    const params = new URLSearchParams()
-    params.set("startDate", toIsoStart(startDate))
-    params.set("endDate", toIsoEnd(endDate))
+    const logs = await apiFetch<SpringPage<any>>(`/api/cars/${carId}/logs?page=0&size=1&sort=startAt,desc`)
+    const latestLog = logs.content?.[0]
+    if (!latestLog?.id) return ok([])
 
-    // pageable 지원 확실할 때만 유지 (지원하면 정렬/개수 체감이 좋아짐)
-    params.set("page", "0")
-    params.set("size", "50")
-    params.set("sort", "createdAt,desc")
+    const page = await apiFetch<SpringPage<DetectionListItemResponse>>(
+      `/api/logs/${latestLog.id}/detections?page=0&size=50&sort=createdAt,desc`
+    )
 
-    const INSECT_LABELS = new Set(["cockroach","ant","fly","mosquito","spider"])
-
-    if (filters?.type && filters.type !== "all") {
-      if (INSECT_LABELS.has(filters.type)) {
-        params.set("label", filters.type)
-      } else {
-        // unknown 같은 건 label로 보내지 말고 전체 검색
-        params.delete("label")
-      }
-    }
-
-
-    const page = await apiFetch<SpringPage<DetectionListItemResponse>>(`/api/detections/search?${params.toString()}`)
-    let items = page.content.map((d) => mapToUiDetection(d))
+    let items = page.content.map((d) => mapToUiDetection(d, { robotId: `car-${carId}` }))
 
     if (filters?.searchId) {
       const q = filters.searchId.toLowerCase()
       items = items.filter((d) => d.id.toLowerCase().includes(q))
     }
 
-    // status는 서버 미지원이라 필터링하지 않음 (UI에서 disabled 권장)
+    if (filters?.type && filters.type !== "all") {
+      items = items.filter((d) => d.type === filters.type)
+    }
+
+    if (filters?.dateFrom) {
+      const from = new Date(toIsoStart(filters.dateFrom))
+      items = items.filter((d) => new Date(d.timestamp) >= from)
+    }
+    if (filters?.dateTo) {
+      const to = new Date(toIsoEnd(filters.dateTo))
+      items = items.filter((d) => new Date(d.timestamp) <= to)
+    }
+
+    // status는 서버 미지원이라 필터링하지 않음
     return ok(items)
   } catch (e: any) {
     return fail(e?.message ?? "탐지 기록 조회 실패")

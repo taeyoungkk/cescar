@@ -36,7 +36,7 @@ function getInitialFilters(): DetectionHistoryFilters {
   }
 }
 
-export function useDetectionHistory(): UseDetectionHistoryReturn {
+export function useDetectionHistory(carId: number | null): UseDetectionHistoryReturn {
   const [detections, setDetections] = useState<Detection[]>([])
   const [selectedDetection, setSelectedDetection] = useState<Detection | null>(null)
   const [filters, setFiltersState] = useState<DetectionHistoryFilters>(() => getInitialFilters())
@@ -79,9 +79,15 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
   }, [detections])
 
   const fetchData = useCallback(async () => {
+    if (!carId) {
+      setDetections([])
+      setIsLoading(false)
+      return
+    }
+
     setIsLoading(true)
     try {
-      const historyResponse = await detectionApi.getDetectionHistory(filters)
+      const historyResponse = await detectionApi.getDetectionHistory(carId, filters)
       setDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
       setError(null)
     } catch {
@@ -89,7 +95,7 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
     } finally {
       setIsLoading(false)
     }
-  }, [filters])
+  }, [carId, filters])
 
   useEffect(() => {
     fetchData()

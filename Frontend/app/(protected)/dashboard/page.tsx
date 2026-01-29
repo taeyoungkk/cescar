@@ -15,6 +15,7 @@ import {
   BarChart3,
   X,
   Camera,
+  Play,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -25,7 +26,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet"
 import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useDetectionHistory } from "@/hooks/useDetectionHistory"
+import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import type { Detection, DetectionStats, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
 
 import { DEMO_MODE } from "@/core/demo/config"
@@ -221,6 +224,7 @@ interface DetailPanelProps {
 
 function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, onSaveNotes, }: DetailPanelProps) {
   const [notes, setNotes] = useState(record?.notes || "")
+  const [isVideoOpen, setIsVideoOpen] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
 
   React.useEffect(() => {
@@ -238,18 +242,42 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
 
   if (!record) return null
   console.log("snapshotUrl:", record.snapshotUrl)
+  const videoUrl = record.videoUrl ? `${BASE_URL}${record.videoUrl}` : null
 
   return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <SheetContent side="right" className="w-full sm:max-w-md bg-card border-border overflow-y-auto">
-        <SheetHeader className="border-b border-border pb-4">
-          <SheetTitle className="text-foreground">탐지 상세 정보</SheetTitle>
-          <SheetDescription className="text-muted-foreground">
-            {record.id} - {record.date} {record.time}
-          </SheetDescription>
+    <Sheet
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) {
+          setIsVideoOpen(false)
+          onClose()
+        }
+      }}
+    >
+      <SheetContent side="right" className="w-full sm:max-w-lg bg-card border-border overflow-y-auto">
+        <SheetHeader className="border-b border-border px-5 pt-5 pb-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <SheetTitle className="text-foreground">탐지 상세 정보</SheetTitle>
+              <SheetDescription className="text-muted-foreground">탐지 ID · {record.id}</SheetDescription>
+            </div>
+            <StatusBadge status={record.status} />
+          </div>
+          <div className="grid grid-cols-2 gap-3 pt-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 시간</p>
+              <p className="text-sm font-medium text-foreground">
+                {record.date} {record.time}
+              </p>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">로봇 ID</p>
+              <p className="text-sm font-medium text-foreground">{record.robotId}</p>
+            </div>
+          </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto py-4 space-y-6">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
             {record.snapshotUrl ? (
               <img
@@ -265,25 +293,22 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
                 </div>
               </div>
             )}
+          </div>
 
-            <div className="absolute top-2 left-2">
-              <StatusBadge status={record.status} />
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">스냅샷 기반 상세 확인</p>
+              <p className="text-xs text-muted-foreground/70">탐지 전후 영상으로 맥락을 확인하세요.</p>
             </div>
+            <Button variant="outline" size="sm" onClick={() => setIsVideoOpen(true)}>
+              <Play className="h-4 w-4 mr-1" />
+              영상 확인
+            </Button>
           </div>
 
           <div className="space-y-4">
-            <h4 className="text-sm font-medium text-foreground">상세 정보</h4>
+            <h4 className="text-sm font-medium text-foreground">탐지 정보</h4>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 시간</p>
-                <p className="text-sm font-medium text-foreground">
-                  {record.date} {record.time}
-                </p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">로봇 ID</p>
-                <p className="text-sm font-medium text-foreground">{record.robotId}</p>
-              </div>
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 유형</p>
                 <p className="text-sm font-medium text-foreground">{typeLabels[record.type] || record.type}</p>
@@ -306,7 +331,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
           </div>
         </div>
 
-        <SheetFooter className="border-t border-border pt-4 gap-2">
+        <SheetFooter className="border-t border-border px-5 pb-5 pt-4 gap-2">
           {onSaveNotes && (
             <Button
               variant="outline"
@@ -331,6 +356,31 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
           )}
         </SheetFooter>
       </SheetContent>
+
+      <Dialog open={isVideoOpen} onOpenChange={setIsVideoOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>탐지 영상</DialogTitle>
+            <DialogDescription>
+              {record.date} {record.time} · {record.robotId}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
+            {videoUrl ? (
+              <video className="absolute inset-0 w-full h-full" controls>
+                <source src={videoUrl} />
+              </video>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center space-y-2">
+                  <Play className="h-10 w-10 text-muted-foreground/50 mx-auto" />
+                  <p className="text-sm text-muted-foreground">영상 준비 중</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </Sheet>
   )
 }
@@ -359,67 +409,71 @@ function FiltersBar({ filters, onFiltersChange, onClearFilters, totalCount }: Fi
     filters.dateFrom || filters.dateTo || (filters.type && filters.type !== "all") || (filters.status && filters.status !== "all") || filters.searchId
 
   return (
-    <div className="flex flex-wrap items-center gap-3 mb-4 pb-4 border-b border-border">
-      <div className="relative flex-1 min-w-[200px] max-w-xs">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="ID로 검색..."
-          value={filters.searchId || ""}
-          onChange={(e) => onFiltersChange({ ...filters, searchId: e.target.value })}
-          className="pl-9 bg-input border-border"
+    <div className="mb-4 pb-4 border-b border-border space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[220px] max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="ID로 검색..."
+            value={filters.searchId || ""}
+            onChange={(e) => onFiltersChange({ ...filters, searchId: e.target.value })}
+            className="pl-9 bg-input border-border"
+          />
+        </div>
+
+        <DateRangePicker
+          startDate={filters.dateFrom || ""}
+          endDate={filters.dateTo || ""}
+          onStartDateChange={(date) => onFiltersChange({ ...filters, dateFrom: date })}
+          onEndDateChange={(date) => onFiltersChange({ ...filters, dateTo: date })}
         />
       </div>
 
-      <DateRangePicker
-        startDate={filters.dateFrom || ""}
-        endDate={filters.dateTo || ""}
-        onStartDateChange={(date) => onFiltersChange({ ...filters, dateFrom: date })}
-        onEndDateChange={(date) => onFiltersChange({ ...filters, dateTo: date })}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <Select
+          value={filters.type || "all"}
+          onValueChange={(value) => onFiltersChange({ ...filters, type: value as DetectionType | "all" })}
+        >
+          <SelectTrigger className="w-[140px] bg-input border-border">
+            <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="유형" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">모든 유형</SelectItem>
+            <SelectItem value="cockroach">바퀴벌레</SelectItem>
+            <SelectItem value="ant">개미</SelectItem>
+            <SelectItem value="fly">파리</SelectItem>
+            <SelectItem value="mosquito">모기</SelectItem>
+            <SelectItem value="spider">거미</SelectItem>
+            <SelectItem value="unknown">미확인</SelectItem>
+          </SelectContent>
+        </Select>
 
-      <Select
-        value={filters.type || "all"}
-        onValueChange={(value) => onFiltersChange({ ...filters, type: value as DetectionType | "all" })}
-      >
-        <SelectTrigger className="w-[140px] bg-input border-border">
-          <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
-          <SelectValue placeholder="유형" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">모든 유형</SelectItem>
-          <SelectItem value="cockroach">바퀴벌레</SelectItem>
-          <SelectItem value="ant">개미</SelectItem>
-          <SelectItem value="fly">파리</SelectItem>
-          <SelectItem value="mosquito">모기</SelectItem>
-          <SelectItem value="spider">거미</SelectItem>
-          <SelectItem value="unknown">미확인</SelectItem>
-        </SelectContent>
-      </Select>
+        <Select
+          value={filters.status || "all"}
+          onValueChange={(value) => onFiltersChange({ ...filters, status: value as DetectionStatus | "all" })}
+        >
+          <SelectTrigger className="w-[140px] bg-input border-border">
+            <SelectValue placeholder="상태" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">모든 상태</SelectItem>
+            <SelectItem value="detected">탐지됨</SelectItem>
+            <SelectItem value="confirmed">확인됨</SelectItem>
+            <SelectItem value="false_alarm">오탐</SelectItem>
+            <SelectItem value="resolved">처리됨</SelectItem>
+          </SelectContent>
+        </Select>
 
-      <Select
-        value={filters.status || "all"}
-        onValueChange={(value) => onFiltersChange({ ...filters, status: value as DetectionStatus | "all" })}
-      >
-        <SelectTrigger className="w-[140px] bg-input border-border">
-          <SelectValue placeholder="상태" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">모든 상태</SelectItem>
-          <SelectItem value="detected">탐지됨</SelectItem>
-          <SelectItem value="confirmed">확인됨</SelectItem>
-          <SelectItem value="false_alarm">오탐</SelectItem>
-          <SelectItem value="resolved">처리됨</SelectItem>
-        </SelectContent>
-      </Select>
+        {hasActiveFilters && (
+          <Button variant="ghost" size="sm" onClick={onClearFilters} className="text-xs h-8 px-2">
+            <X className="h-3 w-3 mr-1" />
+            필터 초기화
+          </Button>
+        )}
 
-      {hasActiveFilters && (
-        <Button variant="ghost" size="sm" onClick={onClearFilters} className="text-xs h-8 px-2">
-          <X className="h-3 w-3 mr-1" />
-          필터 초기화
-        </Button>
-      )}
-
-      <span className="ml-auto text-sm text-muted-foreground">총 {totalCount}건</span>
+        <span className="ml-auto text-sm text-muted-foreground">총 {totalCount}건</span>
+      </div>
     </div>
   )
 }
@@ -609,6 +663,7 @@ function DashboardContent() {
    * REAL MODE
    * ============================
    */
+  const { carId } = usePrimaryCarId()
   const {
     detections,
     stats,
@@ -620,7 +675,7 @@ function DashboardContent() {
     selectDetection,
     updateStatus,
     updateNotes,
-  } = useDetectionHistory()
+  } = useDetectionHistory(carId)
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
 

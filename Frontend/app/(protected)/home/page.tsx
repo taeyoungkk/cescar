@@ -32,6 +32,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
+import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useAlerts } from "@/hooks/useAlerts"
 import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
 
@@ -690,8 +691,8 @@ export default function HomePage() {
   const isDemo = DEMO_MODE
 
   const demoSummary = useHomeDemoSummary()
-  const carId = 1
-  const carStatus = useCarStatus(carId, { enabled: !isDemo, intervalMs: 1000 })
+  const { carId } = usePrimaryCarId()
+  const carStatus = useCarStatus(carId ?? 0, { enabled: !isDemo && !!carId, intervalMs: 1000 })
 
   const realDetections = useRecentDetections(carId, 5)
   const realAlerts = useAlerts()

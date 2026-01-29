@@ -1,7 +1,7 @@
 import type { AuthResponse, LoginRequest, SignupRequest, User } from "../types"
 import { mockUser } from "../mockData"
 
-const AUTH_TOKEN_KEY = "cescar_access_token"
+const AUTH_TOKEN_KEY = "accessToken"
 const MOCK_DELAY = 800
 
 // ============================================

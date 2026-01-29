@@ -73,6 +73,7 @@ export interface Detection {
   date: string
   time: string
   snapshotUrl?: string
+  videoUrl?: string | null
   notes: string
 }
 

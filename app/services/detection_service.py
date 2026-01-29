@@ -18,7 +18,8 @@ class DetectionService:
         self.is_monitoring = False
         self.is_recording = False
         self.record_start_time = None
-        
+        self.current_video_path = None
+
         # OpenCV 관련
         self.cap = None
         self.writer = None
@@ -68,23 +69,19 @@ class DetectionService:
             logger.warning("⚠️ 프레임을 읽어오지 못했습니다.")
             return None
 
-        # 녹화 중이면 프레임 저장
-        if self.is_recording and self.writer:
-            self.writer.write(frame)
-
-        # 일정 확률로 벌레 탐지 시뮬레이션
+        # 2. 녹화 중이 아닐 때만 탐지 시뮬레이션 수행
         if random.random() < self.detection_probability:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            
-            # 1. 실제 프레임으로 스크린샷 저장
+
+            # 스크린샷 저장
             screenshot_path = os.path.join(self.screenshot_dir, f"detect_{timestamp}.jpg")
             cv2.imwrite(screenshot_path, frame)
             logger.info(f"📸 [SCREENSHOT] Saved: {screenshot_path}")
             
-            # 2. 녹화 시작
-            self._start_recording(timestamp)
+            # 녹화 시작 의도적 blocking 시작 (10초)
+            video_url = self._start_recording(frame, timestamp)
             
-            # 3. 스크린샷 클라우드 업로드
+            # 클라우드 업로드
             screenshot_url = storage_service.upload_file(screenshot_path)
 
             detection_data = {
@@ -94,53 +91,69 @@ class DetectionService:
                 "status": "detected",
                 "robot_id": settings.ROBOT_ID,
                 "screenshot_url": screenshot_url,
+                "video_url": video_url,
                 "note": "Real-time CV2 detection simulation"
             }
             
             self._publish_detection(detection_data)
             return detection_data
 
-        # 녹화 중 10초가 지나면 자동 정지
-        if self.is_recording and time.time() - self.record_start_time > 10:
-            self._stop_recording()
-            
         return None
 
-    def _start_recording(self, timestamp):
+    def _start_recording(self, frame, timestamp):
         """녹화 시작"""
-        if self.is_recording:
-            return
-            
         file_path = os.path.join(self.video_dir, f"record_{timestamp}.mp4")
-        
-        # VideoWriter 설정 (H.264 호환을 위해 MP4V 코덱 사용)
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
-        
-        self.is_recording = True
-        self.record_start_time = time.time()
         self.current_video_path = file_path
         
+        # VideoWriter 설정 (브라우저 호환성을 위해 H.264 계열 순차적 시도)
+        success = False
+        for codec in ['avc1', 'H264', 'X264']:
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
+            if self.writer.isOpened():
+                logger.info(f"✅ VideoWriter initialized with codec: {codec}")
+                success = True
+                break
+        
+        if not success:
+            logger.warning("⚠️ H.264 코덱을 사용할 수 없어 mp4v로 대체합니다. (브라우저 재생이 안 될 수 있음)")
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
+        start_time = time.time()
         logger.info(f"🎥 [RECORDING] Started: {file_path}")
+
+        while time.time() - start_time < 10:
+            ret, frame = self.cap.read()
+            if not ret:
+                break
+            self.writer.write(frame)
+        video_url = self._stop_recording()
+
+        return video_url
 
     def _stop_recording(self):
         """녹화 중지 및 파일 업로드"""
-        if not self.is_recording:
-            return
-            
-        self.is_recording = False
         if self.writer:
             self.writer.release()
             self.writer = None
-            
+        
+        # 파일이 물리적으로 디스크에 모두 쓰여질 때까지 아주 짧게 대기
+        time.sleep(1.0)
+        
+        video_url = None
+
         logger.info(f"🛑 [RECORDING] Stopped: {self.current_video_path}")
-        
+        print("current_video_path", self.current_video_path)
         # 녹화 본 클라우드 업로드
-        video_url = storage_service.upload_file(self.current_video_path)
-        if video_url:
-            logger.info(f"✅ [CLOUD] Video upload confirmed: {video_url}")
-        
+        if self.current_video_path and os.path.exists(self.current_video_path) and os.path.getsize(self.current_video_path) > 0:
+            video_url = storage_service.upload_file(self.current_video_path)
+            if video_url:
+                logger.info(f"✅ [CLOUD] Video upload confirmed: {video_url}")
+        else:
+            logger.error(f"❌ Video file is missing or empty: {self.current_video_path or 'Unknown path'}")
+
         self.current_video_path = None
+        return video_url
 
     def _publish_detection(self, data):
         """탐지 결과를 MQTT로 발행"""

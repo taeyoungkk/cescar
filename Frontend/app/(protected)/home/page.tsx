@@ -693,7 +693,7 @@ export default function HomePage() {
   const carId = 1
   const carStatus = useCarStatus(carId, { enabled: !isDemo, intervalMs: 1000 })
 
-  const realDetections = useRecentDetections()
+  const realDetections = useRecentDetections(carId, 5)
   const realAlerts = useAlerts()
   const mapStore = useMapStore()
   const { isOnline: networkOnline } = useNetworkStatus()
@@ -727,7 +727,7 @@ export default function HomePage() {
       type: e.type as Detection["type"],
       time: e.time,
       status: "detected",
-      date: new Date().toLocaleDateString("ko-KR"),
+      date: new Date().toISOString().slice(0, 10),
       robotId: "CESCAR-01",
       confidence: Math.round(70 + Math.random() * 25),
       notes: "",

@@ -60,7 +60,7 @@ export interface CarDetail {
 // ============================================
 // Detection Types
 // ============================================
-export type DetectionType = "cockroach" | "ant" | "fly" | "mosquito" | "spider" | "unknown"
+export type DetectionType = "cockroach" | "ant" | "fly" | "mosquito" | "spider" | "person" | "unknown"
 export type DetectionStatus = "detected" | "confirmed" | "false_alarm" | "resolved" | "pending" | "dismissed"
 
 export interface Detection {

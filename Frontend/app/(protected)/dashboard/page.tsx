@@ -157,15 +157,16 @@ interface ConfidenceBadgeProps {
 }
 
 function ConfidenceBadge({ confidence }: ConfidenceBadgeProps) {
-  let colorClass = "text-emerald-400"
-  if (confidence < 60) {
-    colorClass = "text-red-400"
-  } else if (confidence < 80) {
-    colorClass = "text-amber-400"
-  }
+  // backend: 0~1, UI: 0~100
+  const pct = confidence <= 1 ? confidence * 100 : confidence
 
-  return <span className={`font-mono font-medium ${colorClass}`}>{confidence.toFixed(1)}%</span>
+  let colorClass = "text-emerald-400"
+  if (pct < 60) colorClass = "text-red-400"
+  else if (pct < 80) colorClass = "text-amber-400"
+
+  return <span className={`font-mono font-medium ${colorClass}`}>{pct.toFixed(1)}%</span>
 }
+
 
 interface DateRangePickerProps {
   startDate: string
@@ -215,10 +216,16 @@ interface DetailPanelProps {
   onClose: () => void
   onMarkFalseAlarm: (id: string) => void
   onMarkResolved: (id: string) => void
+  onSaveNotes?: (id: string, notes: string) => void
 }
 
-function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved }: DetailPanelProps) {
+function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, onSaveNotes, }: DetailPanelProps) {
   const [notes, setNotes] = useState(record?.notes || "")
+  const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+
+  React.useEffect(() => {
+    setNotes(record?.notes || "")
+  }, [record?.id])
 
   const typeLabels: Record<string, string> = {
     cockroach: "바퀴벌레",
@@ -230,9 +237,10 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved }
   }
 
   if (!record) return null
+  console.log("snapshotUrl:", record.snapshotUrl)
 
   return (
-    <Sheet open={open} onOpenChange={onClose}>
+    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
       <SheetContent side="right" className="w-full sm:max-w-md bg-card border-border overflow-y-auto">
         <SheetHeader className="border-b border-border pb-4">
           <SheetTitle className="text-foreground">탐지 상세 정보</SheetTitle>
@@ -243,12 +251,21 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved }
 
         <div className="flex-1 overflow-y-auto py-4 space-y-6">
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center space-y-2">
-                <Camera className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-                <p className="text-sm text-muted-foreground">탐지 순간 스냅샷</p>
+            {record.snapshotUrl ? (
+              <img
+                src={`${BASE_URL}${record.snapshotUrl}`}
+                alt="snapshot"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="text-center space-y-2">
+                  <Camera className="h-10 w-10 text-muted-foreground/50 mx-auto" />
+                  <p className="text-sm text-muted-foreground">탐지 순간 스냅샷</p>
+                </div>
               </div>
-            </div>
+            )}
+
             <div className="absolute top-2 left-2">
               <StatusBadge status={record.status} />
             </div>
@@ -290,6 +307,16 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved }
         </div>
 
         <SheetFooter className="border-t border-border pt-4 gap-2">
+          {onSaveNotes && (
+            <Button
+              variant="outline"
+              className="flex-1 bg-transparent"
+              onClick={() => onSaveNotes(record.id, notes)}
+            >
+              저장
+            </Button>
+          )}
+
           {record.status !== "false_alarm" && (
             <Button variant="outline" className="flex-1 bg-transparent" onClick={() => onMarkFalseAlarm(record.id)}>
               <XCircle className="h-4 w-4 mr-2" />
@@ -504,7 +531,7 @@ function DashboardContent() {
       type: e.type as DetectionType,
       confidence: Math.round(70 + Math.random() * 25),
       status: "detected",
-      date: new Date().toLocaleDateString("ko-KR"),
+      date: new Date().toISOString().slice(0, 10),
       time: e.time,
       notes: "",
     }))
@@ -570,6 +597,7 @@ function DashboardContent() {
             onClose={() => setIsDetailOpen(false)}
             onMarkFalseAlarm={() => setIsDetailOpen(false)}
             onMarkResolved={() => setIsDetailOpen(false)}
+            onSaveNotes={() => {}}
           />
         </div>
       </div>
@@ -578,7 +606,7 @@ function DashboardContent() {
 
   /**
    * ============================
-   * REAL MODE (기존 로직 유지)
+   * REAL MODE
    * ============================
    */
   const {
@@ -591,6 +619,7 @@ function DashboardContent() {
     clearFilters,
     selectDetection,
     updateStatus,
+    updateNotes,
   } = useDetectionHistory()
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
@@ -640,6 +669,9 @@ function DashboardContent() {
           onMarkResolved={async (id) => {
             await updateStatus(id, "resolved")
             setIsDetailOpen(false)
+          }}
+          onSaveNotes={async (id, notes) => {
+            await updateNotes(id, notes)
           }}
         />
       </div>

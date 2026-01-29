@@ -1,6 +1,7 @@
+// hooks/useDetectionHistory.ts
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import type { Detection, DetectionHistoryFilters, DetectionStats, DetectionStatus } from "@/core/types"
 import * as detectionApi from "@/core/api/detection"
 
@@ -19,36 +20,69 @@ interface UseDetectionHistoryReturn {
   refresh: () => Promise<void>
 }
 
-const initialFilters: DetectionHistoryFilters = {
-  type: "all",
-  status: "all",
-  searchId: "",
+const toDate = (d: Date) => d.toISOString().slice(0, 10)
+
+function getInitialFilters(): DetectionHistoryFilters {
+  const end = new Date()
+  const start = new Date()
+  start.setDate(start.getDate() - 7)
+
+  return {
+    type: "all",
+    status: "all",
+    searchId: "",
+    dateFrom: toDate(start),
+    dateTo: toDate(end),
+  }
 }
 
 export function useDetectionHistory(): UseDetectionHistoryReturn {
   const [detections, setDetections] = useState<Detection[]>([])
-  const [stats, setStats] = useState<DetectionStats | null>(null)
   const [selectedDetection, setSelectedDetection] = useState<Detection | null>(null)
-  const [filters, setFiltersState] = useState<DetectionHistoryFilters>(initialFilters)
+  const [filters, setFiltersState] = useState<DetectionHistoryFilters>(() => getInitialFilters())
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const stats = useMemo<DetectionStats>(() => {
+    const items = detections
+    if (!items.length) {
+      return { todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "-" }
+    }
+
+    const now = new Date()
+    const isSameDay = (a: Date, b: Date) =>
+      a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+
+    const todayCount = items.filter((d) => {
+      if (!d.timestamp) return false
+      const t = new Date(d.timestamp)
+      return !Number.isNaN(t.getTime()) && isSameDay(t, now)
+    }).length
+
+    const weekAgo = new Date(now)
+    weekAgo.setDate(weekAgo.getDate() - 7)
+
+    const weekCount = items.filter((d) => {
+      if (!d.timestamp) return false
+      const t = new Date(d.timestamp)
+      return !Number.isNaN(t.getTime()) && t >= weekAgo
+    }).length
+
+    const falseAlarmCount = items.filter((d) => d.status === "false_alarm").length
+    const falseAlarmRate = items.length ? Math.round((falseAlarmCount / items.length) * 100) : 0
+
+    const lastDetectionTime = items[0]?.timestamp
+      ? new Date(items[0].timestamp).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+      : "-"
+
+    return { todayCount, weekCount, falseAlarmRate, lastDetectionTime }
+  }, [detections])
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
-      const [historyResponse, statsResponse] = await Promise.all([
-        detectionApi.getDetectionHistory(filters),
-        detectionApi.getDetectionStats(),
-      ])
-
-      if (historyResponse.success && historyResponse.data) {
-        setDetections(historyResponse.data)
-      }
-
-      if (statsResponse.success && statsResponse.data) {
-        setStats(statsResponse.data)
-      }
-
+      const historyResponse = await detectionApi.getDetectionHistory(filters)
+      setDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
       setError(null)
     } catch {
       setError("탐지 기록을 불러오는데 실패했습니다.")
@@ -61,55 +95,58 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
     fetchData()
   }, [fetchData])
 
+  // 선택: 필터/재조회로 목록이 바뀌면, 선택 항목이 사라진 경우 정리
+  useEffect(() => {
+    if (!selectedDetection) return
+    const exists = detections.some((d) => d.id === selectedDetection.id)
+    if (!exists) setSelectedDetection(null)
+  }, [detections, selectedDetection])
+
   const setFilters = useCallback((newFilters: DetectionHistoryFilters) => {
     setFiltersState(newFilters)
   }, [])
 
   const clearFilters = useCallback(() => {
-    setFiltersState(initialFilters)
+    setFiltersState(getInitialFilters())
   }, [])
 
   const selectDetection = useCallback((detection: Detection | null) => {
     setSelectedDetection(detection)
   }, [])
 
-  const updateStatus = useCallback(async (id: string, status: DetectionStatus): Promise<boolean> => {
-    try {
-      const response = await detectionApi.updateDetectionStatus(id, status)
-      if (response.success && response.data) {
-        setDetections((prev) =>
-          prev.map((d) => (d.id === id ? { ...d, status } : d))
-        )
-        if (selectedDetection?.id === id) {
-          setSelectedDetection({ ...selectedDetection, status })
-        }
-        return true
-      }
-      return false
-    } catch {
-      setError("상태 업데이트에 실패했습니다.")
-      return false
-    }
-  }, [selectedDetection])
+  const updateStatus = useCallback(
+    async (id: string, status: DetectionStatus): Promise<boolean> => {
+      try {
+        const response = await detectionApi.updateDetectionStatus(id, status)
+        if (!response.success) return false
 
-  const updateNotes = useCallback(async (id: string, notes: string): Promise<boolean> => {
-    try {
-      const response = await detectionApi.updateDetectionNotes(id, notes)
-      if (response.success && response.data) {
-        setDetections((prev) =>
-          prev.map((d) => (d.id === id ? { ...d, notes } : d))
-        )
-        if (selectedDetection?.id === id) {
-          setSelectedDetection({ ...selectedDetection, notes })
-        }
+        setDetections((prev) => prev.map((d) => (d.id === id ? { ...d, status } : d)))
+        if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, status })
         return true
+      } catch {
+        setError("상태 업데이트에 실패했습니다.")
+        return false
       }
-      return false
-    } catch {
-      setError("메모 업데이트에 실패했습니다.")
-      return false
-    }
-  }, [selectedDetection])
+    },
+    [selectedDetection]
+  )
+
+  const updateNotes = useCallback(
+    async (id: string, notes: string): Promise<boolean> => {
+      try {
+        const response = await detectionApi.updateDetectionNotes(id, notes)
+        if (!response.success) return false
+
+        setDetections((prev) => prev.map((d) => (d.id === id ? { ...d, notes } : d)))
+        if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, notes })
+        return true
+      } catch {
+        setError("메모 업데이트에 실패했습니다.")
+        return false
+      }
+    },
+    [selectedDetection]
+  )
 
   return {
     detections,

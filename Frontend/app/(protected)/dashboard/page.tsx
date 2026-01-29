@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, Suspense } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   Bug,
   Calendar,
@@ -29,6 +30,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useDetectionHistory } from "@/hooks/useDetectionHistory"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
+import * as detectionApi from "@/core/api/detection"
 import type { Detection, DetectionStats, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
 
 import { DEMO_MODE } from "@/core/demo/config"
@@ -567,6 +569,8 @@ function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableP
 // ============================================
 
 function DashboardContent() {
+  const searchParams = useSearchParams()
+  const deepLinkId = searchParams.get("detectionId")
   /**
    * ============================
    * DEMO MODE
@@ -678,6 +682,27 @@ function DashboardContent() {
   } = useDetectionHistory(carId)
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
+  const lastOpenedRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    if (!deepLinkId) return
+    if (lastOpenedRef.current === deepLinkId) return
+
+    const existing = detections.find((d) => d.id === deepLinkId)
+    if (existing) {
+      selectDetection(existing)
+      setIsDetailOpen(true)
+      lastOpenedRef.current = deepLinkId
+      return
+    }
+
+    detectionApi.getDetectionById(deepLinkId).then((res) => {
+      if (!res?.data) return
+      selectDetection(res.data)
+      setIsDetailOpen(true)
+      lastOpenedRef.current = deepLinkId
+    })
+  }, [deepLinkId, detections, selectDetection])
 
   return (
     <div className="p-4 lg:p-6">

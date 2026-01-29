@@ -52,3 +52,17 @@ export async function getCarStatus(carId: number): Promise<CarStatus> {
   console.log("[getCarStatus]", raw, "=>", normalized) // 임시
   return normalized
 }
+
+export async function setCarMode(carId: number, mode: CarMode): Promise<void> {
+  await apiFetch<any>(`/api/cars/${carId}/mode`, {
+    method: "PATCH",
+    body: JSON.stringify({ mode }),
+  })
+}
+
+export async function controlCar(carId: number, v: number, w: number): Promise<void> {
+  await apiFetch<any>(`/api/cars/${carId}/control`, {
+    method: "PATCH",
+    body: JSON.stringify({ v, w }),
+  })
+}

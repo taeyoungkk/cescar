@@ -9,6 +9,11 @@ from app.services.mqtt_service import mqtt_service
 from app.services.storage_service import storage_service
 from app.core.config import settings
 
+logging.basicConfig(
+    level=logging.INFO, # INFO 레벨 이상의 모든 로그를 표시 (DEBUG < INFO < WARNING < ERROR)
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 class DetectionService:
@@ -101,56 +106,99 @@ class DetectionService:
         return None
 
     def _start_recording(self, frame, timestamp):
-        """녹화 시작"""
+        actual_h, actual_w = frame.shape[:2]
+    
+    # 2. 현재 설정되어 있는 VideoWriter의 크기 확인
+        logger.info(f"📊 [SIZE CHECK] 실제 프레임: {actual_w}x{actual_h} | 설정된 크기: {self.frame_width}x{self.frame_height}")
+
+        # 만약 두 값이 다르다면 강제로 맞춰줘야 합니다.
+        if actual_w != self.frame_width or actual_h != self.frame_height:
+            logger.warning(f"⚠️ 크기 불일치 발생! {actual_w}x{actual_h} -> {self.frame_width}x{self.frame_height}로 리사이즈합니다.")
+            
+        """녹화 시작 및 디버깅"""
         file_path = os.path.join(self.video_dir, f"record_{timestamp}.mp4")
         self.current_video_path = file_path
         
-        # VideoWriter 설정 (브라우저 호환성을 위해 H.264 계열 순차적 시도)
-        success = False
-        for codec in ['avc1', 'H264', 'X264']:
-            fourcc = cv2.VideoWriter_fourcc(*codec)
-            self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
-            if self.writer.isOpened():
-                logger.info(f"✅ VideoWriter initialized with codec: {codec}")
-                success = True
-                break
+        # [디버깅] 현재 프레임 정보 확인
+        h, w = frame.shape[:2]
+        logger.info(f"🔍 디버깅: 입력 프레임 크기 ({w}x{h}), 설정된 크기 ({self.frame_width}x{self.frame_height})")
         
-        if not success:
-            logger.warning("⚠️ H.264 코덱을 사용할 수 없어 mp4v로 대체합니다. (브라우저 재생이 안 될 수 있음)")
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
-        start_time = time.time()
-        logger.info(f"🎥 [RECORDING] Started: {file_path}")
+        # FFMPEG는 GStreamer 파이프라인 문자열을 이해 못하므로 file_path만 넣어야 합니다.
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        self.writer = cv2.VideoWriter(file_path, fourcc, 20.0, (self.frame_width, self.frame_height))
 
-        while time.time() - start_time < 10:
-            ret, frame = self.cap.read()
-            if not ret:
-                break
-            self.writer.write(frame)
-        video_url = self._stop_recording()
+        # [디버깅] 최종 Writer 상태 확인
+        if not self.writer.isOpened():
+            logger.error(f"❌ 최종 실패: VideoWriter를 초기화할 수 없습니다. 경로: {file_path}")
+            return None
+
+        logger.info(f"🎥 [RECORDING] 시작됨: {file_path}")
+        
+        start_time = time.time()
+        frames_written = 0
+
+        try:
+            while time.time() - start_time < 10:
+                if frame.shape[1] != self.frame_width or frame.shape[0] != self.frame_height:
+                    frame = cv2.resize(frame, (self.frame_width, self.frame_height))
+
+                self.writer.write(frame)
+                frames_written += 1
+
+            logger.info(f"✅ 녹화 종료. 총 {frames_written} 프레임 기록됨.")
+        
+        except Exception as e:
+            logger.error(f"🔥 녹화 루프 중 에러 발생: {e}")
+        
+        finally:
+            # 반드시 정지 로직 호출
+            video_url = self._stop_recording()
 
         return video_url
 
+
     def _stop_recording(self):
-        """녹화 중지 및 파일 업로드"""
+        import ffmpeg
+        """녹화 중지 -> H.264 변환 -> 클라우드 업로드"""
         if self.writer:
             self.writer.release()
             self.writer = None
         
-        # 파일이 물리적으로 디스크에 모두 쓰여질 때까지 아주 짧게 대기
-        time.sleep(1.0)
+        time.sleep(1.0) # 파일 쓰기 완료 대기
         
+        raw_path = self.current_video_path # mp4v로 저장된 원본 경로
+        web_path = raw_path.replace(".mp4", "_web.mp4") # 변환될 파일 경로
         video_url = None
 
-        logger.info(f"🛑 [RECORDING] Stopped: {self.current_video_path}")
-        print("current_video_path", self.current_video_path)
-        # 녹화 본 클라우드 업로드
-        if self.current_video_path and os.path.exists(self.current_video_path) and os.path.getsize(self.current_video_path) > 0:
-            video_url = storage_service.upload_file(self.current_video_path)
-            if video_url:
-                logger.info(f"✅ [CLOUD] Video upload confirmed: {video_url}")
-        else:
-            logger.error(f"❌ Video file is missing or empty: {self.current_video_path or 'Unknown path'}")
+        if raw_path and os.path.exists(raw_path):
+            try:
+                logger.info(f"🔄 웹 재생용으로 변환 시작 (H.264): {raw_path}")
+                
+                # FFmpeg를 이용한 H.264 변환 (소프트웨어 인코딩)
+                # 젯슨 나노의 CPU를 사용하여 크롬 표준 코덱으로 변환합니다.
+                (
+                    ffmpeg
+                    .input(raw_path)
+                    .output(web_path, vcodec='libx264', crf=28, preset='ultrafast')
+                    .overwrite_output()
+                    .run(capture_stdout=True, capture_stderr=True)
+                )
+
+                # 변환된 파일이 정상적이라면 변환된 파일을 업로드
+                if os.path.exists(web_path) and os.path.getsize(web_path) > 0:
+                    logger.info(f"✅ 변환 완료. 업로드 시도: {web_path}")
+                    video_url = storage_service.upload_file(web_path)
+                    
+                    # 업로드 후 임시 파일들 삭제 (로컬 용량 관리)
+                    os.remove(raw_path)
+                    os.remove(web_path)
+                else:
+                    logger.error("❌ 변환된 파일이 생성되지 않았습니다.")
+            
+            except ffmpeg.Error as e:
+                logger.error(f"❌ FFmpeg 변환 에러: {e.stderr.decode()}")
+                # 변환 실패 시 아쉬운 대로 원본이라도 업로드 시도
+                video_url = storage_service.upload_file(raw_path)
 
         self.current_video_path = None
         return video_url

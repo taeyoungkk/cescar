@@ -17,7 +17,7 @@ google-resumable-media==2.8.0
 googleapis-common-protos==1.72.0
 h11==0.16.0
 idna==3.11
-numpy==2.4.1
+numpy>=2.2.0
 opencv-python==4.13.0.90
 paho-mqtt==2.1.0
 proto-plus==1.27.0

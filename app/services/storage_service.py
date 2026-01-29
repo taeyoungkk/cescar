@@ -12,17 +12,38 @@ class StorageService:
         if not os.path.exists(self.upload_dir):
             os.makedirs(self.upload_dir)
         
-        # GCS 클라이언트 초기화
+        # GCS 클라이언트 초기화 및 디버깅 로그 추가
         try:
-            # .env에서 읽어온 자격 증명 파일 경로가 있다면 환경 변수에 설정
+            logger.debug(f"🔍 DEBUG: Project ID -> {settings.GOOGLE_CLOUD_PROJECT}")
+            logger.debug(f"🔍 DEBUG: Bucket Name -> {settings.GCS_BUCKET_NAME}")
+            logger.debug(f"🔍 DEBUG: Credentials Path -> {settings.GOOGLE_APPLICATION_CREDENTIALS}")
+
             if settings.GOOGLE_APPLICATION_CREDENTIALS:
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = settings.GOOGLE_APPLICATION_CREDENTIALS
+                if os.path.exists(settings.GOOGLE_APPLICATION_CREDENTIALS):
+                    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = settings.GOOGLE_APPLICATION_CREDENTIALS
+                    logger.info(f"🔑 Credentials file found at: {settings.GOOGLE_APPLICATION_CREDENTIALS}")
+                else:
+                    logger.error(f"❌ Credentials file NOT FOUND at: {settings.GOOGLE_APPLICATION_CREDENTIALS}")
+
+            if not settings.GOOGLE_CLOUD_PROJECT or not settings.GCS_BUCKET_NAME:
+                logger.error("❌ GCS configuration missing (Project ID or Bucket Name). Check .env file.")
+                self.client = None
+                self.bucket = None
+                return
 
             self.client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
             self.bucket = self.client.bucket(settings.GCS_BUCKET_NAME)
-            logger.info(f"✅ GCS Client initialized for bucket: {settings.GCS_BUCKET_NAME}")
+            
+            if self.bucket.exists():
+                logger.info(f"✅ GCS Client initialized for bucket: {settings.GCS_BUCKET_NAME}")
+            else:
+                logger.error(f"❌ Bucket '{settings.GCS_BUCKET_NAME}' does not exist or is inaccessible.")
+                self.bucket = None
+
         except Exception as e:
-            logger.error(f"❌ Failed to initialize GCS Client: {e}")
+            logger.error(f"❌ Failed to initialize GCS Client: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
             self.client = None
             self.bucket = None
 

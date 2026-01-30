@@ -137,13 +137,13 @@ public class CarService {
         status.changeMode(request.mode());
 
         try {
-            // MQTT 알림 전송: jetson/{deviceId}/mode
+            // MQTT 알림 전송: robot/{deviceId}/mode
             // 기기 규격에 맞춰 JSON 형식으로 전송: {"mode": "MANUAL"}
             Map<String, String> payload = new HashMap<>();
             payload.put("mode", request.mode().name());
             String jsonPayload = objectMapper.writeValueAsString(payload);
 
-            String topic = "pi/" + car.getDeviceId() + "/mode";
+            String topic = "robot/" + car.getDeviceId() + "/mode";
             mqttGateway.sendToMqtt(jsonPayload, topic);
         } catch (Exception e) {
             // 로그 기록 등을 추가할 수 있으나 현재는 단순 예외 처리
@@ -277,8 +277,8 @@ public class CarService {
 
             String jsonPayload = objectMapper.writeValueAsString(payload);
 
-            // MQTT 명령 전송: jetson/{deviceId}/control
-            String topic = "pi/" + car.getDeviceId() + "/control";
+            // MQTT 명령 전송: robot/{deviceId}/control
+            String topic = "robot/" + car.getDeviceId() + "/control";
             mqttGateway.sendToMqtt(jsonPayload, topic);
         } catch (Exception e) {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
@@ -312,8 +312,8 @@ public class CarService {
             // 미션 데이터를 JSON 문자열로 변환
             String missionJson = objectMapper.writeValueAsString(request);
 
-            // MQTT 미션 전송: jetson/{deviceId}/mission
-            String topic = "jetson/" + car.getDeviceId() + "/mission";
+            // MQTT 미션 전송: robot/{deviceId}/mission
+            String topic = "robot/" + car.getDeviceId() + "/mission";
             mqttGateway.sendToMqtt(missionJson, topic);
 
         } catch (Exception e) {

@@ -49,8 +49,9 @@ public class CarRequest {
         /**
          * 차량 제어 요청 (PATCH /api/cars/{carId}/control)
          */
-        public record ControlRequest(
-                        @Schema(description = "이동 명령 (UP, DOWN, LEFT, RIGHT, STOP)", example = "UP") @NotBlank(message = "command is required") String command) {
+                public record ControlRequest(
+                        @Schema(description = "Linear velocity (v)", example = "0.5") @NotNull(message = "v is required") Double v,
+                        @Schema(description = "Angular velocity (w)", example = "0.0") @NotNull(message = "w is required") Double w) {
         }
 
         /**

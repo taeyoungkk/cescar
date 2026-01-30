@@ -64,7 +64,7 @@ public class MqttConfig {
         if (topic == null) {
             return false;
         }
-        return topic.endsWith("/detections") || topic.endsWith("detections");
+        return topic.endsWith("/detection");
     }
 
     @Bean
@@ -104,7 +104,7 @@ public class MqttConfig {
                     // 1. 페이로드를 byte[]에서 String으로 변환 (인코딩 주의)
                     String payloadString = new String((byte[]) springMessage.getPayload(), StandardCharsets.UTF_8);
 
-                    // [New] 탐지 데이터(detections)인 경우 웹소켓으로 전송 (기능 추가)
+                    // [New] 탐지 데이터(detection)인 경우 웹소켓으로 전송 (기능 추가)
                     if (isDetectionTopic(topic)) {
                         processDetectionMessage(payloadString, topic);
                     }
@@ -139,12 +139,8 @@ public class MqttConfig {
         if (inboundTopic != null && !inboundTopic.isBlank()) {
             mqttClient.subscribe(inboundTopic, 0);
         }
-
-        // [New] 2. 탐지 데이터용 토픽 명시적 구독
-        // application.properties에 없어도 동작하도록 강제 구독
-        mqttClient.subscribe("robot/+/detections", 0);
-
-        log.info("🔥 [MQTT] Client Started. ID: {}, Subscribed to: {}, robot/+/detections",
+        // Detection topics are covered by inboundTopic (robot/#)
+        log.info("🔥 [MQTT] Client Started. ID: {}, Subscribed to: {}, robot/{id}/detection",
                 clientId, inboundTopic);
     }
 
@@ -170,7 +166,7 @@ public class MqttConfig {
             if (roomId != null && !roomId.isBlank()) {
                 detectionWsBroadcaster.broadcastToRoom(roomId, payload);
             } else {
-                log.warn("[MQTT][DETECTIONS] roomId missing. topic={}, payload={}", topic, payload);
+                log.warn("[MQTT][detection] roomId missing. topic={}, payload={}", topic, payload);
             }
         } catch (Exception e) {
             log.error("Failed to parse detection payload for WS broadcast", e);

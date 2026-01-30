@@ -18,7 +18,7 @@ public class DeviceService {
         }
 
         // 2. 기존 로직 (토픽 생성 및 MQTT 메시지 발송)
-        String topic = "pi/" + deviceId + "/command";
+        String topic = "robot/" + deviceId + "/command";
         mqttGateway.sendToMqtt(command, topic);
 
         System.out.println("MQTT 전송 완료: " + topic + " -> " + command);

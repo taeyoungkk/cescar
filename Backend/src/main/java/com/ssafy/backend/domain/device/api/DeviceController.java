@@ -29,9 +29,10 @@ public class DeviceController {
     }
 
     @PostMapping("/test/mqtt")
-    public String sendTestMqtt(@RequestParam String message) {
-        mqttGateway.sendToMqtt(message, "jetson/command");
-        return "MQTT 메시지 전송 시도: " + message;
+    public String sendTestMqtt(@RequestParam String deviceId, @RequestParam String message) {
+        String topic = "robot/" + deviceId + "/command";
+        mqttGateway.sendToMqtt(message, topic);
+        return "MQTT 메시지 전송 시도: " + topic + " -> " + message;
     }
 
     @GetMapping("/{deviceId}/detection")
@@ -64,3 +65,6 @@ public class DeviceController {
         return ResponseEntity.ok(response);
     }
 }
+
+
+

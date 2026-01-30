@@ -190,7 +190,7 @@ public class MqttConfig {
             try {
                 String topic = (String) message.getHeaders().get("mqtt_topic");
                 if (topic == null)
-                    topic = "jetson/command";
+                    topic = "robot/command";
 
                 MqttMessage mqttMessage = new MqttMessage(message.getPayload().toString().getBytes());
                 mqttMessage.setQos(0);

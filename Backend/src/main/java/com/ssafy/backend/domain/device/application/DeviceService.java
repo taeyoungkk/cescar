@@ -9,11 +9,11 @@ import org.springframework.stereotype.Service;
 public class DeviceService {
 
     private final MqttGateway mqttGateway;
-    private final JetsonStatusService jetsonStatusService;
+    private final MqttInboundService mqttInboundService;
 
     public void controlJetson(String deviceId, String command) {
         // 1. Jetson 온라인 상태 확인
-        if (!jetsonStatusService.isJetsonOnline(deviceId)) {
+        if (!mqttInboundService.isJetsonOnline(deviceId)) {
             throw new RuntimeException("Device " + deviceId + " is offline.");
         }
 

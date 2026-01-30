@@ -1,8 +1,7 @@
 package com.ssafy.backend.domain.device.api;
 
 import com.ssafy.backend.domain.device.application.DeviceService;
-import com.ssafy.backend.domain.device.application.JetsonStatusService;
-import com.ssafy.backend.domain.device.application.MqttSubscriberService;
+import com.ssafy.backend.domain.device.application.MqttInboundService;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
 import com.ssafy.backend.infrastructure.mqtt.MqttGateway;
@@ -20,7 +19,7 @@ public class DeviceController {
 
     private final DeviceService deviceService;
     private final MqttGateway mqttGateway;
-    private final JetsonStatusService jetsonStatusService;
+    private final MqttInboundService mqttInboundService;
 
     @GetMapping("/{deviceId}/test")
     public String testMqtt(@PathVariable String deviceId, @RequestParam String msg) {
@@ -37,7 +36,7 @@ public class DeviceController {
 
     @GetMapping("/{deviceId}/detection")
     public ResponseEntity<Map<String, Object>> getLatestDetection(@PathVariable String deviceId) {
-        DetectionRequest latest = MqttSubscriberService.getLatestDetection(deviceId);
+        DetectionRequest latest = mqttInboundService.getLatestDetection(deviceId);
 
         Map<String, Object> response = new HashMap<>();
         response.put("deviceId", deviceId);
@@ -50,11 +49,11 @@ public class DeviceController {
     @GetMapping("/{deviceId}/status")
     public ResponseEntity<Map<String, Object>> getDeviceStatus(@PathVariable String deviceId) {
         // 1. EMQX API를 통한 단순 온라인 여부 확인
-        boolean isOnline = jetsonStatusService.isJetsonOnline(deviceId);
+        boolean isOnline = mqttInboundService.isJetsonOnline(deviceId);
         System.out.println("isOnline:");
         System.out.println(isOnline);
         // 2. MQTT를 통해 수집된 상세 상태 정보(CPU, GPU, 배터리 등) 가져오기
-        DeviceStatusRequest details = jetsonStatusService.getDetailedStatus(deviceId);
+        DeviceStatusRequest details = mqttInboundService.getDetailedStatus(deviceId);
         System.out.println(details);
         Map<String, Object> response = new HashMap<>();
         response.put("deviceId", deviceId);

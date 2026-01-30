@@ -24,23 +24,28 @@ class MotorHatController:
         ain1: int = 1,
         ain2: int = 2,
     ) -> None:
-        self._i2c = i2c or busio.I2C(board.SCL, board.SDA)
-        self._pca = PCA9685(self._i2c, address=address)
-        self._pca.frequency = frequency
+        try:
+            self._i2c = i2c or busio.I2C(board.SCL, board.SDA)
+            self._pca = PCA9685(self._i2c, address=address)
+            self._pca.frequency = frequency
 
-        self._pwma = pwma
-        self._ain1 = ain1
-        self._ain2 = ain2
+            self._pwma = pwma
+            self._ain1 = ain1
+            self._ain2 = ain2
 
-        self._last_speed = 0.0
-        logger.info(
-            "MotorHat initialized addr=0x%02X freq=%d pwma=%d ain1=%d ain2=%d",
-            address,
-            frequency,
-            pwma,
-            ain1,
-            ain2,
-        )
+            self._last_speed = 0.0
+            logger.info(
+                "MotorHat initialized addr=0x%02X freq=%d pwma=%d ain1=%d ain2=%d",
+                address,
+                frequency,
+                pwma,
+                ain1,
+                ain2,
+            )
+        except Exception as e:
+            logger.error(f"MotorHat init failed at addr 0x{address:02X}: {e}")
+            print(f"[MotorHat] ✗ Init failed at addr 0x{address:02X}: {e}")
+            raise
 
     @property
     def last_speed(self) -> float:

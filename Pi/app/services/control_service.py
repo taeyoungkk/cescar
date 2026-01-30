@@ -59,7 +59,11 @@ class ControlService:
 
     def _init_hardware(self) -> None:
         try:
+            print("[HW] Initializing I2C bus...")
             i2c = busio.I2C(board.SCL, board.SDA)
+            print("[HW] I2C bus OK")
+            
+            print("[HW] Initializing MotorHat (0x40)...")
             self._motor = MotorHatController(
                 i2c=i2c,
                 address=0x40,
@@ -67,6 +71,9 @@ class ControlService:
                 ain1=1,
                 ain2=2,
             )
+            print("[HW] MotorHat OK")
+            
+            print("[HW] Initializing SteeringServo (0x60)...")
             self._steer = SteeringServoController(
                 i2c=i2c,
                 address=0x60,
@@ -76,11 +83,25 @@ class ControlService:
                 min_deg=self._steer_min,
                 max_deg=self._steer_max,
             )
+            print("[HW] SteeringServo OK")
+            
             # Safe state on boot
             self._motor.stop()
             self._steer.center()
+            print("[HW] ✓ All hardware initialized successfully")
+            logger.info("All hardware initialized successfully")
+            
+        except OSError as e:
+            logger.error(f"I2C communication error: {e}")
+            print(f"[HW] ✗ I2C ERROR: {e}")
+            print("[HW]   → Check I2C wiring and device addresses")
+            print("[HW]   → Run 'i2cdetect -y 1' to scan devices")
+            self._motor = None
+            self._steer = None
         except Exception as e:
             logger.error(f"Hardware init failed: {e}")
+            print(f"[HW] ✗ Hardware init FAILED: {e}")
+            print(f"[HW]   → Exception type: {type(e).__name__}")
             self._motor = None
             self._steer = None
 

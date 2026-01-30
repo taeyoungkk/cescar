@@ -27,30 +27,35 @@ class SteeringServoController:
         pulse_min_us: int = 500,
         pulse_max_us: int = 2500,
     ) -> None:
-        self._i2c = i2c or busio.I2C(board.SCL, board.SDA)
-        self._kit = ServoKit(channels=16, i2c=self._i2c, address=address)
+        try:
+            self._i2c = i2c or busio.I2C(board.SCL, board.SDA)
+            self._kit = ServoKit(channels=16, i2c=self._i2c, address=address)
 
-        self._channel = channel
-        self._center = center_deg
-        self._scale = steer_scale_deg
-        self._min = min_deg
-        self._max = max_deg
+            self._channel = channel
+            self._center = center_deg
+            self._scale = steer_scale_deg
+            self._min = min_deg
+            self._max = max_deg
 
-        self._kit.servo[self._channel].set_pulse_width_range(
-            pulse_min_us,
-            pulse_max_us,
-        )
+            self._kit.servo[self._channel].set_pulse_width_range(
+                pulse_min_us,
+                pulse_max_us,
+            )
 
-        self._last_angle = center_deg
-        logger.info(
-            "SteeringServo initialized addr=0x%02X ch=%d center=%.1f scale=%.1f min=%.1f max=%.1f",
-            address,
-            channel,
-            center_deg,
-            steer_scale_deg,
-            min_deg,
-            max_deg,
-        )
+            self._last_angle = center_deg
+            logger.info(
+                "SteeringServo initialized addr=0x%02X ch=%d center=%.1f scale=%.1f min=%.1f max=%.1f",
+                address,
+                channel,
+                center_deg,
+                steer_scale_deg,
+                min_deg,
+                max_deg,
+            )
+        except Exception as e:
+            logger.error(f"SteeringServo init failed at addr 0x{address:02X}: {e}")
+            print(f"[SteeringServo] ✗ Init failed at addr 0x{address:02X}: {e}")
+            raise
 
     @property
     def last_angle(self) -> float:

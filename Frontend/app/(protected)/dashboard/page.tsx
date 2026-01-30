@@ -258,13 +258,15 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
       }}
     >
       <SheetContent side="right" className="w-full sm:max-w-lg bg-card border-border overflow-y-auto">
-        <SheetHeader className="border-b border-border px-5 pt-5 pb-4">
-          <div className="flex items-start justify-between gap-3">
+        <SheetHeader className="border-b border-border px-5 pt-4 pb-4 pr-12">
+          <div className="flex items-center justify-between gap-3 pr-2">
             <div>
               <SheetTitle className="text-foreground">탐지 상세 정보</SheetTitle>
               <SheetDescription className="text-muted-foreground">탐지 ID: {record.id}</SheetDescription>
             </div>
-            <StatusBadge status={record.status} />
+            <div className="shrink-0">
+              <StatusBadge status={record.status} />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3 pt-3">
             <div className="space-y-1">
@@ -365,7 +367,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
           <DialogHeader>
             <DialogTitle>탐지 영상</DialogTitle>
             <DialogDescription>
-              {record.date} {record.time} 쨌 {record.robotId}
+              {record.date} {record.time} · {record.robotId}
             </DialogDescription>
           </DialogHeader>
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">

@@ -359,7 +359,7 @@ function MapMetadataPanel({
         <p className="text-sm font-medium text-foreground">{areaSize || "-"}</p>
       </div>
       <div className="bg-secondary/50 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground mb-1">李⑤웾 ID</p>
+        <p className="text-xs text-muted-foreground mb-1">차량 ID</p>
         <p className="text-sm font-medium text-foreground font-mono">{robotId || "-"}</p>
       </div>
     </div>
@@ -766,6 +766,8 @@ function DetectionItem({ detection }: { detection: Detection }) {
 
 export default function HomePage() {
   const isDemo = DEMO_MODE
+  const [isStandalone, setIsStandalone] = React.useState(false)
+  const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission | "unknown">("unknown")
 
   const demoSummary = useHomeDemoSummary()
   const { carId } = usePrimaryCarId()
@@ -777,6 +779,44 @@ export default function HomePage() {
   const mapStore = useMapStore()
   const { isOnline: networkOnline } = useNetworkStatus()
   const carMaps = useCarMaps(isDemo ? null : carId)
+
+  useEffect(() => {
+    const checkStandalone = () => {
+      const isStandaloneMatch = window.matchMedia("(display-mode: standalone)").matches
+      const isIosStandalone = Boolean((window.navigator as any).standalone)
+      setIsStandalone(isStandaloneMatch || isIosStandalone)
+    }
+
+    checkStandalone()
+    const media = window.matchMedia("(display-mode: standalone)")
+    const handler = () => checkStandalone()
+    if (typeof media.addEventListener === "function") {
+      media.addEventListener("change", handler)
+    } else if (typeof media.addListener === "function") {
+      media.addListener(handler)
+    }
+    return () => {
+      if (typeof media.removeEventListener === "function") {
+        media.removeEventListener("change", handler)
+      } else if (typeof media.removeListener === "function") {
+        media.removeListener(handler)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof Notification === "undefined") {
+      setNotificationPermission("unknown")
+      return
+    }
+    setNotificationPermission(Notification.permission)
+  }, [])
+
+  const handleRequestNotification = async () => {
+    if (typeof Notification === "undefined") return
+    const permission = await Notification.requestPermission()
+    setNotificationPermission(permission)
+  }
 
   let status: CarStatus | null = null
   let recentDetections: Detection[] = []
@@ -958,6 +998,26 @@ export default function HomePage() {
             로봇 상태 및 감지 현황을 확인하세요{isDemo ? " (DEMO MODE)" : ""}
           </p>
         </div>
+
+        {!isStandalone && (
+          <Alert className="mb-6">
+            <AlertTitle>모바일 사용 팁</AlertTitle>
+            <AlertDescription>
+              크롬 메뉴에서 “홈 화면에 추가”로 설치하면 앱처럼 실행되고 알림 수신이 더 안정적입니다. 알림 권한도 꼭
+              허용해 주세요.
+            </AlertDescription>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
+                알림 권한: {notificationPermission === "unknown" ? "확인 불가" : notificationPermission}
+              </Badge>
+              {notificationPermission !== "granted" && (
+                <Button size="sm" variant="outline" onClick={handleRequestNotification}>
+                  알림 권한 요청
+                </Button>
+              )}
+            </div>
+          </Alert>
+        )}
 
         <div className="mb-6">
           <RobotStatusSection status={status} stats={stats} isLoading={statusLoading} />

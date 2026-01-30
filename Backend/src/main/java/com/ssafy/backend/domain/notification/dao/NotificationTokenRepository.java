@@ -9,4 +9,6 @@ import java.util.Optional;
 public interface NotificationTokenRepository extends JpaRepository<NotificationToken, Long> {
     Optional<NotificationToken> findByToken(String token);
     List<NotificationToken> findAllByMemberId(Long memberId);
+    int deleteByMemberIdAndToken(Long memberId, String token);
+    int deleteByToken(String token);
 }

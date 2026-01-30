@@ -37,6 +37,20 @@ public class FcmController {
         return "토큰 등록 완료";
     }
 
+    // FCM 토큰 삭제
+    @Operation(summary = "FCM 토큰 삭제",
+            description = "로그인된 사용자의 FCM 토큰을 삭제합니다.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "토큰 삭제 완료")
+    })
+    @PostMapping("/unregister")
+    public String unregisterToken(@RequestBody Map<String, String> request,
+                                  @Parameter(hidden = true) @AuthenticationPrincipal Long memberId) {
+        String token = request.get("token");
+        fcmService.removeToken(memberId, token);
+        return "토큰 삭제 완료";
+    }
+
     // 수동 테스트용
     @Operation(summary = "FCM 토큰 단일 전송(테스트)",
             description = "지정한 토큰으로 알림을 전송합니다. 실제 FCM 토큰이 필요합니다. 운영에서는 비추천.")
@@ -50,7 +64,7 @@ public class FcmController {
         return "전송 요청 완료";
     }
 
-    // 전체 발송 테스트용
+    // 전체 전송 테스트용
     @Operation(summary = "전체 FCM 브로드캐스트(테스트)",
             description = "등록된 모든 토큰으로 테스트 알림을 전송합니다. 실제 FCM 토큰이 필요합니다. 운영에서는 비추천.")
     @ApiResponses(value = {

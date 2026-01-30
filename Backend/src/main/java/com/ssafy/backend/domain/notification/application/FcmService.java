@@ -2,6 +2,7 @@ package com.ssafy.backend.domain.notification.application;
 
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.FirebaseMessagingException;
+import com.google.firebase.messaging.MessagingErrorCode;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
 import com.google.firebase.messaging.WebpushConfig;
@@ -11,9 +12,10 @@ import com.ssafy.backend.domain.notification.dao.NotificationTokenRepository;
 import com.ssafy.backend.domain.notification.domain.NotificationToken;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -21,6 +23,7 @@ public class FcmService {
 
     private final NotificationTokenRepository notificationTokenRepository;
     private final MemberRepository memberRepository;
+    private final TransactionTemplate transactionTemplate;
 
     // 회원별 FCM 토큰을 DB에 저장합니다.
     public void registerToken(Long memberId, String token) {
@@ -48,8 +51,25 @@ public class FcmService {
         System.out.println("✅ FCM 토큰 등록됨: " + token);
     }
 
+    @Transactional
+    public void removeToken(Long memberId, String token) {
+        if (memberId == null) {
+            throw new IllegalArgumentException("회원 인증 정보가 없습니다.");
+        }
+        if (token == null || token.trim().isEmpty()) {
+            return;
+        }
+
+        int deleted = notificationTokenRepository.deleteByMemberIdAndToken(memberId, token);
+        if (deleted > 0) {
+            System.out.println("[FCM] 토큰 삭제: " + token);
+        } else {
+            System.out.println("[FCM] 삭제할 토큰 없음 (memberId=" + memberId + ")");
+        }
+    }
+
     /**
-     * 특정 사용자(토큰)에게 알림을 보냅니다.
+     * 지정한 토큰으로 알림을 전송합니다.
      */
     public void sendMessage(String targetToken, String title, String body) {
         try {
@@ -65,6 +85,15 @@ public class FcmService {
             System.out.println("알림 전송 성공: " + response);
         } catch (FirebaseMessagingException e) {
             System.err.println("알림 전송 실패: " + e.getMessage());
+            MessagingErrorCode errorCode = e.getMessagingErrorCode();
+            if (errorCode == MessagingErrorCode.UNREGISTERED || errorCode == MessagingErrorCode.INVALID_ARGUMENT) {
+                transactionTemplate.executeWithoutResult(status -> {
+                    int deleted = notificationTokenRepository.deleteByToken(targetToken);
+                    if (deleted > 0) {
+                        System.out.println("[FCM] 유효하지 않은 토큰 삭제: " + targetToken);
+                    }
+                });
+            }
         }
     }
 
@@ -75,7 +104,7 @@ public class FcmService {
             return;
         }
 
-        System.out.println("[FCM] sendToMember memberId=" + memberId
+        System.out.println("[FCM] 멤버 알림 전송 시작 memberId=" + memberId
                 + " tokenCount=" + tokens.size());
 
         for (NotificationToken token : tokens) {

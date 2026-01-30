@@ -6,7 +6,10 @@
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "generate:fcm-sw": "node scripts/generate-fcm-sw.mjs",
+    "predev": "npm run generate:fcm-sw",
+    "prebuild": "npm run generate:fcm-sw"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -44,9 +47,10 @@
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
     "embla-carousel-react": "8.5.1",
+    "firebase": "^10.12.5",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
-    "next": "16.0.10",
+    "next": "^16.1.6",
     "next-pwa": "5.6.0",
     "next-themes": "^0.4.6",
     "react": "19.2.0",

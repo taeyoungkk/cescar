@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import type { User, LoginRequest, SignupRequest } from "@/core/types"
 import * as authApi from "@/core/api/auth"
+import { registerFcmToken, unregisterFcmToken } from "@/lib/fcm"
 
 interface UseAuthReturn {
   user: User | null
@@ -40,6 +41,11 @@ export function useAuth(): UseAuthReturn {
     checkAuth()
   }, [])
 
+  useEffect(() => {
+    if (!user) return
+    registerFcmToken({ requestPermission: false }).catch(() => {})
+  }, [user?.id])
+
   const login = useCallback(async (request: LoginRequest): Promise<boolean> => {
     setIsLoading(true)
     setError(null)
@@ -54,6 +60,7 @@ export function useAuth(): UseAuthReturn {
           const currentUser = await authApi.getCurrentUser()
           setUser(currentUser)
         }
+        registerFcmToken({ requestPermission: true }).catch(() => {})
         router.push("/home")
         return true
       }
@@ -92,6 +99,7 @@ export function useAuth(): UseAuthReturn {
   const logout = useCallback(async (): Promise<void> => {
     setIsLoading(true)
     try {
+      await unregisterFcmToken()
       await authApi.logout()
       setUser(null)
       router.push("/")

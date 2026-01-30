@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import React, { useMemo, useRef, useState } from "react"
 import {
@@ -40,6 +40,7 @@ interface LiveCameraViewProps {
   onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
   onDriveStop: () => void
   wsUrl: string
+  detectionWsUrl: string
   roomId: string
 }
 
@@ -54,6 +55,7 @@ function LiveCameraView({
   onDriveStart,
   onDriveStop,
   wsUrl,
+  detectionWsUrl,
   roomId,
 }: LiveCameraViewProps) {
     const [hasStream, setHasStream] = React.useState(false)
@@ -62,12 +64,19 @@ function LiveCameraView({
     const closingRef = React.useRef(false)
 
     const videoRef = React.useRef<HTMLVideoElement | null>(null)
+    const canvasRef = React.useRef<HTMLCanvasElement | null>(null)
 
     const wsRef = React.useRef<WebSocket | null>(null)
+    const detectionWsRef = React.useRef<WebSocket | null>(null)
     const pcRef = React.useRef<RTCPeerConnection | null>(null)
     const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([])
 
     const connectingRef = React.useRef(false)
+    const detectionConnectingRef = React.useRef(false)
+    const detectionReconnectRef = React.useRef<number | null>(null)
+    const [detections, setDetections] = React.useState<
+      { x: number; y: number; w: number; h: number; label?: string; confidence?: number }[]
+    >([])
 
     const cleanupWebRTC = React.useCallback(() => {
       connectingRef.current = false
@@ -77,7 +86,7 @@ function LiveCameraView({
       const pc = pcRef.current
       const ws = wsRef.current
 
-      // 핸들러 제거
+      // ?몃뱾???쒓굅
       if (ws) {
         ws.onopen = null
         ws.onmessage = null
@@ -100,14 +109,223 @@ function LiveCameraView({
       setHasStream(false)
       if (videoRef.current) videoRef.current.srcObject = null
 
-      // 다음 connect를 위해 복구
+      // ?ㅼ쓬 connect瑜??꾪빐 蹂듦뎄
       // setTimeout(() => { closingRef.current = false }, 0)
+    }, [networkOnline])
+
+    const cleanupDetections = React.useCallback(() => {
+      detectionConnectingRef.current = false
+      if (detectionReconnectRef.current != null) {
+        window.clearTimeout(detectionReconnectRef.current)
+        detectionReconnectRef.current = null
+      }
+
+      const ws = detectionWsRef.current
+      if (ws) {
+        ws.onopen = null
+        ws.onmessage = null
+        ws.onerror = null
+        ws.onclose = null
+        try { ws.close() } catch {}
+      }
+      detectionWsRef.current = null
+      setDetections([])
+
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext("2d")
+        ctx?.clearRect(0, 0, canvas.width, canvas.height)
+      }
     }, [])
+
+    const normalizeDetections = React.useCallback((payload: any) => {
+      if (!payload) return []
+      const pickArray = (value: any) => (Array.isArray(value) ? value : null)
+      const candidates =
+        pickArray(payload) ??
+        pickArray(payload?.detections) ??
+        pickArray(payload?.boxes) ??
+        pickArray(payload?.bboxes) ??
+        pickArray(payload?.data?.detections) ??
+        pickArray(payload?.data?.boxes) ??
+        pickArray(payload?.data)
+
+      const list = candidates ?? [payload]
+
+      const toNumber = (value: any) => {
+        const num = typeof value === "string" ? Number(value) : value
+        return Number.isFinite(num) ? num : null
+      }
+
+      const toBox = (box: any) => {
+        if (!box) return null
+        const x1 = toNumber(box.x1 ?? box.left)
+        const y1 = toNumber(box.y1 ?? box.top)
+        const x2 = toNumber(box.x2 ?? box.right)
+        const y2 = toNumber(box.y2 ?? box.bottom)
+        const x = toNumber(box.x ?? x1)
+        const y = toNumber(box.y ?? y1)
+        const w = toNumber(box.w ?? box.width ?? (x1 != null && x2 != null ? x2 - x1 : null))
+        const h = toNumber(box.h ?? box.height ?? (y1 != null && y2 != null ? y2 - y1 : null))
+
+        if (x == null || y == null || w == null || h == null) return null
+        if (w <= 0 || h <= 0) return null
+
+        return {
+          x,
+          y,
+          w,
+          h,
+          label: box.label ?? box.class ?? box.type,
+          confidence: toNumber(box.confidence ?? box.score),
+        }
+      }
+
+      return list.map(toBox).filter(Boolean) as {
+        x: number
+        y: number
+        w: number
+        h: number
+        label?: string
+        confidence?: number
+      }[]
+    }, [])
+
+    const drawDetections = React.useCallback(() => {
+      const canvas = canvasRef.current
+      const video = videoRef.current
+      if (!canvas || !video) return
+
+      const rect = video.getBoundingClientRect()
+      if (!rect.width || !rect.height) return
+
+      const dpr = window.devicePixelRatio || 1
+      canvas.width = rect.width * dpr
+      canvas.height = rect.height * dpr
+      canvas.style.width = `${rect.width}px`
+      canvas.style.height = `${rect.height}px`
+
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, rect.width, rect.height)
+
+      if (!showOverlay || detections.length === 0) return
+
+      const videoWidth = video.videoWidth || rect.width
+      const videoHeight = video.videoHeight || rect.height
+      const scaleX = rect.width / videoWidth
+      const scaleY = rect.height / videoHeight
+
+      ctx.lineWidth = 2
+      ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+
+      detections.forEach((det) => {
+        let { x, y, w, h } = det
+        const normalized = [x, y, w, h].every((value) => value >= 0 && value <= 1)
+
+        if (normalized) {
+          x = x * rect.width
+          y = y * rect.height
+          w = w * rect.width
+          h = h * rect.height
+        } else {
+          x = x * scaleX
+          y = y * scaleY
+          w = w * scaleX
+          h = h * scaleY
+        }
+
+        ctx.strokeStyle = "rgba(52, 211, 153, 0.9)"
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)"
+        ctx.strokeRect(x, y, w, h)
+
+        if (det.label) {
+          const confidenceText =
+            det.confidence != null && Number.isFinite(det.confidence) ? ` ${(det.confidence * 100).toFixed(0)}%` : ""
+          const text = `${det.label}${confidenceText}`
+          const textWidth = ctx.measureText(text).width
+          const paddingX = 6
+          const paddingY = 4
+          const labelX = x
+          const labelY = Math.max(0, y - 18)
+
+          ctx.fillRect(labelX, labelY, textWidth + paddingX * 2, 18)
+          ctx.fillStyle = "rgba(52, 211, 153, 0.95)"
+          ctx.fillText(text, labelX + paddingX, labelY + 13)
+        }
+      })
+    }, [detections, showOverlay])
+
+    React.useEffect(() => {
+      drawDetections()
+    }, [drawDetections])
+
+    React.useEffect(() => {
+      const handleResize = () => drawDetections()
+      window.addEventListener("resize", handleResize)
+      return () => {
+        window.removeEventListener("resize", handleResize)
+      }
+    }, [drawDetections])
+
+    const connectDetections = React.useCallback(() => {
+      if (detectionWsRef.current && (detectionWsRef.current.readyState === WebSocket.OPEN || detectionWsRef.current.readyState === WebSocket.CONNECTING)) {
+        return
+      }
+      if (!detectionWsUrl || !roomId) return
+
+      detectionConnectingRef.current = true
+
+      const ws = new WebSocket(detectionWsUrl)
+      detectionWsRef.current = ws
+
+      ws.onopen = () => {
+        detectionConnectingRef.current = false
+        ws.send(JSON.stringify({ type: "join", roomId }))
+      }
+
+      ws.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data)
+          setDetections(normalizeDetections(msg))
+        } catch {
+          setDetections([])
+        }
+      }
+
+      ws.onerror = () => {
+        try { ws.close() } catch {}
+      }
+
+      ws.onclose = () => {
+        detectionWsRef.current = null
+        if (!networkOnline) return
+        const delay = 1000 + Math.random() * 2000
+        if (detectionReconnectRef.current != null) {
+          window.clearTimeout(detectionReconnectRef.current)
+        }
+        detectionReconnectRef.current = window.setTimeout(() => {
+          connectDetections()
+        }, delay)
+      }
+    }, [detectionWsUrl, networkOnline, normalizeDetections, roomId])
+
+    React.useEffect(() => {
+      if (!networkOnline) {
+        cleanupDetections()
+        return
+      }
+      connectDetections()
+      return () => {
+        cleanupDetections()
+      }
+    }, [networkOnline, connectDetections, cleanupDetections])
 
     const ICE_SERVERS: RTCIceServer[] = [
       { urls: "stun:stun.l.google.com:19302" },
       { urls: "stun:stun1.l.google.com:19302" },
-      // TURN 있으면 여기에 추가
+      // TURN ?덉쑝硫??ш린??異붽?
     ]
 
     const send = (msg: any) => {
@@ -137,7 +355,7 @@ function LiveCameraView({
 
       pc.onicecandidate = (ev) => {
         if (!ev.candidate) return
-        // Jetson이 기대하는 candidate 포맷으로 보냄
+        // Jetson??湲곕??섎뒗 candidate ?щ㎎?쇰줈 蹂대깂
         send({
           type: "candidate",
           roomId,
@@ -183,7 +401,7 @@ function LiveCameraView({
 
       await pc.setRemoteDescription({ type: "offer", sdp })
 
-      // offer 전에 쌓인 candidate 처리
+      // offer ?꾩뿉 ?볦씤 candidate 泥섎━
       for (const c of pendingCandidatesRef.current) {
         await pc.addIceCandidate(new RTCIceCandidate(c))
       }
@@ -192,7 +410,7 @@ function LiveCameraView({
       const answer = await pc.createAnswer()
       await pc.setLocalDescription(answer)
 
-      // Jetson이 기대하는 answer 포맷 (data.sdp를 뽑아씀)
+      // Jetson??湲곕??섎뒗 answer ?щ㎎ (data.sdp瑜?戮묒븘?)
       send({
         type: "answer",
         roomId,
@@ -227,7 +445,7 @@ function LiveCameraView({
       if (!wsUrl || !roomId) return
       setConnectionState("connecting")
 
-      // 이전 pc가 남아있으면 닫고 새로 시작
+      // ?댁쟾 pc媛 ?⑥븘?덉쑝硫??リ퀬 ?덈줈 ?쒖옉
       if (pcRef.current) {
         try { pcRef.current.close() } catch {}
         pcRef.current = null
@@ -250,10 +468,10 @@ function LiveCameraView({
       ws.onmessage = async (ev) => {
         const msg = JSON.parse(ev.data)
 
-        // Spring이 릴레이만 하니까 msg.data가 있든 없든 방어
+        // Spring??由대젅?대쭔 ?섎땲源?msg.data媛 ?덈뱺 ?녿뱺 諛⑹뼱
         if (msg.type === "offer") await handleOffer(msg.data ?? msg)
         if (msg.type === "candidate") await handleCandidate(msg.data ?? msg)
-        // answer는 viewer가 받는 쪽이면 보통 안 옴(offer 주도 Jetson이라서)
+        // answer??viewer媛 諛쏅뒗 履쎌씠硫?蹂댄넻 ????offer 二쇰룄 Jetson?대씪??
       }
 
       ws.onerror = () => {
@@ -312,6 +530,7 @@ function LiveCameraView({
         muted
         className={`absolute inset-0 z-10 w-full h-full object-cover transition-opacity ${hasStream ? "opacity-100" : "opacity-0"}`}
       />
+      <canvas ref={canvasRef} className="absolute inset-0 z-30 pointer-events-none" aria-hidden="true" />
 
       {showVideo ? (
         <>
@@ -346,28 +565,7 @@ function LiveCameraView({
             </div>
           </div>
 
-          {showOverlay && (
-            <>
-              <div className="absolute top-[25%] left-[20%] pointer-events-none animate-pulse" style={{ animationDuration: "2s" }}>
-                <div className="relative">
-                  <div className="w-24 h-16 border-2 border-emerald-400/70 rounded" />
-                  <div className="absolute -top-5 left-0 text-[10px] text-emerald-400 font-mono bg-black/50 px-1 rounded">
-                    바퀴벌레 94%
-                  </div>
-                </div>
-              </div>
-
-              <div className="absolute top-[55%] left-[60%] pointer-events-none">
-                <div className="relative">
-                  <div className="w-16 h-12 border-2 border-amber-400/60 rounded" />
-                  <div className="absolute -top-5 left-0 text-[10px] text-amber-400 font-mono bg-black/50 px-1 rounded">
-                    개미 78%
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </>
+          </>
       ) : (
         <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
           <div className="text-center space-y-3">
@@ -379,7 +577,7 @@ function LiveCameraView({
       )}
 
       {/* Top left badges */}
-      <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2">
+      <div className="absolute top-4 left-4 z-40 flex flex-wrap items-center gap-2">
         <Badge
           className={
             showVideo ? "bg-red-500/90 text-white border-transparent" : "bg-muted/90 text-muted-foreground border-transparent"
@@ -412,7 +610,7 @@ function LiveCameraView({
       </div>
 
       {/* Top right badges */}
-      <div className="absolute top-4 right-4 flex items-center gap-2">
+      <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
         {showVideo && (
           <>
             <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1">
@@ -427,7 +625,7 @@ function LiveCameraView({
       </div>
 
       {/* Bottom bar */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5">
+      <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5">
         <div className="flex items-end justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -449,7 +647,7 @@ function LiveCameraView({
 
       {/* Center crosshair */}
       {showVideo && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 z-40 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
           <div className="w-40 h-40 border border-white/10 rounded-lg" />
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-6 bg-white/20" />
           <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-px h-6 bg-white/20" />
@@ -460,7 +658,7 @@ function LiveCameraView({
       )}
 
       {isManual && (
-        <div className="absolute bottom-16 right-4 z-30 rounded-lg border border-white/10 bg-black/60 p-1.5 backdrop-blur-sm">
+        <div className="absolute bottom-16 right-4 z-40 rounded-lg border border-white/10 bg-black/60 p-1.5 backdrop-blur-sm">
           <div className="grid grid-cols-3 gap-2 place-items-center">
             <div aria-hidden="true" />
             <Button
@@ -701,7 +899,7 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
             {detections.map((event) => {
               const snapshotUrl = resolveMediaUrl(event.snapshotUrl)
               return (
-              <div
+                <div
                 key={event.id}
                 className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors cursor-pointer"
                 onClick={() => onSelect(event.id)}
@@ -738,7 +936,7 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
                               window.open(snapshotUrl, "_blank")
                             }}
                           >
-                            새 창 보기
+                            사진 보기
                           </Button>
                         </div>
                       </HoverCardContent>
@@ -747,7 +945,8 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
                   <span className="text-sm text-foreground">{typeLabels[event.type] || event.type}</span>
                 </div>
               </div>
-            )})}
+              )
+            })}
           </div>
         )}
       </CardContent>
@@ -763,6 +962,8 @@ export default function CameraPage() {
   const { isOnline: networkOnline } = useNetworkStatus()
   const { toast } = useToast()
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+  const detectionWsUrl =
+    process.env.NEXT_PUBLIC_DETECTION_WS_URL ?? (baseUrl ? `${baseUrl.replace(/^http/, "ws")}/ws/detections` : "")
 
   const [cars, setCars] = useState<{ carId: number; nickname: string }[]>([])
   const [carsLoading, setCarsLoading] = useState(true)
@@ -794,7 +995,7 @@ export default function CameraPage() {
       })
       .catch((e: any) => {
         if (!mounted) return
-        setCarsError(e?.message ?? "차량 목록을 불러오는데 실패했습니다.")
+        setCarsError(e?.message ?? "차량 목록을 불러오는 데 실패했습니다.")
       })
       .finally(() => {
         if (!mounted) return
@@ -842,8 +1043,8 @@ export default function CameraPage() {
       toast({ title: "모드 변경 완료", description: `현재 모드: ${mode}` })
     } catch {
       setDriveMode(prev)
-      setModeError("모드 변경에 실패했습니다. 다시 시도해주세요.")
-      toast({ title: "모드 변경 실패", description: "잠시 후 다시 시도해주세요." })
+      setModeError("모드 변경에 실패했습니다. 다시 시도해 주세요.")
+      toast({ title: "모드 변경 실패", description: "잠시 후 다시 시도해 주세요." })
     }
   }
 
@@ -863,7 +1064,7 @@ export default function CameraPage() {
     } catch {
       const now = Date.now()
       if (now - lastDriveToastRef.current > 2000) {
-        toast({ title: "수동 조작 실패", description: "차량 제어 요청이 실패했습니다." })
+        toast({ title: "수동 조작 실패", description: "차량 제어 요청에 실패했습니다." })
         lastDriveToastRef.current = now
       }
     }
@@ -914,26 +1115,27 @@ export default function CameraPage() {
           <div className="flex-1">
             <div className="w-full">
               <div className="relative w-full aspect-video max-h-[60vh] lg:max-h-[70vh]">
-            <LiveCameraView
-              isOnline={carStatus.data?.isOnline ?? false}
-              networkOnline={networkOnline}
-              isDetecting={isDetecting}
-              showOverlay={showOverlay}
-              lastDetectionLabel={lastDetectionLabel}
-              isManual={driveMode === "MANUAL"}
-              manualDisabled={!networkOnline || carStatus.isLoading}
-              onDriveStart={handleDriveStart}
-              onDriveStop={handleDriveStop}
-              wsUrl={process.env.NEXT_PUBLIC_SIGNALING_URL ?? "ws://I14B201.p.ssafy.io/ws/webrtc"}
-              roomId={process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"}
-            />
+                <LiveCameraView
+                  isOnline={carStatus.data?.isOnline ?? false}
+                  networkOnline={networkOnline}
+                  isDetecting={isDetecting}
+                  showOverlay={showOverlay}
+                  lastDetectionLabel={lastDetectionLabel}
+                  isManual={driveMode === "MANUAL"}
+                  manualDisabled={!networkOnline || carStatus.isLoading}
+                  onDriveStart={handleDriveStart}
+                  onDriveStop={handleDriveStop}
+                  wsUrl={process.env.NEXT_PUBLIC_SIGNALING_URL ?? "ws://I14B201.p.ssafy.io/ws/webrtc"}
+                  detectionWsUrl={detectionWsUrl}
+                  roomId={process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"}
+                />
               </div>
             </div>
             <div className="mt-3">
-            <ControlPanel
-              isLoading={carStatus.isLoading}
-              networkOnline={networkOnline}
-              driveMode={driveMode}
+              <ControlPanel
+                isLoading={carStatus.isLoading}
+                networkOnline={networkOnline}
+                driveMode={driveMode}
                 onChangeMode={handleChangeMode}
                 onDriveStart={handleDriveStart}
                 onDriveStop={handleDriveStop}
@@ -990,3 +1192,5 @@ export default function CameraPage() {
     </div>
   )
 }
+
+

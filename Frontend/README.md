@@ -26,5 +26,7 @@ NEXT_PUBLIC_API_BASE_URL=https://i14b201.p.ssafy.io
 
 
 ### 프론트는 Vercel, 백은 EC2인 경우 (웹, 모바일 모두 가능)
+`cd Frontend` 후
+
 `vercel --prod`
 실행 후 나오는 Preview url 접속

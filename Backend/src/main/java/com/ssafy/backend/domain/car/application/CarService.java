@@ -225,7 +225,7 @@ public class CarService {
 
     /**
      * 9️⃣ 차량 직접 제어 (수동 주행)
-     * - 전/후/좌/우 명령을 MQTT로 전달
+     * - v/w 속도 명령을 MQTT로 전달
      * - MANUAL 모드일 때만 작동 가능 (권장)
      */
     @Transactional
@@ -245,35 +245,10 @@ public class CarService {
         }
 
         try {
-            // 방향 명령을 기기용 속도 데이터(v, w)로 변환
-            // v: 선속도(전진/후진), w: 각속도(좌/우 회전)
+            // v: linear velocity, w: angular velocity
             Map<String, Double> payload = new HashMap<>();
-            switch (request.command().toUpperCase()) {
-                case "UP":
-                    payload.put("v", 0.5);
-                    payload.put("w", 0.0);
-                    break;
-                case "DOWN":
-                    payload.put("v", -0.5);
-                    payload.put("w", 0.0);
-                    break;
-                case "LEFT":
-                    payload.put("v", 0.0);
-                    payload.put("w", 1.0);
-                    break;
-                case "RIGHT":
-                    payload.put("v", 0.0);
-                    payload.put("w", -1.0);
-                    break;
-                case "STOP":
-                    payload.put("v", 0.0);
-                    payload.put("w", 0.0);
-                    break;
-                default:
-                    payload.put("v", 0.0);
-                    payload.put("w", 0.0);
-                    break;
-            }
+            payload.put("v", request.v());
+            payload.put("w", request.w());
 
             String jsonPayload = objectMapper.writeValueAsString(payload);
 
@@ -284,7 +259,7 @@ public class CarService {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
-        return CarResponse.ControlResponse.of(request.command());
+        return CarResponse.ControlResponse.of("v=" + request.v() + ",w=" + request.w());
     }
 
     /**

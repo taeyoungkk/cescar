@@ -25,7 +25,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
-public class JetsonStatusService {
+public class MqttInboundService {
 
     private final String EMQX_API_URL = "http://localhost:18083/api/v5/clients/";
     private final ObjectMapper objectMapper;
@@ -85,6 +85,8 @@ public class JetsonStatusService {
         System.out.println("🔍 [DETECTION] " + robotId + " - 감지된 물체: " + detect.getObject_type()
                 + " (신뢰도: " + detect.getConfidence() + "%)");
 
+        detectionCache.put(robotId, detect);
+
         // 🎯 FCM 브로드캐스트 전송
         String title = "🚨 [" + robotId + "] 물체 감지!";
         String body = String.format("%s 물체가 %.1f%% 확률로 감지되었습니다.",
@@ -102,6 +104,7 @@ public class JetsonStatusService {
 
     // 로봇 ID별 최신 상세 상태를 메모리에 저장 (캐싱)
     private final Map<String, DeviceStatusRequest> statusCache = new ConcurrentHashMap<>();
+    private final Map<String, DetectionRequest> detectionCache = new ConcurrentHashMap<>();
 
     /**
      * EMQX API를 통해 클라이언트가 현재 네트워크에 연결되어 있는지 확인
@@ -136,6 +139,10 @@ public class JetsonStatusService {
      */
     public DeviceStatusRequest getDetailedStatus(String deviceId) {
         return statusCache.get(deviceId);
+    }
+
+    public DetectionRequest getLatestDetection(String deviceId) {
+        return detectionCache.get(deviceId);
     }
 
     /**

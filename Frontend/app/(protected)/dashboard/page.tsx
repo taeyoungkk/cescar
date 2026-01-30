@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import React, { useState, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
@@ -19,6 +19,7 @@ import {
   Play,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -130,7 +131,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
       icon: XCircle,
     },
     resolved: {
-      label: "처리됨",
+      label: "해결됨",
       className: "bg-emerald-500/20 text-emerald-400 border-emerald-500/30",
       icon: CheckCircle,
     },
@@ -261,7 +262,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
           <div className="flex items-start justify-between gap-3">
             <div>
               <SheetTitle className="text-foreground">탐지 상세 정보</SheetTitle>
-              <SheetDescription className="text-muted-foreground">탐지 ID · {record.id}</SheetDescription>
+              <SheetDescription className="text-muted-foreground">탐지 ID: {record.id}</SheetDescription>
             </div>
             <StatusBadge status={record.status} />
           </div>
@@ -273,7 +274,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
               </p>
             </div>
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">로봇 ID</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">차량 ID</p>
               <p className="text-sm font-medium text-foreground">{record.robotId}</p>
             </div>
           </div>
@@ -299,8 +300,8 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
 
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 p-3">
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">스냅샷 기반 상세 확인</p>
-              <p className="text-xs text-muted-foreground/70">탐지 전후 영상으로 맥락을 확인하세요.</p>
+              <p className="text-xs text-muted-foreground">탐지 영상 확인</p>
+              <p className="text-xs text-muted-foreground/70">탐지 전후 영상을 확인하세요.</p>
             </div>
             <Button variant="outline" size="sm" onClick={() => setIsVideoOpen(true)}>
               <Play className="h-4 w-4 mr-1" />
@@ -316,7 +317,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
                 <p className="text-sm font-medium text-foreground">{typeLabels[record.type] || record.type}</p>
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">신뢰도</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">확신도</p>
                 <ConfidenceBadge confidence={record.confidence} />
               </div>
             </div>
@@ -327,7 +328,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
             <Textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="메모를 입력하세요..."
+              placeholder="메모를 입력하세요."
               className="bg-input border-border resize-none min-h-[100px]"
             />
           </div>
@@ -364,7 +365,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
           <DialogHeader>
             <DialogTitle>탐지 영상</DialogTitle>
             <DialogDescription>
-              {record.date} {record.time} · {record.robotId}
+              {record.date} {record.time} 쨌 {record.robotId}
             </DialogDescription>
           </DialogHeader>
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
@@ -376,7 +377,7 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center space-y-2">
                   <Play className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-                  <p className="text-sm text-muted-foreground">영상 준비 중</p>
+                  <p className="text-sm text-muted-foreground">영상 준비 중...</p>
                 </div>
               </div>
             )}
@@ -394,7 +395,7 @@ function EmptyState() {
         <Search className="h-8 w-8 text-muted-foreground" />
       </div>
       <h3 className="text-lg font-medium text-foreground mb-2">검색 결과가 없습니다</h3>
-      <p className="text-sm text-muted-foreground max-w-sm">필터 조건을 변경하여 다시 검색해보세요.</p>
+      <p className="text-sm text-muted-foreground max-w-sm">필터 조건을 변경하고 다시 검색해 주세요.</p>
     </div>
   )
 }
@@ -463,7 +464,7 @@ function FiltersBar({ filters, onFiltersChange, onClearFilters, totalCount }: Fi
             <SelectItem value="detected">탐지됨</SelectItem>
             <SelectItem value="confirmed">확인됨</SelectItem>
             <SelectItem value="false_alarm">오탐</SelectItem>
-            <SelectItem value="resolved">처리됨</SelectItem>
+            <SelectItem value="resolved">해결됨</SelectItem>
           </SelectContent>
         </Select>
 
@@ -517,7 +518,7 @@ function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableP
           <TableRow className="border-border hover:bg-transparent">
             <TableHead className="text-muted-foreground">시간</TableHead>
             <TableHead className="text-muted-foreground">탐지 유형</TableHead>
-            <TableHead className="text-muted-foreground">신뢰도</TableHead>
+            <TableHead className="text-muted-foreground">확신도</TableHead>
             <TableHead className="text-muted-foreground">상태</TableHead>
             <TableHead className="text-muted-foreground text-right">액션</TableHead>
           </TableRow>
@@ -582,7 +583,7 @@ function DashboardContent() {
     // Demo engine snapshot
     const snap = robotDemoEngine.getSnapshot()
 
-    // Detection 목록 (CameraEvent → Detection 변환)
+    // Detection 紐⑸줉 (CameraEvent ??Detection 蹂??
     const detections: Detection[] = snap.cameraEvents.map((e, idx) => ({
       id: e.id,
       robotId: "CESCAR-01",
@@ -594,7 +595,7 @@ function DashboardContent() {
       notes: "",
     }))
 
-    // Stats 계산
+    // Stats 怨꾩궛
     const stats: DetectionStats = {
       todayCount: detections.length,
       weekCount: detections.length,
@@ -617,9 +618,9 @@ function DashboardContent() {
       <div className="p-4 lg:p-6">
         <div className="max-w-7xl mx-auto">
           <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-foreground">탐지 기록</h1>
+          <h1 className="text-2xl font-semibold text-foreground">탐지 기록</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              탐지 기록 및 통계를 확인하세요 (DEMO MODE)
+              탐지 기록 및 통계를 확인하세요. (DEMO MODE)
             </p>
           </div>
 
@@ -629,10 +630,15 @@ function DashboardContent() {
 
           <Card className="bg-card border-border">
             <CardHeader className="pb-4">
-              <CardTitle className="text-base font-medium">탐지 기록</CardTitle>
+            <CardTitle className="text-base font-medium">탐지 기록</CardTitle>
             </CardHeader>
             <CardContent>
-              <FiltersBar
+            {error && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}            <FiltersBar
                 filters={filters}
                 onFiltersChange={setFilters}
                 onClearFilters={() => setFilters({})}
@@ -674,6 +680,7 @@ function DashboardContent() {
     selectedDetection,
     filters,
     isLoading,
+    error,
     setFilters,
     clearFilters,
     selectDetection,
@@ -709,7 +716,7 @@ function DashboardContent() {
       <div className="max-w-7xl mx-auto">
         <div className="mb-6">
           <h1 className="text-2xl font-semibold text-foreground">탐지 기록</h1>
-          <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요</p>
+          <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요.</p>
         </div>
 
         <div className="mb-6">
@@ -721,6 +728,12 @@ function DashboardContent() {
             <CardTitle className="text-base font-medium">탐지 기록</CardTitle>
           </CardHeader>
           <CardContent>
+            {error && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
             <FiltersBar
               filters={filters}
               onFiltersChange={setFilters}
@@ -774,3 +787,6 @@ export default function DashboardPage() {
     </Suspense>
   )
 }
+
+
+

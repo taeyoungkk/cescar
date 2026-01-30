@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import React, { useEffect } from "react"
 import Link from "next/link"
@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -35,6 +36,7 @@ import { useRecentDetections } from "@/hooks/useRecentDetections"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useAlerts } from "@/hooks/useAlerts"
 import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
+import { useCarMaps } from "@/hooks/useCarMaps"
 
 import type { Detection, SystemAlert, DetectionStats, CarStatus, CarDetail, CarMode } from "@/core/types"
 import { OfflineGuardButton } from "@/components/offline-guard-button"
@@ -123,10 +125,10 @@ function RobotStatusSection({
         value={status.isOnline ? "온라인" : "오프라인"}
         icon={status.isOnline ? Wifi : WifiOff}
         variant={status.isOnline ? "success" : "danger"}
-        subtitle={status.isOnline ? "정상 연결됨" : "연결 끊김"}
+        subtitle={status.isOnline ? "정상 연결" : "연결 끊김"}
       />
       <StatusCard
-        title="마지막 신호"
+        title="마지막 수신"
         value={lastSeenLabel}
         icon={Clock}
         variant="default"
@@ -144,7 +146,7 @@ function RobotStatusSection({
         value={stats?.todayCount ?? 0}
         icon={Bug}
         variant="default"
-        subtitle={`이번 주: ${stats?.weekCount ?? 0}건`}
+        subtitle={`이번 주 ${stats?.weekCount ?? 0}건`}
       />
     </div>
   )
@@ -174,8 +176,8 @@ function MapVisualization({ status, progress = 0 }: { status: MapStatus; progres
           <div className="p-4 rounded-full bg-secondary/50 mb-4">
             <Grid3X3 className="h-12 w-12 text-muted-foreground/50" />
           </div>
-          <p className="text-muted-foreground text-sm">생성된 지도가 없습니다</p>
-          <p className="text-muted-foreground/60 text-xs mt-1">지도 생성을 시작하세요</p>
+          <p className="text-muted-foreground text-sm">생성된 지도가 없습니다.</p>
+          <p className="text-muted-foreground/60 text-xs mt-1">지도를 생성해 주세요.</p>
         </div>
       )}
 
@@ -229,7 +231,7 @@ function MapVisualization({ status, progress = 0 }: { status: MapStatus; progres
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
             <div className="flex items-center gap-3 mb-2">
               <Loader2 className="h-4 w-4 text-emerald-400 animate-spin" />
-              <span className="text-sm text-emerald-400 font-medium">지도 생성 중...</span>
+            <span className="text-sm text-emerald-400 font-medium">지도 생성 중...</span>
             </div>
             <Progress value={progress} className="h-1.5" />
             <p className="text-xs text-muted-foreground mt-2">{progress}% 완료</p>
@@ -315,7 +317,7 @@ function MapVisualization({ status, progress = 0 }: { status: MapStatus; progres
           <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3">
             <div className="flex items-center justify-between text-xs text-white/80">
               <span>마지막 업데이트: 방금 전</span>
-              <span>탐지 지점: 3개</span>
+              <span>탐지 지점 3개</span>
             </div>
           </div>
         </>
@@ -357,7 +359,7 @@ function MapMetadataPanel({
         <p className="text-sm font-medium text-foreground">{areaSize || "-"}</p>
       </div>
       <div className="bg-secondary/50 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground mb-1">차량 ID</p>
+        <p className="text-xs text-muted-foreground mb-1">李⑤웾 ID</p>
         <p className="text-sm font-medium text-foreground font-mono">{robotId || "-"}</p>
       </div>
     </div>
@@ -392,7 +394,7 @@ function MapHistoryDialog({
           {maps.length === 0 ? (
             <div className="text-center py-8">
               <Grid3X3 className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">저장된 지도가 없습니다</p>
+              <p className="text-sm text-muted-foreground">등록된 지도가 없습니다.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -459,6 +461,8 @@ function MapGenerationSection({
   networkOnline,
   robotOnline,
   mapReady,
+  generationEnabled = true,
+  generationDisabledReason,
 }: {
   mapStatus: MapStatus
   progress?: number
@@ -480,25 +484,28 @@ function MapGenerationSection({
   networkOnline: boolean
   robotOnline: boolean
   mapReady: boolean
+  generationEnabled?: boolean
+  generationDisabledReason?: string
 }) {
   const isDisabled = !isOnline
   const enabled = detectionEnabled ?? true
+  const canGenerate = generationEnabled && !!onStartGeneration
   const canStart = enabled && networkOnline && robotOnline && mapReady
   const canStop = enabled && networkOnline && robotOnline
   const startBlockMessage = !enabled
     ? (detectionDisabledReason ?? "현재 이 기능은 사용할 수 없습니다.")
     : !networkOnline
-    ? "네트워크에 연결되어야 탐지를 시작할 수 있습니다"
+    ? "네트워크 연결 후 탐지를 시작할 수 있습니다."
     : !robotOnline
-    ? "로봇이 오프라인 상태입니다. 로봇 연결 후 다시 시도해 주세요"
+    ? "차량이 오프라인입니다. 연결 후 다시 시도하세요."
     : !mapReady
-    ? "지도가 생성 완료된 이후에 탐지를 시작할 수 있습니다"
-    : "탐지를 시작할 수 없습니다"
+    ? "지도가 준비된 후 탐지를 시작할 수 있습니다."
+    : "탐지를 시작할 수 없습니다."
   const stopBlockMessage = !enabled
     ? (detectionDisabledReason ?? "현재 이 기능은 사용할 수 없습니다.")
     : !networkOnline
-    ? "네트워크에 연결되어야 탐지를 중지할 수 있습니다"
-    : "로봇이 오프라인 상태입니다. 로봇 연결 후 다시 시도해 주세요."
+    ? "네트워크 연결 후 탐지를 중지할 수 있습니다."
+    : "차량이 오프라인입니다. 연결 후 다시 시도하세요."
 
   return (
     <Card className="bg-card border-border overflow-hidden">
@@ -552,12 +559,16 @@ function MapGenerationSection({
 
         <div className="flex gap-3">
           {mapStatus === "generating" ? (
-            <Button variant="destructive" className="flex-1" onClick={onStopGeneration} disabled={isDisabled}>
+            <Button variant="destructive" className="flex-1" onClick={onStopGeneration} disabled={isDisabled || !onStopGeneration}>
               <Square className="mr-2 h-4 w-4" />
               생성 중지
             </Button>
           ) : (
-            <Button className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground" onClick={onStartGeneration} disabled={isDisabled}>
+            <Button
+              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={onStartGeneration}
+              disabled={isDisabled || !canGenerate}
+            >
               {mapStatus === "completed" ? (
                 <>
                   <MapIcon className="mr-2 h-4 w-4" />
@@ -586,7 +597,15 @@ function MapGenerationSection({
         {isDisabled && (
           <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
             <AlertTriangle className="h-4 w-4 text-amber-400" />
-            <p className="text-xs text-amber-400">로봇이 오프라인 상태입니다. 연결 후 지도 생성이 가능합니다.</p>
+            <p className="text-xs text-amber-400">로봇이 오프라인이면 지도 생성이 불가합니다.</p>
+          </div>
+        )}
+        {!generationEnabled && (
+          <div className="flex items-center gap-2 p-3 bg-secondary/40 border border-border rounded-lg">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            <p className="text-xs text-muted-foreground">
+              {generationDisabledReason ?? "지도 생성은 로봇에서 수행합니다."}
+            </p>
           </div>
         )}
       </CardContent>
@@ -681,7 +700,7 @@ function SystemAlertsSection({
             ))}
           </div>
         ) : alerts.filter((a) => !a.isRead).length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">알림이 없습니다</p>
+          <p className="text-sm text-muted-foreground text-center py-4">알림이 없습니다.</p>
         ) : (
           alerts.filter((a) => !a.isRead).slice(0, 3).map((alert) => (
             <AlertItem key={alert.id} alert={alert} onRead={onRead} />
@@ -757,6 +776,7 @@ export default function HomePage() {
   const { setExternalAlerts } = realAlerts
   const mapStore = useMapStore()
   const { isOnline: networkOnline } = useNetworkStatus()
+  const carMaps = useCarMaps(isDemo ? null : carId)
 
   let status: CarStatus | null = null
   let recentDetections: Detection[] = []
@@ -816,6 +836,8 @@ export default function HomePage() {
     alertsLoading = realAlerts.isLoading
   }
 
+  const currentMap = isDemo ? null : carMaps.currentMap
+
   const computedAlerts = React.useMemo(() => {
     const list: SystemAlert[] = []
     const now = Date.now()
@@ -825,7 +847,7 @@ export default function HomePage() {
         type: "error",
         title: isDemo ? "로봇 연결 끊김" : "차량 오프라인",
         message: isDemo
-          ? "로봇이 오프라인입니다. 네트워크/전원을 확인하세요."
+          ? "로봇이 오프라인입니다. 전원/네트워크를 확인하세요."
           : "차량이 오프라인입니다. 전원/네트워크를 확인하세요.",
         timestamp: new Date().toISOString(),
         isRead: false,
@@ -844,7 +866,7 @@ export default function HomePage() {
         })
       }
     }
-    if (mapStore.status !== "completed") {
+    if ((isDemo ? mapStore.status === "completed" : Boolean(currentMap)) === false) {
       list.push({
         id: "map",
         type: "info",
@@ -855,7 +877,7 @@ export default function HomePage() {
       })
     }
     return list
-  }, [status?.isOnline, status?.updatedAt, mapStore.status, isDemo])
+  }, [status?.isOnline, status?.updatedAt, mapStore.status, isDemo, currentMap])
 
   React.useEffect(() => {
     setExternalAlerts(computedAlerts)
@@ -865,9 +887,28 @@ export default function HomePage() {
 
 
   const robotOnline = status?.isOnline ?? false
-  const mapReady = mapStore.status === "completed"
+  const mapReady = isDemo ? mapStore.status === "completed" : Boolean(currentMap)
+  const areaSize = currentMap && currentMap.width && currentMap.height && currentMap.resolution
+    ? `${(currentMap.width * currentMap.resolution).toFixed(1)}m x ${(currentMap.height * currentMap.resolution).toFixed(1)}m`
+    : "-"
+  const generatedAt = currentMap?.createdAt
+    ? new Date(currentMap.createdAt).toLocaleString("ko-KR")
+    : "-"
+  const mapHistoryItems: StoredMap[] = isDemo
+    ? mapStore.maps
+    : carMaps.maps.map((m) => ({
+        id: String(m.id),
+        generatedAt: new Date(m.createdAt).toLocaleString("ko-KR"),
+        areaSize:
+          m.width && m.height && m.resolution
+            ? `${(m.width * m.resolution).toFixed(1)}m x ${(m.height * m.resolution).toFixed(1)}m`
+            : "-",
+        robotId: carId ? String(carId) : "-",
+        detectionsCount: 0,
+        mapSeed: Number(m.id),
+      }))
 
-  // MVP: real에서는 탐지 컨트롤 비활성 (추후 API 확정 후 연결)
+  // MVP: real?먯꽌??탐지 而⑦듃濡?鍮꾪솢??(異뷀썑 API ?뺤젙 ???곌껐)
   const demoSnap = isDemo ? robotDemoEngine.getSnapshot() : null
   const isDetecting = isDemo ? (demoSnap?.isDetecting ?? false) : false
   const detectionLoading = isDemo ? statusLoading : false
@@ -900,7 +941,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto">
           <div className="mb-6">
             <h1 className="text-2xl font-semibold text-foreground">홈</h1>
-            <p className="text-sm text-muted-foreground mt-1">로봇 상태 및 탐지 현황을 확인하세요</p>
+            <p className="text-sm text-muted-foreground mt-1">로봇 상태 및 감지 현황을 확인하세요.</p>
           </div>
           <div className="animate-pulse bg-secondary/20 h-96 rounded-lg" />
         </div>
@@ -914,7 +955,7 @@ export default function HomePage() {
         <div className="mb-6">
           <h1 className="text-2xl font-semibold text-foreground">홈</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            로봇 상태 및 탐지 현황을 확인하세요{isDemo ? " (DEMO MODE)" : ""}
+            로봇 상태 및 감지 현황을 확인하세요{isDemo ? " (DEMO MODE)" : ""}
           </p>
         </div>
 
@@ -924,18 +965,26 @@ export default function HomePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
+            {!isDemo && carMaps.error && (
+              <Alert variant="destructive">
+                <AlertTitle>지도 불러오기 실패</AlertTitle>
+                <AlertDescription>{carMaps.error}</AlertDescription>
+              </Alert>
+            )}
             <MapGenerationSection
-              mapStatus={mapStore.status}
-              progress={mapStore.progress}
+              mapStatus={isDemo ? mapStore.status : currentMap ? "completed" : "no_map"}
+              progress={isDemo ? mapStore.progress : 0}
               isOnline={robotOnline}
-              generatedAt={mapStore.activeMap?.generatedAt}
-              areaSize={mapStore.activeMap?.areaSize}
+              generatedAt={generatedAt}
+              areaSize={areaSize}
               robotId={carId ? String(carId) : undefined}
-              maps={mapStore.maps}
-              onStartGeneration={mapStore.startGeneration}
-              onStopGeneration={mapStore.stopGeneration}
-              onSelectMap={mapStore.selectMap}
-              onDeleteMap={mapStore.deleteMap}
+              maps={mapHistoryItems}
+              onStartGeneration={isDemo ? mapStore.startGeneration : undefined}
+              onStopGeneration={isDemo ? mapStore.stopGeneration : undefined}
+              onSelectMap={isDemo ? mapStore.selectMap : (id) => carMaps.selectMap(Number(id))}
+              onDeleteMap={isDemo ? mapStore.deleteMap : (id) => carMaps.deleteMap(Number(id))}
+              generationEnabled={isDemo}
+              generationDisabledReason="지도 생성은 로봇에서 수행됩니다. 현재는 조회만 가능합니다."
               detectionEnabled
               isDetecting={isDetecting}
               detectionLoading={isDemo ? statusLoading : detectionLoading}
@@ -962,3 +1011,5 @@ export default function HomePage() {
     </div>
   )
 }
+
+

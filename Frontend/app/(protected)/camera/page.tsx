@@ -1,64 +1,44 @@
 "use client"
 
-import React, { useState } from "react"
+import React, { useMemo, useRef, useState } from "react"
 import {
   Wifi,
   WifiOff,
-  Battery,
-  BatteryLow,
   Camera,
-  AlertTriangle,
   Clock,
   Circle,
-  Play,
   Square,
-  ImageIcon,
-  Eye,
-  EyeOff,
-  SignalLow,
-  SignalMedium,
-  SignalHigh,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { Switch } from "@/components/ui/switch"
-import { useRobotStatus } from "@/hooks/useRobotStatus"
-import type { RobotStatus, CameraEvent, ConnectionQuality } from "@/core/types"
-import { OfflineGuardButton } from "@/components/offline-guard-button"
+import { useToast } from "@/components/ui/use-toast"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
+import { useCarStatus } from "@/hooks/useCarStatus"
+import { useRecentDetections } from "@/hooks/useRecentDetections"
+import * as carApi from "@/core/api/car"
+import type { CarStatus, Detection } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 
 // ============================================
 // Presentational Components (UI Only)
 // ============================================
 
-interface ConnectionQualityIndicatorProps {
-  quality: ConnectionQuality
-}
-
-function ConnectionQualityIndicator({ quality }: ConnectionQualityIndicatorProps) {
-  const config = {
-    excellent: { icon: SignalHigh, label: "우수", color: "text-emerald-400" },
-    good: { icon: SignalMedium, label: "양호", color: "text-amber-400" },
-    poor: { icon: SignalLow, label: "불안정", color: "text-red-400" },
-  }
-
-  const { icon: Icon, label, color } = config[quality]
-
-  return (
-    <div className={`flex items-center gap-1.5 ${color}`}>
-      <Icon className="h-4 w-4" />
-      <span className="text-xs font-medium">{label}</span>
-    </div>
-  )
-}
-
 interface LiveCameraViewProps {
   isOnline: boolean
   networkOnline: boolean
   isDetecting: boolean
   showOverlay: boolean
-  connectionQuality: ConnectionQuality
+  lastDetectionLabel: string
+  isManual: boolean
+  manualDisabled: boolean
+  onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
+  onDriveStop: () => void
   wsUrl: string
   roomId: string
 }
@@ -68,11 +48,16 @@ function LiveCameraView({
   networkOnline,
   isDetecting,
   showOverlay,
-  connectionQuality,
+  lastDetectionLabel,
+  isManual,
+  manualDisabled,
+  onDriveStart,
+  onDriveStop,
   wsUrl,
   roomId,
 }: LiveCameraViewProps) {
     const [hasStream, setHasStream] = React.useState(false)
+    const [connectionState, setConnectionState] = React.useState<"offline" | "connecting" | "signaling" | "connected" | "failed">("offline")
     const showVideo = hasStream
     const closingRef = React.useRef(false)
 
@@ -87,6 +72,7 @@ function LiveCameraView({
     const cleanupWebRTC = React.useCallback(() => {
       connectingRef.current = false
       closingRef.current = true
+      setConnectionState(networkOnline ? "connecting" : "offline")
 
       const pc = pcRef.current
       const ws = wsRef.current
@@ -134,8 +120,18 @@ function LiveCameraView({
       const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
       pcRef.current = pc
 
-      pc.oniceconnectionstatechange = () => console.log("[ice]", pc.iceConnectionState)
-      pc.onconnectionstatechange = () => console.log("[pc]", pc.connectionState)
+      pc.oniceconnectionstatechange = () => {
+        const s = pc.iceConnectionState
+        if (s === "connected" || s === "completed") setConnectionState("connected")
+        if (s === "disconnected") setConnectionState("connecting")
+        if (s === "failed") setConnectionState("failed")
+      }
+      pc.onconnectionstatechange = () => {
+        const s = pc.connectionState
+        if (s === "connected") setConnectionState("connected")
+        if (s === "connecting") setConnectionState("connecting")
+        if (s === "failed") setConnectionState("failed")
+      }
 
       pc.addTransceiver("video", { direction: "recvonly" })
 
@@ -161,6 +157,7 @@ function LiveCameraView({
 
         const stream = ev.streams?.[0] ?? new MediaStream([ev.track])
         setHasStream(true)
+        setConnectionState("connected")
 
         const video = videoRef.current
 
@@ -228,6 +225,7 @@ function LiveCameraView({
       }
 
       if (!wsUrl || !roomId) return
+      setConnectionState("connecting")
 
       // 이전 pc가 남아있으면 닫고 새로 시작
       if (pcRef.current) {
@@ -243,6 +241,7 @@ function LiveCameraView({
       wsRef.current = ws
 
       ws.onopen = () => {
+        setConnectionState("signaling")
         send({ type: "join", roomId })
         createPeerConnection()
         send({ type: "ready", roomId })
@@ -259,6 +258,7 @@ function LiveCameraView({
 
       ws.onerror = () => {
         connectingRef.current = false
+        setConnectionState("failed")
       }
 
       ws.onclose = () => {
@@ -272,6 +272,7 @@ function LiveCameraView({
         wsRef.current = null
         pendingCandidatesRef.current = []
         setHasStream(false)
+        setConnectionState(networkOnline ? "connecting" : "offline")
         if (videoRef.current) videoRef.current.srcObject = null
       }
     }, [cleanupWebRTC, roomId, wsUrl])
@@ -279,6 +280,7 @@ function LiveCameraView({
       React.useEffect(() => {
         if (!networkOnline) {
           connectingRef.current = false
+          setConnectionState("offline")
           cleanupWebRTC()
           return
         }
@@ -377,7 +379,7 @@ function LiveCameraView({
       )}
 
       {/* Top left badges */}
-      <div className="absolute top-4 left-4 flex items-center gap-3">
+      <div className="absolute top-4 left-4 flex flex-wrap items-center gap-2">
         <Badge
           className={
             showVideo ? "bg-red-500/90 text-white border-transparent" : "bg-muted/90 text-muted-foreground border-transparent"
@@ -386,12 +388,27 @@ function LiveCameraView({
           <Circle className={`h-2 w-2 mr-1.5 ${showVideo ? "fill-white animate-pulse" : "fill-muted-foreground"}`} />
           {showVideo ? "LIVE" : "OFFLINE"}
         </Badge>
-
-        {showVideo && (
-          <div className="bg-black/70 rounded px-2.5 py-1">
-            <ConnectionQualityIndicator quality={connectionQuality} />
-          </div>
-        )}
+        <Badge
+          className={
+            connectionState === "connected"
+              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+              : connectionState === "failed"
+                ? "bg-red-500/20 text-red-300 border-red-500/30"
+                : connectionState === "offline"
+                  ? "bg-muted text-muted-foreground border-border"
+                  : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+          }
+        >
+          {connectionState === "connected"
+            ? "스트림 연결됨"
+            : connectionState === "signaling"
+              ? "신호 교환 중"
+              : connectionState === "connecting"
+                ? "연결 중"
+                : connectionState === "failed"
+                  ? "연결 실패"
+                  : "오프라인"}
+        </Badge>
       </div>
 
       {/* Top right badges */}
@@ -419,7 +436,7 @@ function LiveCameraView({
                 {isDetecting ? "탐지 중" : "대기 중"}
               </span>
             </div>
-            <p className="text-xs text-white/60">마지막 탐지: 3분 전</p>
+            <p className="text-xs text-white/60">마지막 탐지: {lastDetectionLabel}</p>
           </div>
           <div className="text-right space-y-0.5">
             <p className="text-xs text-white/80 font-mono">
@@ -441,56 +458,126 @@ function LiveCameraView({
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 border border-white/30 rounded-full" />
         </div>
       )}
+
+      {isManual && (
+        <div className="absolute bottom-16 right-4 z-30 rounded-lg border border-white/10 bg-black/60 p-1.5 backdrop-blur-sm">
+          <div className="grid grid-cols-3 gap-2 place-items-center">
+            <div aria-hidden="true" />
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={manualDisabled}
+              onPointerDown={() => onDriveStart("forward")}
+              onPointerUp={onDriveStop}
+              onPointerLeave={onDriveStop}
+              onPointerCancel={onDriveStop}
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-8 w-8"
+              disabled={manualDisabled}
+              onPointerDown={() => onDriveStart("stop")}
+              onPointerUp={onDriveStop}
+              onPointerLeave={onDriveStop}
+              onPointerCancel={onDriveStop}
+            >
+              <Square className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={manualDisabled}
+              onPointerDown={() => onDriveStart("left")}
+              onPointerUp={onDriveStop}
+              onPointerLeave={onDriveStop}
+              onPointerCancel={onDriveStop}
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={manualDisabled}
+              onPointerDown={() => onDriveStart("backward")}
+              onPointerUp={onDriveStop}
+              onPointerLeave={onDriveStop}
+              onPointerCancel={onDriveStop}
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              className="h-8 w-8"
+              disabled={manualDisabled}
+              onPointerDown={() => onDriveStart("right")}
+              onPointerUp={onDriveStop}
+              onPointerLeave={onDriveStop}
+              onPointerCancel={onDriveStop}
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
 interface ControlPanelProps {
-  showOverlay: boolean
-  onToggleOverlay: () => void
-  onCapture: () => void
   isLoading: boolean
   networkOnline: boolean
+  driveMode: "AUTO" | "MANUAL" | "STOP"
+  onChangeMode: (mode: "AUTO" | "MANUAL" | "STOP") => void
+  onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
+  onDriveStop: () => void
+  modeError: string | null
 }
 
 function ControlPanel({
-  showOverlay,
-  onToggleOverlay,
-  onCapture,
   isLoading,
   networkOnline,
+  driveMode,
+  onChangeMode,
+  onDriveStart,
+  onDriveStop,
+  modeError,
 }: ControlPanelProps) {
   return (
     <Card className="bg-card border-border">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">제어 패널</CardTitle>
-      </CardHeader>
       <CardContent className="space-y-5">
-        <div className="h-px bg-border" />
-
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">카메라 제어</p>
-          <OfflineGuardButton
-            variant="secondary"
-            className="w-full justify-start"
-            onClick={onCapture}
-            disabled={isLoading || !networkOnline}
-            offlineMessage="네트워크에 연결되어야 스냅샷을 캡처할 수 있습니다"
-          >
-            <ImageIcon className="mr-2 h-4 w-4" />
-            스냅샷 캡처
-          </OfflineGuardButton>
-          <div className="flex items-center justify-between py-2">
-            <div className="flex items-center gap-2">
-              {showOverlay ? (
-                <Eye className="h-4 w-4 text-muted-foreground" />
-              ) : (
-                <EyeOff className="h-4 w-4 text-muted-foreground" />
-              )}
-              <span className="text-sm text-foreground">바운딩 박스 표시</span>
-            </div>
-            <Switch checked={showOverlay} onCheckedChange={onToggleOverlay} />
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">주행 모드</p>
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              variant={driveMode === "AUTO" ? "default" : "outline"}
+              className="w-full"
+              onClick={() => onChangeMode("AUTO")}
+            >
+              AUTO
+            </Button>
+            <Button
+              variant={driveMode === "MANUAL" ? "default" : "outline"}
+              className="w-full"
+              onClick={() => onChangeMode("MANUAL")}
+            >
+              MANUAL
+            </Button>
+            <Button
+              variant={driveMode === "STOP" ? "default" : "outline"}
+              className="w-full"
+              onClick={() => onChangeMode("STOP")}
+            >
+              STOP
+            </Button>
           </div>
+          {modeError && <p className="text-xs text-red-400">{modeError}</p>}
         </div>
       </CardContent>
     </Card>
@@ -498,7 +585,7 @@ function ControlPanel({
 }
 
 interface RobotStatusPanelProps {
-  status: RobotStatus | null
+  status: CarStatus | null
   isLoading: boolean
 }
 
@@ -507,7 +594,7 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
     return (
       <Card className="bg-card border-border">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">로봇 상태</CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 상태</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="h-8 bg-secondary/20 rounded animate-pulse" />
@@ -517,17 +604,20 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
       </Card>
     )
   }
-
-  const getBatteryColor = (level: number) => {
-    if (level > 50) return "text-emerald-400"
-    if (level > 20) return "text-amber-400"
-    return "text-red-400"
-  }
+  const modeLabels: Record<CarStatus["mode"], string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
+  const updatedLabel = new Date(status.updatedAt).toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+  const xLabel = status.x == null ? "-" : status.x.toFixed(2)
+  const yLabel = status.y == null ? "-" : status.y.toFixed(2)
+  const headingLabel = Number.isFinite(status.heading) ? status.heading.toFixed(0) : "-"
 
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">로봇 상태</CardTitle>
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 상태</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex items-center justify-between">
@@ -546,24 +636,18 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
           </Badge>
         </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              {status.batteryLevel > 20 ? (
-                <Battery className={`h-4 w-4 ${getBatteryColor(status.batteryLevel)}`} />
-              ) : (
-                <BatteryLow className={`h-4 w-4 ${getBatteryColor(status.batteryLevel)}`} />
-              )}
-              <span className="text-sm text-foreground">배터리</span>
-            </div>
-            <span className={`text-sm font-medium ${getBatteryColor(status.batteryLevel)}`}>{status.batteryLevel}%</span>
-          </div>
-          <Progress value={status.batteryLevel} className="h-1.5" />
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-foreground">현재 모드</span>
+          <Badge variant="secondary">{modeLabels[status.mode]}</Badge>
         </div>
 
         <div className="flex items-center justify-between">
-          <span className="text-sm text-foreground">이동 상태</span>
-          <Badge variant="secondary">{status.isMoving ? "이동 중" : "정지"}</Badge>
+          <span className="text-sm text-foreground">마지막 수신</span>
+          <span className="text-sm text-muted-foreground font-mono">{updatedLabel}</span>
+        </div>
+
+        <div className="rounded-md border border-border bg-secondary/30 p-2.5 text-xs text-muted-foreground">
+          좌표: X {xLabel} / Y {yLabel} · 방향: {headingLabel}°
         </div>
       </CardContent>
     </Card>
@@ -571,11 +655,13 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
 }
 
 interface EventLogProps {
-  events: CameraEvent[]
+  detections: Detection[]
   isLoading: boolean
+  onSelect: (id: string) => void
+  baseUrl: string
 }
 
-function EventLog({ events, isLoading }: EventLogProps) {
+function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
   const typeLabels: Record<string, string> = {
     cockroach: "바퀴벌레",
     ant: "개미",
@@ -585,13 +671,19 @@ function EventLog({ events, isLoading }: EventLogProps) {
     unknown: "미확인",
   }
 
+  const resolveMediaUrl = (path?: string) => {
+    if (!path) return null
+    if (path.startsWith("http://") || path.startsWith("https://")) return path
+    return `${baseUrl}${path}`
+  }
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">탐지 로그</CardTitle>
           <Badge variant="secondary" className="text-xs">
-            최근 {events.length}건
+            최근 {detections.length}건
           </Badge>
         </div>
       </CardHeader>
@@ -606,43 +698,58 @@ function EventLog({ events, isLoading }: EventLogProps) {
           </div>
         ) : (
           <div className="max-h-48 overflow-y-auto">
-            {events.map((event) => (
+            {detections.map((event) => {
+              const snapshotUrl = resolveMediaUrl(event.snapshotUrl)
+              return (
               <div
                 key={event.id}
-                className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors"
+                className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors cursor-pointer"
+                onClick={() => onSelect(event.id)}
               >
                 <div className="flex items-center gap-2.5">
                   <Clock className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground font-mono">{event.time}</span>
                 </div>
-                <span className="text-sm text-foreground">{typeLabels[event.type] || event.type}</span>
+                <div className="flex items-center gap-2">
+                  {snapshotUrl && (
+                    <HoverCard openDelay={200}>
+                      <HoverCardTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                          }}
+                        >
+                          <Camera className="h-4 w-4" />
+                        </Button>
+                      </HoverCardTrigger>
+                      <HoverCardContent className="w-48 p-2">
+                        <div className="relative aspect-video overflow-hidden rounded-md border border-border bg-secondary/40">
+                          <img src={snapshotUrl} alt="snapshot preview" className="h-full w-full object-cover" />
+                        </div>
+                        <div className="mt-2 flex items-center justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              window.open(snapshotUrl, "_blank")
+                            }}
+                          >
+                            새 창 보기
+                          </Button>
+                        </div>
+                      </HoverCardContent>
+                    </HoverCard>
+                  )}
+                  <span className="text-sm text-foreground">{typeLabels[event.type] || event.type}</span>
+                </div>
               </div>
-            ))}
+            )})}
           </div>
         )}
-      </CardContent>
-    </Card>
-  )
-}
-
-interface WarningMessagesProps {
-  hasLowBattery: boolean
-  batteryLevel: number
-}
-
-function WarningMessages({ hasLowBattery, batteryLevel }: WarningMessagesProps) {
-  if (!hasLowBattery) return null
-
-  return (
-    <Card className="bg-card border-border">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">경고</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
-        <div className="flex items-center gap-2.5 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-400" />
-          <span className="text-sm text-foreground">배터리 잔량 {batteryLevel}% 이하</span>
-        </div>
       </CardContent>
     </Card>
   )
@@ -654,54 +761,229 @@ function WarningMessages({ hasLowBattery, batteryLevel }: WarningMessagesProps) 
 
 export default function CameraPage() {
   const { isOnline: networkOnline } = useNetworkStatus()
+  const { toast } = useToast()
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
 
-  // All data fetching via hooks
-  const { robotStatus, cameraEvents, isLoading, isDetecting, captureSnapshot } = useRobotStatus()
+  const [cars, setCars] = useState<{ carId: number; nickname: string }[]>([])
+  const [carsLoading, setCarsLoading] = useState(true)
+  const [carsError, setCarsError] = useState<string | null>(null)
+  const [selectedCarId, setSelectedCarId] = useState<number | null>(null)
+
+  const carStatus = useCarStatus(selectedCarId ?? 0, { enabled: !!selectedCarId, intervalMs: 1000 })
+  const recentDetections = useRecentDetections(selectedCarId, 10)
 
   // Local UI state only (no data)
   const [showOverlay, setShowOverlay] = useState(true)
+  const [driveMode, setDriveMode] = useState<"AUTO" | "MANUAL" | "STOP">("STOP")
+  const [modeError, setModeError] = useState<string | null>(null)
+  const lastDriveToastRef = useRef<number>(0)
 
-  const handleCapture = async () => {
-    await captureSnapshot()
+  const driveTimerRef = useRef<number | null>(null)
+  const driveCommandRef = useRef<"forward" | "backward" | "left" | "right" | "stop" | null>(null)
+
+  React.useEffect(() => {
+    let mounted = true
+    setCarsLoading(true)
+    carApi
+      .getMyCars()
+      .then((list) => {
+        if (!mounted) return
+        setCars(list.map((c) => ({ carId: c.carId, nickname: c.nickname })))
+        setSelectedCarId((prev) => prev ?? list[0]?.carId ?? null)
+        setCarsError(null)
+      })
+      .catch((e: any) => {
+        if (!mounted) return
+        setCarsError(e?.message ?? "차량 목록을 불러오는데 실패했습니다.")
+      })
+      .finally(() => {
+        if (!mounted) return
+        setCarsLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const lastDetectionLabel = useMemo(() => {
+    const latest = recentDetections.recentDetections[0]
+    if (!latest) return "-"
+    return `${latest.date} ${latest.time}`
+  }, [recentDetections.recentDetections])
+
+  const isDetecting = useMemo(() => {
+    const latest = recentDetections.recentDetections[0]
+    if (!latest?.timestamp) return false
+    const last = new Date(latest.timestamp)
+    if (Number.isNaN(last.getTime())) return false
+    return Date.now() - last.getTime() < 60_000
+  }, [recentDetections.recentDetections])
+
+  React.useEffect(() => {
+    if (carStatus.data?.mode) {
+      setDriveMode(carStatus.data.mode)
+    }
+  }, [carStatus.data?.mode])
+
+  const handleChangeMode = async (mode: "AUTO" | "MANUAL" | "STOP") => {
+    if (!selectedCarId) return
+    const prev = driveMode
+    setDriveMode(mode)
+    setModeError(null)
+    if (!networkOnline) {
+      setModeError("오프라인 상태에서는 모드를 변경할 수 없습니다.")
+      setDriveMode(prev)
+      toast({ title: "모드 변경 실패", description: "오프라인 상태입니다." })
+      return
+    }
+    try {
+      await carApi.setCarMode(selectedCarId, mode)
+      toast({ title: "모드 변경 완료", description: `현재 모드: ${mode}` })
+    } catch {
+      setDriveMode(prev)
+      setModeError("모드 변경에 실패했습니다. 다시 시도해주세요.")
+      toast({ title: "모드 변경 실패", description: "잠시 후 다시 시도해주세요." })
+    }
   }
 
-  const hasLowBattery = (robotStatus?.batteryLevel ?? 100) <= 30
+  const sendDriveCommand = async (command: "forward" | "backward" | "left" | "right" | "stop") => {
+    if (!selectedCarId || !networkOnline || driveMode !== "MANUAL") return
+    const map: Record<typeof command, { v: number; w: number }> = {
+      forward: { v: 0.3, w: 0 },
+      backward: { v: -0.3, w: 0 },
+      left: { v: 0, w: 0.6 },
+      right: { v: 0, w: -0.6 },
+      stop: { v: 0, w: 0 },
+    }
+
+    const { v, w } = map[command]
+    try {
+      await carApi.controlCar(selectedCarId, v, w)
+    } catch {
+      const now = Date.now()
+      if (now - lastDriveToastRef.current > 2000) {
+        toast({ title: "수동 조작 실패", description: "차량 제어 요청이 실패했습니다." })
+        lastDriveToastRef.current = now
+      }
+    }
+  }
+
+  const handleDriveStart = (command: "forward" | "backward" | "left" | "right" | "stop") => {
+    if (driveMode !== "MANUAL") return
+    driveCommandRef.current = command
+    if (driveTimerRef.current != null) {
+      window.clearInterval(driveTimerRef.current)
+      driveTimerRef.current = null
+    }
+    sendDriveCommand(command).catch(() => {})
+    driveTimerRef.current = window.setInterval(() => {
+      if (!driveCommandRef.current) return
+      sendDriveCommand(driveCommandRef.current).catch(() => {})
+    }, 200)
+  }
+
+  const handleDriveStop = () => {
+    driveCommandRef.current = null
+    if (driveTimerRef.current != null) {
+      window.clearInterval(driveTimerRef.current)
+      driveTimerRef.current = null
+    }
+    sendDriveCommand("stop").catch(() => {})
+  }
+
+  React.useEffect(() => {
+    return () => {
+      if (driveTimerRef.current != null) {
+        window.clearInterval(driveTimerRef.current)
+      }
+    }
+  }, [])
 
   return (
     <div className="p-4 lg:p-6">
       <div className="max-w-[1920px] mx-auto h-full">
         <div className="mb-4">
-          <h1 className="text-2xl font-semibold text-foreground">실시간 카메라</h1>
-          <p className="text-sm text-muted-foreground mt-1">로봇 카메라 영상을 실시간으로 확인하세요</p>
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">실시간 카메라</h1>
+            <p className="text-sm text-muted-foreground mt-1">로봇 카메라 영상을 실시간으로 확인하세요</p>
+          </div>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
-          <div className="flex-1 min-h-[400px] lg:min-h-[600px]">
+          <div className="flex-1">
+            <div className="w-full">
+              <div className="relative w-full aspect-video max-h-[60vh] lg:max-h-[70vh]">
             <LiveCameraView
-              isOnline={robotStatus?.isOnline ?? false}
+              isOnline={carStatus.data?.isOnline ?? false}
               networkOnline={networkOnline}
               isDetecting={isDetecting}
               showOverlay={showOverlay}
-              connectionQuality={robotStatus?.connectionQuality ?? "good"}
+              lastDetectionLabel={lastDetectionLabel}
+              isManual={driveMode === "MANUAL"}
+              manualDisabled={!networkOnline || carStatus.isLoading}
+              onDriveStart={handleDriveStart}
+              onDriveStop={handleDriveStop}
               wsUrl={process.env.NEXT_PUBLIC_SIGNALING_URL ?? "ws://I14B201.p.ssafy.io/ws/webrtc"}
               roomId={process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"}
             />
+              </div>
+            </div>
+            <div className="mt-3">
+            <ControlPanel
+              isLoading={carStatus.isLoading}
+              networkOnline={networkOnline}
+              driveMode={driveMode}
+                onChangeMode={handleChangeMode}
+                onDriveStart={handleDriveStart}
+                onDriveStop={handleDriveStop}
+                modeError={modeError}
+              />
+            </div>
           </div>
 
-          <div className="w-full lg:w-80 xl:w-96 space-y-4">
-            <ControlPanel
-              showOverlay={showOverlay}
-              onToggleOverlay={setShowOverlay}
-              onCapture={handleCapture}
-              isLoading={isLoading}
-              networkOnline={networkOnline}
+          <div className="w-full lg:w-80 xl:w-96 space-y-3">
+            <Card className="bg-card border-border">
+              <CardContent className="space-y-1.5 py-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">차량 선택</p>
+                  {selectedCarId && (
+                    <Badge variant="secondary" className="h-5 px-2 text-[10px]">
+                      {selectedCarId}
+                    </Badge>
+                  )}
+                </div>
+                <Select
+                  value={selectedCarId ? String(selectedCarId) : ""}
+                  onValueChange={(value) => setSelectedCarId(Number(value))}
+                >
+                  <SelectTrigger className="bg-input border-border">
+                    <SelectValue placeholder={carsLoading ? "차량 로딩 중..." : "차량 선택"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cars.map((c) => (
+                      <SelectItem key={c.carId} value={String(c.carId)}>
+                        {c.nickname} · {c.carId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="min-h-[14px] text-[11px] text-muted-foreground">
+                  {carsLoading ? "차량 목록 불러오는 중..." : "제어할 차량을 선택하세요."}
+                </p>
+                <p className="min-h-[14px] text-[11px] text-red-400">{carsError ?? ""}</p>
+              </CardContent>
+            </Card>
+            <RobotStatusPanel status={carStatus.data} isLoading={carStatus.isLoading} />
+
+            <EventLog
+              detections={recentDetections.recentDetections}
+              isLoading={recentDetections.isLoading}
+              onSelect={(id) => {
+                window.location.href = `/dashboard?detectionId=${id}`
+              }}
+              baseUrl={baseUrl}
             />
-
-            <RobotStatusPanel status={robotStatus} isLoading={isLoading} />
-
-            <EventLog events={cameraEvents} isLoading={isLoading} />
-
-            <WarningMessages hasLowBattery={hasLowBattery} batteryLevel={robotStatus?.batteryLevel ?? 100} />
           </div>
         </div>
       </div>

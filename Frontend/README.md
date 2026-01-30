@@ -1,6 +1,9 @@
 # 실행 방법
 
-## Frontend 폴더 안에 .env.local 파일 추가 후 아래 내용 복붙
+## 1. Node.js 설치
+v24.13.0 로 깔았음
+
+## 2. Frontend 폴더 안에 .env.local 파일 추가 후 아래 내용 복붙
 `NEXT_PUBLIC_SIGNALING_URL=ws://I14B201.p.ssafy.io/ws/webrtc`
 `NEXT_PUBLIC_ROBOT_ROOM_ID=robot_default`
 (프론트도 EC2에 올라갔다면)
@@ -10,7 +13,8 @@
 `NEXT_PUBLIC_API_BASE_URL=http://3.35.235.49:8080`
 
 
-## (웹에서 실행)
+## 3. 실행
+### 웹에서 실행
 `cd Frontend` 후
 
 `npm install`<br>
@@ -20,6 +24,7 @@
 `http://localhost:3000` 접속
 
 
+### 앱에서 실행
 <!-- ## (모바일에서 실행) -> 이거 지금 안됨
 powershell(관리자) 에서<br>
 `winget install Cloudflare.cloudflared`

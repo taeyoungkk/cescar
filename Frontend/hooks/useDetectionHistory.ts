@@ -36,15 +36,33 @@ function getInitialFilters(): DetectionHistoryFilters {
   }
 }
 
-export function useDetectionHistory(): UseDetectionHistoryReturn {
-  const [detections, setDetections] = useState<Detection[]>([])
+export function useDetectionHistory(carId: number | null): UseDetectionHistoryReturn {
+  const [allDetections, setAllDetections] = useState<Detection[]>([])
   const [selectedDetection, setSelectedDetection] = useState<Detection | null>(null)
   const [filters, setFiltersState] = useState<DetectionHistoryFilters>(() => getInitialFilters())
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  const filteredDetections = useMemo(() => {
+    const items = allDetections
+    return items.filter((d) => {
+      if (filters.type && filters.type !== "all" && d.type !== filters.type) return false
+      if (filters.status && filters.status !== "all" && d.status !== filters.status) return false
+      if (filters.searchId && !d.id.includes(filters.searchId)) return false
+      if (filters.dateFrom) {
+        const from = new Date(`${filters.dateFrom}T00:00:00`)
+        if (Number.isNaN(from.getTime()) || new Date(d.timestamp) < from) return false
+      }
+      if (filters.dateTo) {
+        const to = new Date(`${filters.dateTo}T23:59:59`)
+        if (Number.isNaN(to.getTime()) || new Date(d.timestamp) > to) return false
+      }
+      return true
+    })
+  }, [allDetections, filters])
+
   const stats = useMemo<DetectionStats>(() => {
-    const items = detections
+    const items = filteredDetections
     if (!items.length) {
       return { todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "-" }
     }
@@ -76,20 +94,26 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
       : "-"
 
     return { todayCount, weekCount, falseAlarmRate, lastDetectionTime }
-  }, [detections])
+  }, [filteredDetections])
 
   const fetchData = useCallback(async () => {
+    if (!carId) {
+      setAllDetections([])
+      setIsLoading(false)
+      return
+    }
+
     setIsLoading(true)
     try {
-      const historyResponse = await detectionApi.getDetectionHistory(filters)
-      setDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
+      const historyResponse = await detectionApi.getDetectionHistory(carId)
+      setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
       setError(null)
     } catch {
       setError("탐지 기록을 불러오는데 실패했습니다.")
     } finally {
       setIsLoading(false)
     }
-  }, [filters])
+  }, [carId])
 
   useEffect(() => {
     fetchData()
@@ -98,9 +122,9 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
   // 선택: 필터/재조회로 목록이 바뀌면, 선택 항목이 사라진 경우 정리
   useEffect(() => {
     if (!selectedDetection) return
-    const exists = detections.some((d) => d.id === selectedDetection.id)
+    const exists = filteredDetections.some((d) => d.id === selectedDetection.id)
     if (!exists) setSelectedDetection(null)
-  }, [detections, selectedDetection])
+  }, [filteredDetections, selectedDetection])
 
   const setFilters = useCallback((newFilters: DetectionHistoryFilters) => {
     setFiltersState(newFilters)
@@ -120,7 +144,7 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
         const response = await detectionApi.updateDetectionStatus(id, status)
         if (!response.success) return false
 
-        setDetections((prev) => prev.map((d) => (d.id === id ? { ...d, status } : d)))
+        setAllDetections((prev) => prev.map((d) => (d.id === id ? { ...d, status } : d)))
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, status })
         return true
       } catch {
@@ -137,7 +161,7 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
         const response = await detectionApi.updateDetectionNotes(id, notes)
         if (!response.success) return false
 
-        setDetections((prev) => prev.map((d) => (d.id === id ? { ...d, notes } : d)))
+        setAllDetections((prev) => prev.map((d) => (d.id === id ? { ...d, notes } : d)))
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, notes })
         return true
       } catch {
@@ -149,7 +173,7 @@ export function useDetectionHistory(): UseDetectionHistoryReturn {
   )
 
   return {
-    detections,
+    detections: filteredDetections,
     stats,
     selectedDetection,
     filters,

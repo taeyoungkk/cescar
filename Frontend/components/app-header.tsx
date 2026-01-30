@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from "react"
 import { usePathname } from "next/navigation"
 import Link from "next/link"
-import { Bell, User, Settings, LogOut, Menu, Home, Camera, LayoutDashboard, Sun, Moon } from "lucide-react"
+import { Bell, Settings, LogOut, Menu, Home, Camera, LayoutDashboard, Sun, Moon } from "lucide-react"
 import { CescarLogo } from "@/components/cescar-logo"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -25,7 +25,10 @@ import {
 import { useAuth } from "@/hooks/useAuth"
 import { useTheme } from "@/hooks/useTheme"
 import { useAlerts } from "@/hooks/useAlerts"
+import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { cn } from "@/lib/utils"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Badge } from "@/components/ui/badge"
 
 interface NavItem {
   label: string
@@ -43,7 +46,8 @@ export function AppHeader() {
   const pathname = usePathname()
   const { user, logout } = useAuth()
   const { toggleTheme, isDark } = useTheme()
-  const { unreadCount } = useAlerts()
+  const { unreadCount, alerts, markAsRead, markAllAsRead } = useAlerts()
+  const { carId } = usePrimaryCarId()
 
   // ✅ 모바일 Sheet open state를 controlled로 관리
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -56,6 +60,10 @@ export function AppHeader() {
   const handleLogout = async () => {
     await logout()
   }
+
+  const displayNickname = user?.nickname || user?.name || "사용자"
+  const displayName = user?.name || user?.nickname || "사용자"
+  const avatarText = displayNickname.slice(0, 2)
 
   return (
     <header className="flex items-center justify-between h-16 px-4 lg:px-6 border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
@@ -123,38 +131,83 @@ export function AppHeader() {
           </span>
         </Button>
 
-        <Button variant="ghost" size="icon" className="relative" aria-label="알림">
-          <Bell className="h-5 w-5 text-muted-foreground" />
-          {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 h-4 w-4 bg-red-500 rounded-full text-[10px] font-medium text-white flex items-center justify-center">
-              {unreadCount}
-            </span>
-          )}
-        </Button>
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative" aria-label="알림">
+              <Bell className="h-5 w-5 text-muted-foreground" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 h-4 w-4 bg-red-500 rounded-full text-[10px] font-medium text-white flex items-center justify-center">
+                  {unreadCount}
+                </span>
+              )}
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-80 p-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-medium text-foreground">알림</p>
+              {unreadCount > 0 && (
+                <div className="flex items-center gap-2">
+                  <Badge variant="secondary" className="text-[10px]">
+                    {unreadCount} unread
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-[10px]"
+                    onClick={() => markAllAsRead()}
+                  >
+                    전체 읽음
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="space-y-2 max-h-72 overflow-auto">
+              {(!alerts || alerts.filter((a) => !a.isRead).length === 0) && (
+                <p className="text-xs text-muted-foreground">알림이 없습니다.</p>
+              )}
+              {alerts?.filter((a) => !a.isRead).slice(0, 5).map((alert) => (
+                <div key={alert.id} className="rounded-md border border-border bg-secondary/20 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-foreground">{alert.title}</p>
+                    {!alert.isRead && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-[10px]"
+                        onClick={() => markAsRead(alert.id)}
+                      >
+                        읽음
+                      </Button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">{alert.message}</p>
+                </div>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" className="flex items-center gap-2 px-2" aria-label="계정 메뉴">
               <Avatar className="h-8 w-8">
                 <AvatarFallback className="bg-primary/20 text-primary text-sm">
-                  {user?.name?.slice(0, 2) || "관리"}
+                  {avatarText}
                 </AvatarFallback>
               </Avatar>
               <span className="text-sm font-medium text-foreground hidden sm:inline">
-                {user?.name || "관리자"}
+                {displayName}
               </span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>내 계정</DropdownMenuLabel>
+            <DropdownMenuLabel>차량 ID: {carId ?? "-"}</DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem>
-              <User className="mr-2 h-4 w-4" />
-              프로필
-            </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/settings" className="flex items-center">
               <Settings className="mr-2 h-4 w-4" />
               설정
+              </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-red-400" onClick={handleLogout}>

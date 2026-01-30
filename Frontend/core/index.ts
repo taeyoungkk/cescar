@@ -9,5 +9,5 @@ export * from "./mockData"
 
 // API Functions
 export * as authApi from "./api/auth"
-export * as robotApi from "./api/robot"
 export * as detectionApi from "./api/detection"
+export * as mapApi from "./api/map"

@@ -5,6 +5,7 @@ export interface User {
   id: string
   email: string
   name: string
+  nickname?: string
   role: "admin" | "operator" | "viewer"
   createdAt: string
 }
@@ -72,7 +73,10 @@ export interface Detection {
   timestamp: string
   date: string
   time: string
+  x?: number | null
+  y?: number | null
   snapshotUrl?: string
+  videoUrl?: string | null
   notes: string
 }
 
@@ -122,4 +126,20 @@ export interface ApiResponse<T> {
   success: boolean
   data?: T
   error?: string
+}
+
+// ============================================
+// Map Types
+// ============================================
+export interface CarMap {
+  id: number
+  carId: number
+  name: string
+  imageUrl?: string | null
+  width: number
+  height: number
+  resolution: number
+  originX: number
+  originY: number
+  createdAt: string
 }

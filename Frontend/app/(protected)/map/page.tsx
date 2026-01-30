@@ -1,6 +1,6 @@
-"use client"
+﻿"use client"
 
-import React from "react"
+import React, { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import {
   ArrowLeft,
@@ -18,6 +18,7 @@ import {
   Grid3X3,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -27,7 +28,12 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
+import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
+import { useCarMaps } from "@/hooks/useCarMaps"
+import { useRecentDetections } from "@/hooks/useRecentDetections"
+import type { CarMap } from "@/core/types"
+
+type MapStatus = "no_map" | "generating" | "completed"
 
 // ============================================
 // Presentational Components (UI Only)
@@ -58,10 +64,8 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
           <div className="p-6 rounded-full bg-secondary/50 mb-4">
             <Map className="h-16 w-16 text-muted-foreground/50" />
           </div>
-          <p className="text-muted-foreground text-lg">지도가 아직 생성되지 않았습니다</p>
-          <p className="text-muted-foreground/60 text-sm mt-2">
-            홈에서 지도 생성을 시작하세요
-          </p>
+          <p className="text-muted-foreground text-lg">지도가 아직 생성되지 않았습니다.</p>
+          <p className="text-muted-foreground/60 text-sm mt-2">홈에서 지도 생성을 시작하세요.</p>
 
           <Button asChild variant="outline" className="bg-transparent mt-4">
             <Link href="/home">
@@ -78,9 +82,7 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
             <RefreshCw className="h-16 w-16 text-emerald-400/80 animate-spin" />
           </div>
           <p className="text-foreground text-lg font-medium">지도 생성 중...</p>
-          <p className="text-muted-foreground/60 text-sm mt-2">
-            잠시만 기다려주세요
-          </p>
+          <p className="text-muted-foreground/60 text-sm mt-2">잠시만 기다려주세요.</p>
         </div>
       )}
 
@@ -311,20 +313,25 @@ function DetectionPointItem({ id, type, location, time, status }: DetectionPoint
 // Page Component
 // ============================================
 
-// Static demo data for display purposes
-const demoDetectionPoints = [
-  { id: "D1", type: "바퀴벌레", location: "구역 A (2.5m, 2.0m)", time: "14:23", status: "confirmed" as const },
-  { id: "D2", type: "개미", location: "구역 C (10.0m, 3.0m)", time: "14:45", status: "confirmed" as const },
-  { id: "D3", type: "바퀴벌레", location: "구역 B (4.5m, 6.0m)", time: "15:12", status: "confirmed" as const },
-  { id: "D4", type: "미확인", location: "구역 B (7.5m, 6.5m)", time: "15:28", status: "pending" as const },
-]
+function toAreaSize(map: CarMap | null) {
+  if (!map || !map.width || !map.height || !map.resolution) return "-"
+  const w = map.width * map.resolution
+  const h = map.height * map.resolution
+  return `${w.toFixed(1)}m x ${h.toFixed(1)}m`
+}
 
+function formatDateLabel(value?: string | null) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString("ko-KR")
+}
 function MapHistoryDialog({
   maps,
   onSelect,
   onDelete,
 }: {
-  maps: StoredMap[]
+  maps: CarMap[]
   onSelect: (mapId: string) => void
   onDelete: (mapId: string) => void
 }) {
@@ -346,7 +353,7 @@ function MapHistoryDialog({
           {maps.length === 0 ? (
             <div className="text-center py-8">
               <Grid3X3 className="h-10 w-10 text-muted-foreground/50 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">저장된 지도가 없습니다</p>
+              <p className="text-sm text-muted-foreground">등록된 지도가 없습니다.</p>
             </div>
           ) : (
             <div className="space-y-2">
@@ -356,10 +363,10 @@ function MapHistoryDialog({
                   className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-secondary/30 transition-colors"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{map.generatedAt}</p>
+                    <p className="text-sm font-medium text-foreground truncate">{map.name}</p>
                     <div className="flex items-center gap-3 mt-1">
-                      <span className="text-xs text-muted-foreground">{map.areaSize}</span>
-                      <span className="text-xs text-muted-foreground">{map.detectionsCount}개 탐지</span>
+                      <span className="text-xs text-muted-foreground">{formatDateLabel(map.createdAt)}</span>
+                      <span className="text-xs text-muted-foreground">{toAreaSize(map)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 ml-3">
@@ -367,7 +374,7 @@ function MapHistoryDialog({
                       size="sm"
                       variant="default"
                       onClick={() => {
-                        onSelect(map.id)
+                        onSelect(String(map.id))
                         setOpen(false)
                       }}
                     >
@@ -377,7 +384,7 @@ function MapHistoryDialog({
                       size="sm"
                       variant="ghost"
                       className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
-                      onClick={() => onDelete(map.id)}
+                      onClick={() => onDelete(String(map.id))}
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
@@ -393,9 +400,46 @@ function MapHistoryDialog({
 }
 
 export default function MapDetailPage() {
-  const { status: mapStatus, activeMap, maps, isInitialized, selectMap, deleteMap } = useMapStore()
+  const { carId } = usePrimaryCarId()
+  const { maps, currentMap, isLoading, refresh, selectMap, deleteMap, error: mapsError } = useCarMaps(carId)
+  const { recentDetections, isLoading: detectionsLoading, error: detectionsError } = useRecentDetections(carId, 20)
 
-  if (!isInitialized) {
+  const mapStatus: MapStatus = currentMap ? "completed" : "no_map"
+
+  const handleSelectMap = useCallback(async (mapId: string) => {
+    await selectMap(Number(mapId))
+  }, [selectMap])
+
+  const handleDeleteMap = useCallback(async (mapId: string) => {
+    await deleteMap(Number(mapId))
+  }, [deleteMap])
+
+  const detectionPoints = useMemo(() => {
+    const typeLabels: Record<string, string> = {
+      cockroach: "바퀴벌레",
+      ant: "개미",
+      fly: "파리",
+      mosquito: "모기",
+      spider: "거미",
+      person: "사람",
+      unknown: "미확인",
+    }
+    return recentDetections.map((d) => {
+      const x = d.x == null ? "-" : d.x.toFixed(2)
+      const y = d.y == null ? "-" : d.y.toFixed(2)
+      const location = d.x == null || d.y == null ? "-" : `(${x}m, ${y}m)`
+      const status = d.status === "confirmed" || d.status === "resolved" ? "confirmed" : "pending"
+      return {
+        id: d.id,
+        type: typeLabels[d.type] ?? d.type,
+        location,
+        time: d.time,
+        status,
+      }
+    })
+  }, [recentDetections])
+
+  if (isLoading) {
     return (
       <div className="p-4 lg:p-6">
         <div className="max-w-7xl mx-auto">
@@ -424,8 +468,8 @@ export default function MapDetailPage() {
                 <span className="hidden sm:inline">지도 상세 보기</span>
               </h1>
               <p className="text-sm text-muted-foreground mt-0.5 break-words">
-                <span className="sm:hidden">SLAM 맵핑 결과</span>
-                <span className="hidden sm:inline">SLAM 기반 실내 맵핑 결과</span>
+                <span className="sm:hidden">SLAM 지도 결과</span>
+                <span className="hidden sm:inline">SLAM 기반 지도 결과</span>
               </p>
             </div>
           </div>
@@ -433,7 +477,7 @@ export default function MapDetailPage() {
           {/* Right */}
           <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
             {maps.length > 0 && (
-              <MapHistoryDialog maps={maps} onSelect={selectMap} onDelete={deleteMap} />
+              <MapHistoryDialog maps={maps} onSelect={handleSelectMap} onDelete={handleDeleteMap} />
             )}
 
             {mapStatus === "completed" && (
@@ -449,6 +493,12 @@ export default function MapDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Map visualization - spans 3 columns */}
           <div className="lg:col-span-3">
+            {mapsError && (
+              <Alert variant="destructive" className="mb-4">
+                <AlertTitle>지도 불러오기 실패</AlertTitle>
+                <AlertDescription>{mapsError}</AlertDescription>
+              </Alert>
+            )}
             <Card className="bg-card border-border overflow-hidden">
               <CardHeader className="pb-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -465,7 +515,7 @@ export default function MapDetailPage() {
                       <Download className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">내보내기</span>
                     </Button>
-                    <Button variant="outline" size="sm" className="bg-transparent">
+                    <Button variant="outline" size="sm" className="bg-transparent" onClick={refresh} disabled={isLoading}>
                       <RefreshCw className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">새로고침</span>
                     </Button>
@@ -485,7 +535,7 @@ export default function MapDetailPage() {
                   <div>
                     <p className="text-sm font-medium text-blue-400">실시간 기능 준비 중</p>
                     <p className="text-xs text-blue-400/80 mt-1">
-                      실시간 로봇 위치 추적, 경로 계획, 수동 조종 기능이 곧 추가될 예정입니다.
+                      실시간 로봇 위치 추적, 경로 확인, 수동 조작 기능을 곧 추가할 예정입니다.
                     </p>
                   </div>
                 </div>
@@ -499,12 +549,12 @@ export default function MapDetailPage() {
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground px-1">지도 정보</h3>
               <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
-                <MapMetadataCard label="생성 시각" value={activeMap?.generatedAt || "-"} icon={Clock} />
-                <MapMetadataCard label="맵 영역" value={activeMap?.areaSize || "-"} icon={Map} />
-                <MapMetadataCard label="로봇 ID" value={activeMap?.robotId || "-"} icon={Target} />
+                <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} />
+                <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
+                <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} />
                 <MapMetadataCard
                   label="탐지 지점"
-                  value={activeMap ? `${activeMap.detectionsCount}개` : "-"}
+                  value={detectionsLoading ? "-" : recentDetections.length ? `${recentDetections.length}개` : "-"}
                   icon={Bug}
                 />
               </div>
@@ -516,10 +566,22 @@ export default function MapDetailPage() {
                 <CardTitle className="text-sm font-medium">탐지 지점 목록</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
+                {detectionsError && (
+                  <div className="p-4">
+                    <Alert variant="destructive">
+                      <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
+                      <AlertDescription>{detectionsError}</AlertDescription>
+                    </Alert>
+                  </div>
+                )}
                 <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
-                  {demoDetectionPoints.map((point) => (
-                    <DetectionPointItem key={point.id} {...point} />
-                  ))}
+                  {detectionsLoading ? (
+                    <div className="p-4 text-sm text-muted-foreground">불러오는 중...</div>
+                  ) : detectionPoints.length === 0 ? (
+                    <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
+                  ) : (
+                    detectionPoints.map((point) => <DetectionPointItem key={point.id} {...point} />)
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -529,3 +591,5 @@ export default function MapDetailPage() {
     </div>
   )
 }
+
+

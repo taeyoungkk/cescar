@@ -14,6 +14,7 @@ export const mockUser: User = {
   id: "user-001",
   email: "admin@cescar.io",
   name: "관리자",
+  nickname: "관리",
   role: "admin",
   createdAt: "2024-01-01T00:00:00Z",
 }

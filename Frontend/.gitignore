@@ -31,3 +31,4 @@ next-env.d.ts
 /public/sw.js
 /public/workbox-*.js
 /public/firebase-messaging-sw.js
+/public/firebase/

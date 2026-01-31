@@ -29,7 +29,20 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useToast } from "@/components/ui/use-toast"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
@@ -38,8 +51,9 @@ import { useAlerts } from "@/hooks/useAlerts"
 import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
 import { useCarMaps } from "@/hooks/useCarMaps"
 
-import type { Detection, SystemAlert, DetectionStats, CarStatus, CarDetail, CarMode } from "@/core/types"
+import type { Detection, SystemAlert, DetectionStats, CarStatus, CarSummary, CarMode } from "@/core/types"
 import { OfflineGuardButton } from "@/components/offline-guard-button"
+import * as carApi from "@/core/api/car"
 
 
 // DEMO MODE
@@ -768,9 +782,21 @@ export default function HomePage() {
   const isDemo = DEMO_MODE
   const [isStandalone, setIsStandalone] = React.useState(false)
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission | "unknown">("unknown")
+  const { toast } = useToast()
+  const [carList, setCarList] = React.useState<CarSummary[]>([])
+  const [carLoading, setCarLoading] = React.useState(false)
+  const [carError, setCarError] = React.useState<string | null>(null)
+  const [claimCode, setClaimCode] = React.useState("")
+  const [claimNickname, setClaimNickname] = React.useState("")
+  const [nicknameDraft, setNicknameDraft] = React.useState("")
+  const [isClaiming, setIsClaiming] = React.useState(false)
+  const [isUnclaiming, setIsUnclaiming] = React.useState(false)
+  const [isSavingNickname, setIsSavingNickname] = React.useState(false)
+  const [claimConfirmOpen, setClaimConfirmOpen] = React.useState(false)
+  const [unclaimConfirmOpen, setUnclaimConfirmOpen] = React.useState(false)
 
   const demoSummary = useHomeDemoSummary()
-  const { carId } = usePrimaryCarId()
+  const { carId, setCarId, refresh: refreshPrimaryCar } = usePrimaryCarId()
   const carStatus = useCarStatus(carId ?? 0, { enabled: !isDemo && !!carId, intervalMs: 1000 })
 
   const realDetections = useRecentDetections(carId, 5)
@@ -803,6 +829,32 @@ export default function HomePage() {
       }
     }
   }, [])
+
+  const refreshCars = React.useCallback(async () => {
+    if (isDemo) return
+    setCarLoading(true)
+    try {
+      const list = await carApi.getMyCars()
+      setCarList(list)
+      setCarError(null)
+    } catch (e: any) {
+      setCarError(e?.message ?? "차량 목록을 불러오지 못했습니다.")
+      setCarList([])
+    } finally {
+      setCarLoading(false)
+    }
+  }, [isDemo])
+
+  useEffect(() => {
+    if (isDemo) return
+    refreshCars()
+  }, [isDemo, refreshCars])
+
+  const primaryCar = carList.find((car) => car.carId === carId) ?? carList[0] ?? null
+
+  useEffect(() => {
+    setNicknameDraft(primaryCar?.nickname ?? "")
+  }, [primaryCar?.carId, primaryCar?.nickname])
 
   useEffect(() => {
     if (typeof Notification === "undefined") {
@@ -969,6 +1021,76 @@ export default function HomePage() {
     return false
   }, [isDemo])
 
+  const handleClaim = async () => {
+    if (!claimCode.trim()) {
+      setCarError("클레임 코드를 입력해 주세요.")
+      toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+      return
+    }
+    setIsClaiming(true)
+    try {
+      await carApi.claimCar(claimCode.trim(), claimNickname.trim() || undefined)
+      setClaimCode("")
+      setClaimNickname("")
+      await refreshCars()
+      await refreshPrimaryCar()
+      toast({
+        title: "차량 등록 완료",
+        description: claimNickname.trim()
+          ? `닉네임 “${claimNickname.trim()}”으로 등록되었습니다.`
+          : "차량이 성공적으로 등록되었습니다.",
+      })
+    } catch (e: any) {
+      const message = e?.message ?? "차량 등록에 실패했습니다."
+      setCarError(message)
+      toast({ title: "차량 등록 실패", description: message })
+    } finally {
+      setIsClaiming(false)
+    }
+  }
+
+  const handleUnclaim = async () => {
+    if (!primaryCar) return
+    setIsUnclaiming(true)
+    try {
+      await carApi.unclaimCar(primaryCar.carId)
+      await refreshCars()
+      await refreshPrimaryCar()
+      toast({
+        title: "차량 연결 해제",
+        description: `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제되었습니다.`,
+      })
+    } catch (e: any) {
+      const message = e?.message ?? "차량 해제에 실패했습니다."
+      setCarError(message)
+      toast({ title: "차량 해제 실패", description: message })
+    } finally {
+      setIsUnclaiming(false)
+    }
+  }
+
+  const handleSaveNickname = async () => {
+    if (!primaryCar) return
+    const nextName = nicknameDraft.trim()
+    if (!nextName) {
+      setCarError("닉네임을 입력해 주세요.")
+      toast({ title: "닉네임 저장 실패", description: "닉네임을 입력해 주세요." })
+      return
+    }
+    setIsSavingNickname(true)
+    try {
+      await carApi.updateCarNickname(primaryCar.carId, nextName)
+      await refreshCars()
+      toast({ title: "닉네임 저장 완료", description: `“${nextName}”으로 변경되었습니다.` })
+    } catch (e: any) {
+      const message = e?.message ?? "닉네임 수정에 실패했습니다."
+      setCarError(message)
+      toast({ title: "닉네임 저장 실패", description: message })
+    } finally {
+      setIsSavingNickname(false)
+    }
+  }
+
   useEffect(() => {
     if (mapStore.status === "generating" && isDetecting) onStop()
   }, [mapStore.status, isDetecting, onStop])
@@ -1056,6 +1178,147 @@ export default function HomePage() {
             />
           </div>
           <div className="space-y-6">
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">차량 관리</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {carLoading ? (
+                  <div className="text-sm text-muted-foreground">불러오는 중...</div>
+                ) : (
+                  <>
+                    {primaryCar ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-muted-foreground">현재 차량</p>
+                          <Badge variant="secondary">{primaryCar.carId}</Badge>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">차량 선택</p>
+                          <Select
+                            value={primaryCar ? String(primaryCar.carId) : ""}
+                            onValueChange={(value) => {
+                              const nextId = Number(value)
+                              if (Number.isFinite(nextId)) {
+                                setCarId(nextId)
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="bg-input border-border">
+                              <SelectValue placeholder="차량 선택" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {carList.map((car) => (
+                                <SelectItem key={car.carId} value={String(car.carId)}>
+                                  {car.nickname} · {car.carId}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">닉네임</p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={nicknameDraft}
+                              onChange={(e) => setNicknameDraft(e.target.value)}
+                              placeholder="차량 닉네임"
+                              className="bg-input border-border"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleSaveNickname}
+                              disabled={isSavingNickname || nicknameDraft.trim() === primaryCar.nickname}
+                            >
+                              저장
+                            </Button>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => setUnclaimConfirmOpen(true)}
+                          disabled={isUnclaiming}
+                        >
+                          차량 연결 해제
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">등록된 차량이 없습니다.</p>
+                    )}
+
+                    <div className="h-px bg-border" />
+
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">차량 등록</p>
+                      <Input
+                        value={claimCode}
+                        onChange={(e) => setClaimCode(e.target.value)}
+                        placeholder="클레임 코드"
+                        className="bg-input border-border"
+                      />
+                      <Input
+                        value={claimNickname}
+                        onChange={(e) => setClaimNickname(e.target.value)}
+                        placeholder="닉네임 (선택)"
+                        className="bg-input border-border"
+                      />
+                      <Button
+                        className="w-full"
+                        onClick={() => {
+                          if (!claimCode.trim()) {
+                            setCarError("클레임 코드를 입력해 주세요.")
+                            toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+                            return
+                          }
+                          setClaimConfirmOpen(true)
+                        }}
+                        disabled={isClaiming}
+                      >
+                        차량 등록
+                      </Button>
+                    </div>
+                  </>
+                )}
+
+                {carError && <p className="text-xs text-red-400">{carError}</p>}
+              </CardContent>
+            </Card>
+
+            <AlertDialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>차량을 등록할까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    클레임 코드 {claimCode ? `“${claimCode}”` : ""}로 차량을 등록합니다.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleClaim}>등록</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={unclaimConfirmOpen} onOpenChange={setUnclaimConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>차량 연결을 해제할까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {primaryCar
+                      ? `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제됩니다.`
+                      : "차량 연결을 해제합니다."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleUnclaim}>해제</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
             <SystemAlertsSection
               alerts={alerts}
               isLoading={alertsLoading}

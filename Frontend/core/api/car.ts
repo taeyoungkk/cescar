@@ -93,3 +93,12 @@ export async function controlCar(carId: number, v: number, w: number): Promise<v
   })
 }
 
+export async function startMission(carId: number, payload: { points: { x: number; y: number }[] }): Promise<void> {
+  await apiFetch<any>(`/api/cars/${carId}/mission`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      area: payload.points,
+    }),
+  })
+}
+

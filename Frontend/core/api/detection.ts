@@ -54,6 +54,8 @@ type DetectionDetailResponse = DetectionListItemResponse & {
   videoUrl: string | null
 }
 
+type LogStatisticsResponse = Record<string, any>
+
 function mapToUiDetection(raw: DetectionListItemResponse, opts?: { robotId?: string }): Detection {
   const { date, time } = toDateParts(raw.createdAt)
   return {
@@ -80,6 +82,33 @@ function toIsoEnd(dateStr: string) {
   return `${dateStr}T23:59:59`
 }
 
+function normalizeLogStats(raw: LogStatisticsResponse, fallbackLastTime?: string): DetectionStats {
+  const total =
+    raw?.totalDetections ??
+    raw?.detectionCount ??
+    raw?.totalCount ??
+    raw?.count ??
+    raw?.total ??
+    0
+
+  const todayCount = raw?.todayCount ?? total ?? 0
+  const weekCount = raw?.weekCount ?? total ?? 0
+  const falseAlarmRate = raw?.falseAlarmRate ?? raw?.falseRate ?? 0
+  const lastDetectionTime =
+    raw?.lastDetectionTime ??
+    raw?.latestDetectionTime ??
+    raw?.lastDetectedAt ??
+    fallbackLastTime ??
+    "-"
+
+  return {
+    todayCount: Number.isFinite(todayCount) ? Number(todayCount) : 0,
+    weekCount: Number.isFinite(weekCount) ? Number(weekCount) : 0,
+    falseAlarmRate: Number.isFinite(falseAlarmRate) ? Math.round(Number(falseAlarmRate)) : 0,
+    lastDetectionTime: String(lastDetectionTime),
+  }
+}
+
 // ?쒕쾭 ?듦퀎 ?붾뱶?ъ씤???앷린湲????붾?
 export async function getDetectionStats(): Promise<ApiResponse<DetectionStats>> {
   return ok({ todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "" })
@@ -99,6 +128,22 @@ export async function getRecentDetections(carId: number, limit: number = 5): Pro
     return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
   } catch (e: any) {
     return fail(e?.message ?? "理쒓렐 ?먯? 議고쉶 ?ㅽ뙣")
+  }
+}
+
+export async function getLatestLogStatistics(
+  carId: number,
+  fallbackLastTime?: string
+): Promise<ApiResponse<DetectionStats | null>> {
+  try {
+    const logs = await apiFetch<SpringPage<any>>(`/api/cars/${carId}/logs?page=0&size=1&sort=startAt,desc`)
+    const latestLog = logs.content?.[0]
+    if (!latestLog?.id) return ok(null)
+
+    const raw = await apiFetch<LogStatisticsResponse>(`/api/logs/${latestLog.id}/statistics`)
+    return ok(normalizeLogStats(raw, fallbackLastTime))
+  } catch (e: any) {
+    return fail(e?.message ?? "통계 조회 실패")
   }
 }
 

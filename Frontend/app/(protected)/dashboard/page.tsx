@@ -29,10 +29,23 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFo
 import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useDetectionHistory } from "@/hooks/useDetectionHistory"
+import { useCarLogs } from "@/hooks/useCarLogs"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import * as detectionApi from "@/core/api/detection"
 import type { Detection, DetectionStats, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
+import { Switch } from "@/components/ui/switch"
+import { useToast } from "@/components/ui/use-toast"
 
 import { DEMO_MODE } from "@/core/demo/config"
 import { robotDemoEngine } from "@/core/demo/robotDemoEngine"
@@ -223,9 +236,10 @@ interface DetailPanelProps {
   onMarkFalseAlarm: (id: string) => void
   onMarkResolved: (id: string) => void
   onSaveNotes?: (id: string, notes: string) => void
+  onDelete?: (id: string) => void
 }
 
-function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, onSaveNotes, }: DetailPanelProps) {
+function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, onSaveNotes, onDelete }: DetailPanelProps) {
   const [notes, setNotes] = useState(record?.notes || "")
   const [isVideoOpen, setIsVideoOpen] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
@@ -344,6 +358,16 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
               onClick={() => onSaveNotes(record.id, notes)}
             >
               저장
+            </Button>
+          )}
+
+          {onDelete && (
+            <Button
+              variant="destructive"
+              className="flex-1"
+              onClick={() => onDelete(record.id)}
+            >
+              삭제
             </Button>
           )}
 
@@ -675,23 +699,95 @@ function DashboardContent() {
    * REAL MODE
    * ============================
    */
+  const { toast } = useToast()
   const { carId } = usePrimaryCarId()
+  const { logs, isLoading: logsLoading } = useCarLogs(carId)
   const {
     detections,
     stats,
     selectedDetection,
     filters,
+    logId,
+    useSearch,
     isLoading,
     error,
     setFilters,
     clearFilters,
+    setLogId,
+    setUseSearch,
     selectDetection,
     updateStatus,
     updateNotes,
+    deleteDetection,
   } = useDetectionHistory(carId)
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Detection | null>(null)
   const lastOpenedRef = React.useRef<string | null>(null)
+
+  const formatLogLabel = (log: { id: number; startAt: string; endAt: string | null; status: string; detectionCount: number }) => {
+    const start = log.startAt ? new Date(log.startAt) : null
+    const end = log.endAt ? new Date(log.endAt) : null
+    const startLabel = start && !Number.isNaN(start.getTime()) ? start.toLocaleString("ko-KR") : log.startAt
+    const endLabel = end && !Number.isNaN(end.getTime()) ? end.toLocaleString("ko-KR") : "-"
+    return `${startLabel} ~ ${endLabel} · ${log.status} · ${log.detectionCount}건`
+  }
+
+  React.useEffect(() => {
+    if (useSearch) return
+    if (logId) return
+    if (!logs.length) return
+    setLogId(logs[0].id)
+  }, [logs, logId, setLogId, useSearch])
+
+  React.useEffect(() => {
+    const detectionId = searchParams.get("detectionId")
+    if (useSearch) {
+      const params = new URLSearchParams()
+      params.set("search", "1")
+      if (filters.type && filters.type !== "all") params.set("type", filters.type)
+      if (filters.status && filters.status !== "all") params.set("status", filters.status)
+      if (filters.dateFrom) params.set("from", filters.dateFrom)
+      if (filters.dateTo) params.set("to", filters.dateTo)
+      if (detectionId) params.set("detectionId", detectionId)
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`)
+      return
+    }
+    if (logId) {
+      const params = new URLSearchParams()
+      params.set("logId", String(logId))
+      if (detectionId) params.set("detectionId", detectionId)
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`)
+    }
+  }, [filters.dateFrom, filters.dateTo, filters.status, filters.type, logId, searchParams, useSearch])
+
+  React.useEffect(() => {
+    const search = searchParams.get("search")
+    const logParam = searchParams.get("logId")
+    if (search === "1") {
+      setUseSearch(true)
+      setLogId(null)
+      setFilters({
+        ...filters,
+        type: (searchParams.get("type") as DetectionType) || filters.type,
+        status: (searchParams.get("status") as DetectionStatus) || filters.status,
+        dateFrom: searchParams.get("from") || filters.dateFrom,
+        dateTo: searchParams.get("to") || filters.dateTo,
+      })
+      return
+    }
+    if (logParam) {
+      setUseSearch(false)
+      setLogId(Number(logParam))
+    }
+  }, [searchParams])
+
+  React.useEffect(() => {
+    if (!useSearch) return
+    if (!error) return
+    toast({ title: "통합 검색 실패", description: "로그 기준 조회로 전환합니다." })
+    setUseSearch(false)
+  }, [error, setUseSearch, toast, useSearch])
 
   React.useEffect(() => {
     if (!deepLinkId) return
@@ -720,6 +816,90 @@ function DashboardContent() {
           <h1 className="text-2xl font-semibold text-foreground">탐지 기록</h1>
           <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요.</p>
         </div>
+
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="min-w-[280px] flex-1 sm:flex-none">
+            <Select
+              value={logId ? String(logId) : ""}
+              onValueChange={(value) => {
+                setUseSearch(false)
+                setLogId(Number(value))
+              }}
+              disabled={useSearch || logsLoading || logs.length === 0}
+            >
+              <SelectTrigger className="bg-input border-border">
+                <SelectValue placeholder={logsLoading ? "운행 로그 불러오는 중..." : "운행 로그 선택"} />
+              </SelectTrigger>
+              <SelectContent>
+                {logs.map((log) => (
+                  <SelectItem key={log.id} value={String(log.id)}>
+                    {formatLogLabel(log)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <Select
+            value={filters.type || "all"}
+            onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
+          >
+            <SelectTrigger className="w-[140px] bg-input border-border">
+              <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectValue placeholder="유형" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">모든 유형</SelectItem>
+              <SelectItem value="cockroach">바퀴벌레</SelectItem>
+              <SelectItem value="ant">개미</SelectItem>
+              <SelectItem value="fly">파리</SelectItem>
+              <SelectItem value="mosquito">모기</SelectItem>
+              <SelectItem value="spider">거미</SelectItem>
+              <SelectItem value="unknown">미확인</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.status || "all"}
+            onValueChange={(value) => setFilters({ ...filters, status: value as DetectionStatus | "all" })}
+          >
+            <SelectTrigger className="w-[140px] bg-input border-border">
+              <SelectValue placeholder="상태" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">모든 상태</SelectItem>
+              <SelectItem value="detected">탐지됨</SelectItem>
+              <SelectItem value="confirmed">확인됨</SelectItem>
+              <SelectItem value="false_alarm">오탐</SelectItem>
+              <SelectItem value="resolved">해결됨</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={useSearch}
+              onCheckedChange={(checked) => {
+                setUseSearch(checked)
+                if (checked) setLogId(null)
+              }}
+            />
+            <span className="text-sm text-muted-foreground">통합 검색</span>
+          </div>
+          {useSearch && (
+            <Badge variant="secondary" className="text-xs">
+              통합 검색 결과
+            </Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearFilters}
+            className="text-xs h-8 px-2"
+          >
+            <X className="h-3 w-3 mr-1" />
+            필터 초기화
+          </Button>
+        </div>
+        {isLoading && (
+          <div className="mb-4 h-2 w-full rounded-full bg-secondary/30 animate-pulse" />
+        )}
 
         <div className="mb-6">
           <StatsSection stats={stats} isLoading={isLoading} />
@@ -765,10 +945,44 @@ function DashboardContent() {
             await updateStatus(id, "resolved")
             setIsDetailOpen(false)
           }}
+          onDelete={async (id) => {
+            const target = detections.find((d) => d.id === id) ?? null
+            setDeleteTarget(target)
+          }}
           onSaveNotes={async (id, notes) => {
             await updateNotes(id, notes)
           }}
         />
+
+        <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>탐지 내역 삭제</AlertDialogTitle>
+              <AlertDialogDescription>
+                삭제하면 복구할 수 없습니다. 정말 삭제할까요?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setDeleteTarget(null)}>취소</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-500 hover:bg-red-500/90"
+                onClick={async () => {
+                  if (!deleteTarget) return
+                  const ok = await deleteDetection(deleteTarget.id)
+                  if (ok) {
+                    setIsDetailOpen(false)
+                    toast({ title: "삭제 완료", description: "탐지 내역을 삭제했습니다." })
+                  } else {
+                    toast({ title: "삭제 실패", description: "삭제 중 오류가 발생했습니다." })
+                  }
+                  setDeleteTarget(null)
+                }}
+              >
+                삭제
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   )

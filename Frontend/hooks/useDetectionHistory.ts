@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useEffect, useCallback, useMemo } from "react"
-import type { Detection, DetectionHistoryFilters, DetectionStats, DetectionStatus } from "@/core/types"
+import type { Detection, DetectionHistoryFilters, DetectionStats, DetectionStatus, DetectionType } from "@/core/types"
 import * as detectionApi from "@/core/api/detection"
 
 interface UseDetectionHistoryReturn {
@@ -10,13 +10,18 @@ interface UseDetectionHistoryReturn {
   stats: DetectionStats | null
   selectedDetection: Detection | null
   filters: DetectionHistoryFilters
+  logId: number | null
+  useSearch: boolean
   isLoading: boolean
   error: string | null
   setFilters: (filters: DetectionHistoryFilters) => void
   clearFilters: () => void
+  setLogId: (logId: number | null) => void
+  setUseSearch: (useSearch: boolean) => void
   selectDetection: (detection: Detection | null) => void
   updateStatus: (id: string, status: DetectionStatus) => Promise<boolean>
   updateNotes: (id: string, notes: string) => Promise<boolean>
+  deleteDetection: (id: string) => Promise<boolean>
   refresh: () => Promise<void>
 }
 
@@ -40,8 +45,11 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
   const [allDetections, setAllDetections] = useState<Detection[]>([])
   const [selectedDetection, setSelectedDetection] = useState<Detection | null>(null)
   const [filters, setFiltersState] = useState<DetectionHistoryFilters>(() => getInitialFilters())
+  const [logId, setLogId] = useState<number | null>(null)
+  const [useSearch, setUseSearch] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [statsOverride, setStatsOverride] = useState<DetectionStats | null>(null)
 
   const filteredDetections = useMemo(() => {
     const items = allDetections
@@ -61,7 +69,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
     })
   }, [allDetections, filters])
 
-  const stats = useMemo<DetectionStats>(() => {
+  const computedStats = useMemo<DetectionStats>(() => {
     const items = filteredDetections
     if (!items.length) {
       return { todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "-" }
@@ -96,6 +104,13 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
     return { todayCount, weekCount, falseAlarmRate, lastDetectionTime }
   }, [filteredDetections])
 
+  const stats = statsOverride ?? computedStats
+
+  const mapLabel = (type?: DetectionType | "all") => {
+    if (!type || type === "all") return undefined
+    return type
+  }
+
   const fetchData = useCallback(async () => {
     if (!carId) {
       setAllDetections([])
@@ -105,21 +120,37 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
 
     setIsLoading(true)
     try {
-      const historyResponse = await detectionApi.getDetectionHistory(carId)
-      setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
+      if (useSearch) {
+        const searchResponse = await detectionApi.searchDetections({
+          startDate: filters.dateFrom,
+          endDate: filters.dateTo,
+          label: mapLabel(filters.type),
+        })
+        setAllDetections(searchResponse.success && searchResponse.data ? searchResponse.data : [])
+        setStatsOverride(null)
+      } else if (logId) {
+        const historyResponse = await detectionApi.getDetectionsByLog(logId, 50, carId ?? undefined)
+        setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
+        const latestTime = historyResponse.success && historyResponse.data ? historyResponse.data[0]?.time : undefined
+        const statsResponse = await detectionApi.getLogStatistics(logId, latestTime)
+        setStatsOverride(statsResponse.success ? statsResponse.data : null)
+      } else {
+        const historyResponse = await detectionApi.getDetectionHistory(carId)
+        setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
+        setStatsOverride(null)
+      }
       setError(null)
     } catch {
-      setError("탐지 기록을 불러오는데 실패했습니다.")
+      setError("?먯? 湲곕줉??遺덈윭?ㅻ뒗???ㅽ뙣?덉뒿?덈떎.")
     } finally {
       setIsLoading(false)
     }
-  }, [carId])
+  }, [carId, filters.dateFrom, filters.dateTo, filters.type, logId, useSearch])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
 
-  // 선택: 필터/재조회로 목록이 바뀌면, 선택 항목이 사라진 경우 정리
   useEffect(() => {
     if (!selectedDetection) return
     const exists = filteredDetections.some((d) => d.id === selectedDetection.id)
@@ -148,7 +179,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, status })
         return true
       } catch {
-        setError("상태 업데이트에 실패했습니다.")
+        setError("?곹깭 ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.")
         return false
       }
     },
@@ -165,7 +196,23 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, notes })
         return true
       } catch {
-        setError("메모 업데이트에 실패했습니다.")
+        setError("硫붾え ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.")
+        return false
+      }
+    },
+    [selectedDetection]
+  )
+
+  const deleteDetection = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const response = await detectionApi.deleteDetection(id)
+        if (!response.success) return false
+        setAllDetections((prev) => prev.filter((d) => d.id !== id))
+        if (selectedDetection?.id === id) setSelectedDetection(null)
+        return true
+      } catch {
+        setError("감지 삭제에 실패했습니다.")
         return false
       }
     },
@@ -177,13 +224,18 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
     stats,
     selectedDetection,
     filters,
+    logId,
+    useSearch,
     isLoading,
     error,
     setFilters,
     clearFilters,
+    setLogId,
+    setUseSearch,
     selectDetection,
     updateStatus,
     updateNotes,
+    deleteDetection,
     refresh: fetchData,
   }
 }

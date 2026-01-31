@@ -56,6 +56,15 @@ type DetectionDetailResponse = DetectionListItemResponse & {
 
 type LogStatisticsResponse = Record<string, any>
 
+type CarLogResponse = {
+  id: number
+  mapId: number | null
+  startAt: string
+  endAt: string | null
+  status: string
+  detectionCount: number
+}
+
 function mapToUiDetection(raw: DetectionListItemResponse, opts?: { robotId?: string }): Detection {
   const { date, time } = toDateParts(raw.createdAt)
   return {
@@ -83,6 +92,16 @@ function toIsoEnd(dateStr: string) {
 }
 
 function normalizeLogStats(raw: LogStatisticsResponse, fallbackLastTime?: string): DetectionStats {
+  if (Array.isArray(raw)) {
+    const total = raw.reduce((sum, item) => sum + Number(item?.count ?? 0), 0)
+    return {
+      todayCount: total,
+      weekCount: total,
+      falseAlarmRate: 0,
+      lastDetectionTime: fallbackLastTime ?? "-",
+    }
+  }
+
   const total =
     raw?.totalDetections ??
     raw?.detectionCount ??
@@ -106,6 +125,17 @@ function normalizeLogStats(raw: LogStatisticsResponse, fallbackLastTime?: string
     weekCount: Number.isFinite(weekCount) ? Number(weekCount) : 0,
     falseAlarmRate: Number.isFinite(falseAlarmRate) ? Math.round(Number(falseAlarmRate)) : 0,
     lastDetectionTime: String(lastDetectionTime),
+  }
+}
+
+function normalizeLog(raw: any): CarLogResponse {
+  return {
+    id: Number(raw?.id),
+    mapId: raw?.mapId ?? raw?.map_id ?? null,
+    startAt: String(raw?.startAt ?? raw?.start_at ?? raw?.createdAt ?? ""),
+    endAt: raw?.endAt ?? raw?.end_at ?? null,
+    status: String(raw?.status ?? "UNKNOWN"),
+    detectionCount: Number(raw?.detectionCount ?? raw?.detection_count ?? raw?.count ?? 0),
   }
 }
 
@@ -144,6 +174,72 @@ export async function getLatestLogStatistics(
     return ok(normalizeLogStats(raw, fallbackLastTime))
   } catch (e: any) {
     return fail(e?.message ?? "통계 조회 실패")
+  }
+}
+
+export async function getCarLogs(carId: number, size: number = 20): Promise<ApiResponse<CarLogResponse[]>> {
+  try {
+    const page = await apiFetch<SpringPage<any>>(`/api/cars/${carId}/logs?page=0&size=${size}&sort=startAt,desc`)
+    const logs = Array.isArray(page?.content) ? page.content.map(normalizeLog) : []
+    return ok(logs)
+  } catch (e: any) {
+    return fail(e?.message ?? "운행 기록 조회 실패")
+  }
+}
+
+export async function getDetectionsByLog(logId: number, limit: number = 50, carId?: number): Promise<ApiResponse<Detection[]>> {
+  try {
+    const detPage = await apiFetch<SpringPage<DetectionListItemResponse>>(
+      `/api/logs/${logId}/detections?page=0&size=${limit}&sort=createdAt,desc`
+    )
+    const robotId = carId ? `car-${carId}` : "unknown"
+    return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
+  } catch (e: any) {
+    return fail(e?.message ?? "감지 목록 조회 실패")
+  }
+}
+
+export async function getLogStatistics(logId: number, fallbackLastTime?: string): Promise<ApiResponse<DetectionStats | null>> {
+  try {
+    const raw = await apiFetch<LogStatisticsResponse>(`/api/logs/${logId}/statistics`)
+    return ok(normalizeLogStats(raw, fallbackLastTime))
+  } catch (e: any) {
+    return fail(e?.message ?? "통계 조회 실패")
+  }
+}
+
+export async function deleteDetection(id: string): Promise<ApiResponse<void>> {
+  try {
+    await apiFetch(`/api/detections/${id}`, { method: "DELETE" })
+    return ok(undefined)
+  } catch (e: any) {
+    return fail(e?.message ?? "감지 삭제 실패")
+  }
+}
+
+export async function searchDetections(params: {
+  startDate?: string
+  endDate?: string
+  label?: string
+}): Promise<ApiResponse<Detection[]>> {
+  try {
+    const query = new URLSearchParams()
+    const normalizeDateTime = (value?: string, fallbackTime?: string) => {
+      if (!value) return undefined
+      if (value.includes("T")) return value
+      return `${value}${fallbackTime ?? "T00:00:00"}`
+    }
+    const start = normalizeDateTime(params.startDate, "T00:00:00")
+    const end = normalizeDateTime(params.endDate, "T23:59:59")
+    if (start) query.set("startDate", start)
+    if (end) query.set("endDate", end)
+    if (params.label) query.set("label", params.label)
+
+    const res = await apiFetch<any>(`/api/detections/search?${query.toString()}`)
+    const content = Array.isArray(res) ? res : Array.isArray(res?.content) ? res.content : []
+    return ok(content.map((d: any) => mapToUiDetection(d)))
+  } catch (e: any) {
+    return fail(e?.message ?? "통합 감지 검색 실패")
   }
 }
 

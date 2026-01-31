@@ -7,6 +7,7 @@
     "dev": "next dev",
     "lint": "eslint .",
     "start": "next start",
+    "vercel-build": "npm run build",
     "generate:fcm-sw": "node scripts/generate-fcm-sw.mjs",
     "predev": "npm run generate:fcm-sw",
     "prebuild": "npm run generate:fcm-sw"

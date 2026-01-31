@@ -10,6 +10,11 @@ v24.13.0 로 깔았음
 
 ## 3. 실행
 ### 프론트는 Vercel, 백은 EC2인 경우 (웹, 모바일 모두 가능)
+`cd Frontend` 후
+
+`vercel link`
+(마지막 `Would you like to pull environment variables now?` 질문에만 n 하면 되는 것으로 알고 있음)
+
 `vercel --prod`
 실행 후 나오는 Production url로 모바일 크롬에서 접속
 

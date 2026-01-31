@@ -77,8 +77,10 @@ export function AppHeader() {
 
           <SheetContent side="left" className="w-64 p-0">
             <SheetHeader className="flex flex-row items-center gap-3 h-16 px-6 border-b border-border">
-              <CescarLogo size={32} className="text-primary" />
-              <SheetTitle className="text-lg font-semibold">Cescar</SheetTitle>
+              <Link href="/home" className="flex items-center gap-3">
+                <CescarLogo size={32} className="text-primary" />
+                <SheetTitle className="text-lg font-semibold">Cescar</SheetTitle>
+              </Link>
             </SheetHeader>
 
             <nav className="p-4 space-y-1">
@@ -108,10 +110,10 @@ export function AppHeader() {
           </SheetContent>
         </Sheet>
 
-        <div className="flex items-center gap-3 lg:hidden">
+        <Link href="/home" className="flex items-center gap-3 lg:hidden">
           <CescarLogo size={28} className="text-primary" />
           <span className="text-base font-semibold text-foreground">Cescar</span>
-        </div>
+        </Link>
       </div>
 
       <div className="flex items-center gap-2">

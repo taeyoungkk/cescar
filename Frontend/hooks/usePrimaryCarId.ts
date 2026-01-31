@@ -5,6 +5,7 @@ import { getMyCars } from "@/core/api/car"
 
 interface UsePrimaryCarIdReturn {
   carId: number | null
+  setCarId: (carId: number | null) => void
   isLoading: boolean
   error: string | null
   refresh: () => Promise<void>
@@ -33,5 +34,5 @@ export function usePrimaryCarId(): UsePrimaryCarIdReturn {
     fetchCars()
   }, [fetchCars])
 
-  return { carId, isLoading, error, refresh: fetchCars }
+  return { carId, setCarId, isLoading, error, refresh: fetchCars }
 }

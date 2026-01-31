@@ -29,23 +29,32 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useToast } from "@/components/ui/use-toast"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useAlerts } from "@/hooks/useAlerts"
-import { useMapStore, type StoredMap, type MapStatus } from "@/hooks/useMapStore"
 import { useCarMaps } from "@/hooks/useCarMaps"
 
-import type { Detection, SystemAlert, DetectionStats, CarStatus, CarDetail, CarMode } from "@/core/types"
+import type { Detection, SystemAlert, DetectionStats, CarStatus, CarSummary, CarMode } from "@/core/types"
 import { OfflineGuardButton } from "@/components/offline-guard-button"
+import * as carApi from "@/core/api/car"
 
 
-// DEMO MODE
-import { DEMO_MODE } from "@/core/demo/config"
-import { robotDemoEngine } from "@/core/demo/robotDemoEngine"
-import { useHomeDemoSummary } from "@/hooks/useHomeDemoSummary"
 import { useCarStatus } from "@/hooks/useCarStatus"
 
 // ============================================
@@ -155,6 +164,17 @@ function RobotStatusSection({
 // ============================================
 // Map UI (Presentational)
 // ============================================
+
+type MapStatus = "no_map" | "generating" | "completed"
+
+type StoredMap = {
+  id: string
+  generatedAt: string
+  areaSize: string
+  robotId: string
+  detectionsCount: number
+  mapSeed: number
+}
 
 function MapVisualization({ status, progress = 0 }: { status: MapStatus; progress?: number }) {
   return (
@@ -447,6 +467,7 @@ function MapGenerationSection({
   generatedAt,
   areaSize,
   robotId,
+  mapActions,
   maps,
   onStartGeneration,
   onStopGeneration,
@@ -470,6 +491,7 @@ function MapGenerationSection({
   generatedAt?: string
   areaSize?: string
   robotId?: string
+  mapActions?: React.ReactNode
   maps: StoredMap[]
   onStartGeneration?: () => void
   onStopGeneration?: () => void
@@ -520,6 +542,7 @@ function MapGenerationSection({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
+            {mapActions}
             {maps.length > 0 && onSelectMap && onDeleteMap && (
               <MapHistoryDialog maps={maps} onSelect={onSelectMap} onDelete={onDeleteMap} />
             )}
@@ -605,6 +628,14 @@ function MapGenerationSection({
             <Info className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">
               {generationDisabledReason ?? "지도 생성은 로봇에서 수행합니다."}
+            </p>
+          </div>
+        )}
+        {!generationEnabled && (
+          <div className="flex items-center gap-2 p-3 bg-secondary/20 border border-border rounded-lg">
+            <Info className="h-4 w-4 text-muted-foreground" />
+            <p className="text-xs text-muted-foreground">
+              지도 재생성은 로봇에서 새 지도를 만든 뒤, 여기서 “지도 등록”으로 메타데이터를 입력해 주세요.
             </p>
           </div>
         )}
@@ -761,24 +792,47 @@ function DetectionItem({ detection }: { detection: Detection }) {
 // RecentDetectionsSection removed per request
 
 // ============================================
-// Page Component (DEMO/REAL merge)
+// Page Component
 // ============================================
 
 export default function HomePage() {
-  const isDemo = DEMO_MODE
   const [isStandalone, setIsStandalone] = React.useState(false)
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission | "unknown">("unknown")
+  const { toast } = useToast()
+  const [carList, setCarList] = React.useState<CarSummary[]>([])
+  const [carLoading, setCarLoading] = React.useState(false)
+  const [carError, setCarError] = React.useState<string | null>(null)
+  const [claimCode, setClaimCode] = React.useState("")
+  const [claimNickname, setClaimNickname] = React.useState("")
+  const [nicknameDraft, setNicknameDraft] = React.useState("")
+  const [isClaiming, setIsClaiming] = React.useState(false)
+  const [isUnclaiming, setIsUnclaiming] = React.useState(false)
+  const [isSavingNickname, setIsSavingNickname] = React.useState(false)
+  const [claimConfirmOpen, setClaimConfirmOpen] = React.useState(false)
+  const [unclaimConfirmOpen, setUnclaimConfirmOpen] = React.useState(false)
+  const [createMapOpen, setCreateMapOpen] = React.useState(false)
+  const [isCreatingMap, setIsCreatingMap] = React.useState(false)
+  const [mapDraftError, setMapDraftError] = React.useState<string | null>(null)
+  const [mapFieldErrors, setMapFieldErrors] = React.useState<Record<string, string>>({})
+  const [mapDraft, setMapDraft] = React.useState({
+    name: "",
+    imageUrl: "",
+    width: "",
+    height: "",
+    resolution: "",
+    originX: "",
+    originY: "",
+  })
 
-  const demoSummary = useHomeDemoSummary()
-  const { carId } = usePrimaryCarId()
-  const carStatus = useCarStatus(carId ?? 0, { enabled: !isDemo && !!carId, intervalMs: 1000 })
+  const { carId, setCarId, refresh: refreshPrimaryCar } = usePrimaryCarId()
+  const carStatus = useCarStatus(carId ?? 0, { enabled: !!carId, intervalMs: 1000 })
 
   const realDetections = useRecentDetections(carId, 5)
   const realAlerts = useAlerts()
   const { setExternalAlerts } = realAlerts
-  const mapStore = useMapStore()
   const { isOnline: networkOnline } = useNetworkStatus()
-  const carMaps = useCarMaps(isDemo ? null : carId)
+  const carMaps = useCarMaps(carId)
+  const currentMap = carMaps.currentMap
 
   useEffect(() => {
     const checkStandalone = () => {
@@ -804,6 +858,30 @@ export default function HomePage() {
     }
   }, [])
 
+  const refreshCars = React.useCallback(async () => {
+    setCarLoading(true)
+    try {
+      const list = await carApi.getMyCars()
+      setCarList(list)
+      setCarError(null)
+    } catch (e: any) {
+      setCarError(e?.message ?? "차량 목록을 불러오지 못했습니다.")
+      setCarList([])
+    } finally {
+      setCarLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshCars()
+  }, [refreshCars])
+
+  const primaryCar = carList.find((car) => car.carId === carId) ?? carList[0] ?? null
+
+  useEffect(() => {
+    setNicknameDraft(primaryCar?.nickname ?? "")
+  }, [primaryCar?.carId, primaryCar?.nickname])
+
   useEffect(() => {
     if (typeof Notification === "undefined") {
       setNotificationPermission("unknown")
@@ -811,6 +889,30 @@ export default function HomePage() {
     }
     setNotificationPermission(Notification.permission)
   }, [])
+
+  useEffect(() => {
+    if (!createMapOpen) return
+    setMapDraft((prev) => {
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "")
+      return {
+        name: prev.name || `MAP-${stamp}`,
+        imageUrl: prev.imageUrl || currentMap?.imageUrl || "",
+        width: prev.width || (currentMap?.width ? String(currentMap.width) : ""),
+        height: prev.height || (currentMap?.height ? String(currentMap.height) : ""),
+        resolution: prev.resolution || (currentMap?.resolution ? String(currentMap.resolution) : ""),
+        originX: prev.originX || (currentMap?.originX != null ? String(currentMap.originX) : ""),
+        originY: prev.originY || (currentMap?.originY != null ? String(currentMap.originY) : ""),
+      }
+    })
+  }, [
+    createMapOpen,
+    currentMap?.imageUrl,
+    currentMap?.width,
+    currentMap?.height,
+    currentMap?.resolution,
+    currentMap?.originX,
+    currentMap?.originY,
+  ])
 
   const handleRequestNotification = async () => {
     if (typeof Notification === "undefined") return
@@ -827,56 +929,15 @@ export default function HomePage() {
   let detectionsLoading = false
   let alertsLoading = false
 
-  if (isDemo) {
-    const snap = robotDemoEngine.getSnapshot()
-    const base = demoSummary.status
+  status = carStatus.data
+  statusLoading = carStatus.isLoading
 
-    status = base
-      ? {
-          x: null,
-          y: null,
-          heading: 0,
-          mode: "AUTO",
-          isOnline: base.isOnline,
-          updatedAt: new Date().toISOString(),
-        }
-      : null
+  recentDetections = realDetections.recentDetections
+  stats = realDetections.stats
+  alerts = realAlerts.alerts
 
-    recentDetections = snap.cameraEvents.slice(0, 5).map((e) => ({
-      id: e.id,
-      type: e.type as Detection["type"],
-      time: e.time,
-      status: "detected",
-      date: new Date().toISOString().slice(0, 10),
-      robotId: "CESCAR-01",
-      confidence: Math.round(70 + Math.random() * 25),
-      notes: "",
-      timestamp: new Date().toISOString(),
-    }))
-
-    stats = {
-      todayCount: demoSummary.detectionsLast10m,
-      weekCount: snap.detectionHistory.length,
-      falseAlarmRate: 8,
-      lastDetectionTime: recentDetections[0]?.time ?? "-",
-    }
-
-    statusLoading = status == null
-    detectionsLoading = false
-    alertsLoading = false
-  } else {
-    status = carStatus.data
-    statusLoading = carStatus.isLoading
-
-    recentDetections = realDetections.recentDetections
-    stats = realDetections.stats
-    alerts = realAlerts.alerts
-
-    detectionsLoading = realDetections.isLoading
-    alertsLoading = realAlerts.isLoading
-  }
-
-  const currentMap = isDemo ? null : carMaps.currentMap
+  detectionsLoading = realDetections.isLoading
+  alertsLoading = realAlerts.isLoading
 
   const computedAlerts = React.useMemo(() => {
     const list: SystemAlert[] = []
@@ -885,10 +946,8 @@ export default function HomePage() {
       list.push({
         id: "offline",
         type: "error",
-        title: isDemo ? "로봇 연결 끊김" : "차량 오프라인",
-        message: isDemo
-          ? "로봇이 오프라인입니다. 전원/네트워크를 확인하세요."
-          : "차량이 오프라인입니다. 전원/네트워크를 확인하세요.",
+        title: "차량 오프라인",
+        message: "차량이 오프라인입니다. 전원/네트워크를 확인하세요.",
         timestamp: new Date().toISOString(),
         isRead: false,
       })
@@ -906,7 +965,7 @@ export default function HomePage() {
         })
       }
     }
-    if ((isDemo ? mapStore.status === "completed" : Boolean(currentMap)) === false) {
+    if (!currentMap) {
       list.push({
         id: "map",
         type: "info",
@@ -917,7 +976,7 @@ export default function HomePage() {
       })
     }
     return list
-  }, [status?.isOnline, status?.updatedAt, mapStore.status, isDemo, currentMap])
+  }, [status?.isOnline, status?.updatedAt, currentMap])
 
   React.useEffect(() => {
     setExternalAlerts(computedAlerts)
@@ -927,67 +986,396 @@ export default function HomePage() {
 
 
   const robotOnline = status?.isOnline ?? false
-  const mapReady = isDemo ? mapStore.status === "completed" : Boolean(currentMap)
+  const mapReady = Boolean(currentMap)
   const areaSize = currentMap && currentMap.width && currentMap.height && currentMap.resolution
     ? `${(currentMap.width * currentMap.resolution).toFixed(1)}m x ${(currentMap.height * currentMap.resolution).toFixed(1)}m`
     : "-"
   const generatedAt = currentMap?.createdAt
     ? new Date(currentMap.createdAt).toLocaleString("ko-KR")
     : "-"
-  const mapHistoryItems: StoredMap[] = isDemo
-    ? mapStore.maps
-    : carMaps.maps.map((m) => ({
-        id: String(m.id),
-        generatedAt: new Date(m.createdAt).toLocaleString("ko-KR"),
-        areaSize:
-          m.width && m.height && m.resolution
-            ? `${(m.width * m.resolution).toFixed(1)}m x ${(m.height * m.resolution).toFixed(1)}m`
-            : "-",
-        robotId: carId ? String(carId) : "-",
-        detectionsCount: 0,
-        mapSeed: Number(m.id),
-      }))
+  const mapHistoryItems: StoredMap[] = carMaps.maps.map((m) => ({
+    id: String(m.id),
+    generatedAt: new Date(m.createdAt).toLocaleString("ko-KR"),
+    areaSize:
+      m.width && m.height && m.resolution
+        ? `${(m.width * m.resolution).toFixed(1)}m x ${(m.height * m.resolution).toFixed(1)}m`
+        : "-",
+    robotId: carId ? String(carId) : "-",
+    detectionsCount: 0,
+    mapSeed: Number(m.id),
+  }))
 
-  // MVP: real?먯꽌??탐지 而⑦듃濡?鍮꾪솢??(異뷀썑 API ?뺤젙 ???곌껐)
-  const demoSnap = isDemo ? robotDemoEngine.getSnapshot() : null
-  const isDetecting = isDemo ? (demoSnap?.isDetecting ?? false) : false
-  const detectionLoading = isDemo ? statusLoading : false
+  const isDetecting = false
+  const detectionLoading = false
 
   const onStart = React.useCallback(async () => {
-    if (isDemo) {
-      robotDemoEngine.startDetection()
-      return true
-    }
+    toast({ title: "탐지 시작 불가", description: "탐지 시작/중지 API 연동이 필요합니다." })
     return false
-  }, [isDemo])
+  }, [toast])
 
   const onStop = React.useCallback(async () => {
-    if (isDemo) {
-      robotDemoEngine.stopDetection()
-      return true
-    }
+    toast({ title: "탐지 중지 불가", description: "탐지 시작/중지 API 연동이 필요합니다." })
     return false
-  }, [isDemo])
+  }, [toast])
 
-  useEffect(() => {
-    if (mapStore.status === "generating" && isDetecting) onStop()
-  }, [mapStore.status, isDetecting, onStop])
-
-
-  // Wait for mapStore hydration (prevents flicker + mismatch)
-  if (!mapStore.isInitialized) {
-    return (
-      <div className="p-4 lg:p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-6">
-            <h1 className="text-2xl font-semibold text-foreground">홈</h1>
-            <p className="text-sm text-muted-foreground mt-1">로봇 상태 및 감지 현황을 확인하세요.</p>
-          </div>
-          <div className="animate-pulse bg-secondary/20 h-96 rounded-lg" />
-        </div>
-      </div>
-    )
+  const handleClaim = async () => {
+    if (!claimCode.trim()) {
+      setCarError("클레임 코드를 입력해 주세요.")
+      toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+      return
+    }
+    setIsClaiming(true)
+    try {
+      await carApi.claimCar(claimCode.trim(), claimNickname.trim() || undefined)
+      setClaimCode("")
+      setClaimNickname("")
+      await refreshCars()
+      await refreshPrimaryCar()
+      toast({
+        title: "차량 등록 완료",
+        description: claimNickname.trim()
+          ? `닉네임 “${claimNickname.trim()}”으로 등록되었습니다.`
+          : "차량이 성공적으로 등록되었습니다.",
+      })
+    } catch (e: any) {
+      const message = e?.message ?? "차량 등록에 실패했습니다."
+      setCarError(message)
+      toast({ title: "차량 등록 실패", description: message })
+    } finally {
+      setIsClaiming(false)
+    }
   }
+
+  const handleUnclaim = async () => {
+    if (!primaryCar) return
+    setIsUnclaiming(true)
+    try {
+      await carApi.unclaimCar(primaryCar.carId)
+      await refreshCars()
+      await refreshPrimaryCar()
+      toast({
+        title: "차량 연결 해제",
+        description: `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제되었습니다.`,
+      })
+    } catch (e: any) {
+      const message = e?.message ?? "차량 해제에 실패했습니다."
+      setCarError(message)
+      toast({ title: "차량 해제 실패", description: message })
+    } finally {
+      setIsUnclaiming(false)
+    }
+  }
+
+  const handleSaveNickname = async () => {
+    if (!primaryCar) return
+    const nextName = nicknameDraft.trim()
+    if (!nextName) {
+      setCarError("닉네임을 입력해 주세요.")
+      toast({ title: "닉네임 저장 실패", description: "닉네임을 입력해 주세요." })
+      return
+    }
+    setIsSavingNickname(true)
+    try {
+      await carApi.updateCarNickname(primaryCar.carId, nextName)
+      await refreshCars()
+      toast({ title: "닉네임 저장 완료", description: `“${nextName}”으로 변경되었습니다.` })
+    } catch (e: any) {
+      const message = e?.message ?? "닉네임 수정에 실패했습니다."
+      setCarError(message)
+      toast({ title: "닉네임 저장 실패", description: message })
+    } finally {
+      setIsSavingNickname(false)
+    }
+  }
+
+  const resetMapDraft = () => {
+    setMapDraft({
+      name: "",
+      imageUrl: "",
+      width: "",
+      height: "",
+      resolution: "",
+      originX: "",
+      originY: "",
+    })
+    setMapDraftError(null)
+    setMapFieldErrors({})
+  }
+
+  const handleCreateMap = async () => {
+    if (!carId) {
+      toast({ title: "지도 등록 실패", description: "차량을 먼저 선택해 주세요." })
+      return
+    }
+    const width = Number(mapDraft.width)
+    const height = Number(mapDraft.height)
+    const resolution = Number(mapDraft.resolution)
+    const originX = Number(mapDraft.originX)
+    const originY = Number(mapDraft.originY)
+
+    if (!mapDraft.name.trim()) {
+      setMapDraftError("지도 이름을 입력해 주세요.")
+      setMapFieldErrors({ name: "지도 이름을 입력해 주세요." })
+      toast({ title: "지도 등록 실패", description: "지도 이름을 입력해 주세요." })
+      return
+    }
+    if (!mapDraft.imageUrl.trim()) {
+      setMapDraftError("이미지 URL을 입력해 주세요.")
+      setMapFieldErrors({ imageUrl: "이미지 URL을 입력해 주세요." })
+      toast({ title: "지도 등록 실패", description: "이미지 URL을 입력해 주세요." })
+      return
+    }
+    if (!/^(https?:\/\/|gs:\/\/)/i.test(mapDraft.imageUrl.trim())) {
+      setMapDraftError("이미지 URL은 http(s):// 또는 gs://로 시작해야 합니다.")
+      setMapFieldErrors({ imageUrl: "http(s):// 또는 gs:// 형식을 입력해 주세요." })
+      toast({ title: "지도 등록 실패", description: "이미지 URL 형식을 확인해 주세요." })
+      return
+    }
+    if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
+      setMapDraftError("지도 크기(width/height)를 입력해 주세요.")
+      setMapFieldErrors({ width: "가로/세로 값을 확인해 주세요.", height: "가로/세로 값을 확인해 주세요." })
+      toast({ title: "지도 등록 실패", description: "지도 크기(width/height)를 입력해 주세요." })
+      return
+    }
+    if (!Number.isFinite(resolution) || resolution <= 0) {
+      setMapDraftError("해상도(resolution)를 입력해 주세요.")
+      setMapFieldErrors({ resolution: "해상도를 입력해 주세요." })
+      toast({ title: "지도 등록 실패", description: "해상도(resolution)를 입력해 주세요." })
+      return
+    }
+    if (resolution < 0.01 || resolution > 1) {
+      setMapDraftError("해상도는 0.01 ~ 1.0 범위여야 합니다.")
+      setMapFieldErrors({ resolution: "0.01 ~ 1.0 범위로 입력해 주세요." })
+      toast({ title: "지도 등록 실패", description: "해상도 범위를 확인해 주세요." })
+      return
+    }
+    if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
+      setMapDraftError("origin 좌표를 입력해 주세요.")
+      setMapFieldErrors({ originX: "origin 좌표를 입력해 주세요.", originY: "origin 좌표를 입력해 주세요." })
+      toast({ title: "지도 등록 실패", description: "origin 좌표를 입력해 주세요." })
+      return
+    }
+    if (Math.abs(originX) > 1000 || Math.abs(originY) > 1000) {
+      setMapDraftError("origin 좌표는 -1000 ~ 1000 범위여야 합니다.")
+      setMapFieldErrors({ originX: "좌표 범위를 확인해 주세요.", originY: "좌표 범위를 확인해 주세요." })
+      toast({ title: "지도 등록 실패", description: "origin 좌표 범위를 확인해 주세요." })
+      return
+    }
+
+    setIsCreatingMap(true)
+    try {
+      const created = await carMaps.createMap({
+        name: mapDraft.name.trim(),
+        imageUrl: mapDraft.imageUrl.trim(),
+        width,
+        height,
+        resolution,
+        originX,
+        originY,
+      })
+      if (created?.id) {
+        await carMaps.selectMap(created.id)
+      }
+      toast({ title: "지도 등록 완료", description: "지도 메타데이터가 등록되었고 현재 지도로 설정되었습니다." })
+      setCreateMapOpen(false)
+      resetMapDraft()
+    } catch (e: any) {
+      setMapDraftError(e?.message ?? "지도 등록에 실패했습니다.")
+      setMapFieldErrors({})
+      toast({ title: "지도 등록 실패", description: e?.message ?? "지도 등록에 실패했습니다." })
+    } finally {
+      setIsCreatingMap(false)
+    }
+  }
+
+  const createMapAction = (
+    <Dialog
+      open={createMapOpen}
+      onOpenChange={(open) => {
+        setCreateMapOpen(open)
+        if (!open) resetMapDraft()
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="bg-transparent" disabled={!carId}>
+          <MapIcon className="mr-2 h-4 w-4" />
+          지도 등록
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-lg bg-card border-border">
+        <DialogHeader>
+          <DialogTitle>지도 등록</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="text-xs text-muted-foreground">
+            로봇에서 지도 생성이 완료된 뒤, 메타데이터를 입력해 등록합니다.
+          </div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] text-muted-foreground">
+              {currentMap ? "현재 지도 메타데이터를 입력칸에 채웁니다." : "현재 지도 정보가 없습니다."}
+            </span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="bg-transparent"
+              disabled={!currentMap}
+              onClick={() => {
+                if (!currentMap) return
+                setMapDraft((prev) => ({
+                  ...prev,
+                  imageUrl: currentMap.imageUrl ?? "",
+                  width: String(currentMap.width ?? ""),
+                  height: String(currentMap.height ?? ""),
+                  resolution: String(currentMap.resolution ?? ""),
+                  originX: String(currentMap.originX ?? ""),
+                  originY: String(currentMap.originY ?? ""),
+                }))
+              }}
+            >
+              현재 지도 값 불러오기
+            </Button>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">지도 이름</p>
+            <Input
+              value={mapDraft.name}
+              onChange={(e) => {
+                const cleaned = e.target.value.replace(/[,\s]+/g, " ").trimStart()
+                setMapDraft((prev) => ({ ...prev, name: cleaned }))
+                setMapDraftError(null)
+                setMapFieldErrors((prev) => ({ ...prev, name: "" }))
+              }}
+              placeholder="예: 3층 복도"
+              className={`bg-input border-border ${mapFieldErrors.name ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+            />
+            {mapFieldErrors.name && <p className="text-[11px] text-red-400">{mapFieldErrors.name}</p>}
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs text-muted-foreground">이미지 URL</p>
+              <Input
+                value={mapDraft.imageUrl}
+                onChange={(e) => {
+                  const cleaned = e.target.value.replace(/\s+/g, "")
+                  setMapDraft((prev) => ({ ...prev, imageUrl: cleaned }))
+                  setMapDraftError(null)
+                  setMapFieldErrors((prev) => ({ ...prev, imageUrl: "" }))
+                }}
+                placeholder="https://..."
+                className={`bg-input border-border ${mapFieldErrors.imageUrl ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+            <p className="text-[11px] text-muted-foreground">
+              서버에서 이미지 URL을 필수로 요구합니다. http(s):// 또는 gs:// 형식만 허용됩니다.
+            </p>
+            {mapFieldErrors.imageUrl && <p className="text-[11px] text-red-400">{mapFieldErrors.imageUrl}</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">가로 (px)</p>
+              <Input
+                type="number"
+                value={mapDraft.width}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^\d]/g, "")
+                  setMapDraft((prev) => ({ ...prev, width: val }))
+                  setMapDraftError(null)
+                  setMapFieldErrors((prev) => ({ ...prev, width: "" }))
+                }}
+                className={`bg-input border-border ${mapFieldErrors.width ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+              <p className="text-[11px] text-muted-foreground">예: 800</p>
+              {mapFieldErrors.width && <p className="text-[11px] text-red-400">{mapFieldErrors.width}</p>}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">세로 (px)</p>
+              <Input
+                type="number"
+                value={mapDraft.height}
+                onChange={(e) => {
+                  const val = e.target.value.replace(/[^\d]/g, "")
+                  setMapDraft((prev) => ({ ...prev, height: val }))
+                  setMapDraftError(null)
+                  setMapFieldErrors((prev) => ({ ...prev, height: "" }))
+                }}
+                className={`bg-input border-border ${mapFieldErrors.height ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+              <p className="text-[11px] text-muted-foreground">예: 600</p>
+              {mapFieldErrors.height && <p className="text-[11px] text-red-400">{mapFieldErrors.height}</p>}
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">해상도 (m/px)</p>
+              <Input
+                type="number"
+                step="0.01"
+                value={mapDraft.resolution}
+                onChange={(e) => {
+                  const val = e.target.value
+                  const normalized = val && !Number.isNaN(Number(val)) ? Number(val).toFixed(2) : val
+                  setMapDraft((prev) => ({ ...prev, resolution: normalized }))
+                  setMapDraftError(null)
+                  setMapFieldErrors((prev) => ({ ...prev, resolution: "" }))
+                }}
+                className={`bg-input border-border ${mapFieldErrors.resolution ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+              <p className="text-[11px] text-muted-foreground">범위: 0.01 ~ 1.0 (예: 0.05)</p>
+              {mapFieldErrors.resolution && <p className="text-[11px] text-red-400">{mapFieldErrors.resolution}</p>}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Origin X</p>
+              <Input
+                type="number"
+                step="0.1"
+                value={mapDraft.originX}
+                onChange={(e) => {
+                  const val = e.target.value
+                  const normalized = val && !Number.isNaN(Number(val)) ? Number(val).toFixed(1) : val
+                  setMapDraft((prev) => ({ ...prev, originX: normalized }))
+                  setMapDraftError(null)
+                  setMapFieldErrors((prev) => ({ ...prev, originX: "" }))
+                }}
+                className={`bg-input border-border ${mapFieldErrors.originX ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+              <p className="text-[11px] text-muted-foreground">범위: -1000 ~ 1000 (예: -10.0)</p>
+              {mapFieldErrors.originX && <p className="text-[11px] text-red-400">{mapFieldErrors.originX}</p>}
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">Origin Y</p>
+              <Input
+                type="number"
+                step="0.1"
+                value={mapDraft.originY}
+                onChange={(e) => {
+                  const val = e.target.value
+                  const normalized = val && !Number.isNaN(Number(val)) ? Number(val).toFixed(1) : val
+                  setMapDraft((prev) => ({ ...prev, originY: normalized }))
+                  setMapDraftError(null)
+                  setMapFieldErrors((prev) => ({ ...prev, originY: "" }))
+                }}
+                className={`bg-input border-border ${mapFieldErrors.originY ? "border-red-500 focus-visible:ring-red-500" : ""}`}
+              />
+              <p className="text-[11px] text-muted-foreground">범위: -1000 ~ 1000 (예: -8.0)</p>
+              {mapFieldErrors.originY && <p className="text-[11px] text-red-400">{mapFieldErrors.originY}</p>}
+            </div>
+          </div>
+          {mapDraftError && (
+            <div className="text-xs text-red-400">{mapDraftError}</div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setCreateMapOpen(false)}>
+              취소
+            </Button>
+            <Button onClick={handleCreateMap} disabled={isCreatingMap}>
+              등록
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
+  // 탐지 시작/중지 API 연동 시 여기에 상태 연동 로직 추가
 
   return (
     <div className="p-4 lg:p-6">
@@ -995,7 +1383,7 @@ export default function HomePage() {
         <div className="mb-6">
           <h1 className="text-2xl font-semibold text-foreground">홈</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            로봇 상태 및 감지 현황을 확인하세요{isDemo ? " (DEMO MODE)" : ""}
+            로봇 상태 및 감지 현황을 확인하세요
           </p>
         </div>
 
@@ -1025,29 +1413,31 @@ export default function HomePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-4">
-            {!isDemo && carMaps.error && (
+            {carMaps.error && (
               <Alert variant="destructive">
                 <AlertTitle>지도 불러오기 실패</AlertTitle>
                 <AlertDescription>{carMaps.error}</AlertDescription>
               </Alert>
             )}
             <MapGenerationSection
-              mapStatus={isDemo ? mapStore.status : currentMap ? "completed" : "no_map"}
-              progress={isDemo ? mapStore.progress : 0}
+              mapStatus={currentMap ? "completed" : "no_map"}
+              progress={0}
               isOnline={robotOnline}
               generatedAt={generatedAt}
               areaSize={areaSize}
               robotId={carId ? String(carId) : undefined}
+              mapActions={createMapAction}
               maps={mapHistoryItems}
-              onStartGeneration={isDemo ? mapStore.startGeneration : undefined}
-              onStopGeneration={isDemo ? mapStore.stopGeneration : undefined}
-              onSelectMap={isDemo ? mapStore.selectMap : (id) => carMaps.selectMap(Number(id))}
-              onDeleteMap={isDemo ? mapStore.deleteMap : (id) => carMaps.deleteMap(Number(id))}
-              generationEnabled={isDemo}
+              onStartGeneration={undefined}
+              onStopGeneration={undefined}
+              onSelectMap={(id) => carMaps.selectMap(Number(id))}
+              onDeleteMap={(id) => carMaps.deleteMap(Number(id))}
+              generationEnabled={false}
               generationDisabledReason="지도 생성은 로봇에서 수행됩니다. 현재는 조회만 가능합니다."
-              detectionEnabled
+              detectionEnabled={false}
+              detectionDisabledReason="탐지 시작/중지 API 연동이 필요합니다."
               isDetecting={isDetecting}
-              detectionLoading={isDemo ? statusLoading : detectionLoading}
+              detectionLoading={detectionLoading}
               onStartDetect={onStart}
               onStopDetect={onStop}
               networkOnline={networkOnline}
@@ -1056,6 +1446,147 @@ export default function HomePage() {
             />
           </div>
           <div className="space-y-6">
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium">차량 관리</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {carLoading ? (
+                  <div className="text-sm text-muted-foreground">불러오는 중...</div>
+                ) : (
+                  <>
+                    {primaryCar ? (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs text-muted-foreground">현재 차량</p>
+                          <Badge variant="secondary">{primaryCar.carId}</Badge>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">차량 선택</p>
+                          <Select
+                            value={primaryCar ? String(primaryCar.carId) : ""}
+                            onValueChange={(value) => {
+                              const nextId = Number(value)
+                              if (Number.isFinite(nextId)) {
+                                setCarId(nextId)
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="bg-input border-border">
+                              <SelectValue placeholder="차량 선택" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {carList.map((car) => (
+                                <SelectItem key={car.carId} value={String(car.carId)}>
+                                  {car.nickname} · {car.carId}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground">닉네임</p>
+                          <div className="flex gap-2">
+                            <Input
+                              value={nicknameDraft}
+                              onChange={(e) => setNicknameDraft(e.target.value)}
+                              placeholder="차량 닉네임"
+                              className="bg-input border-border"
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleSaveNickname}
+                              disabled={isSavingNickname || nicknameDraft.trim() === primaryCar.nickname}
+                            >
+                              저장
+                            </Button>
+                          </div>
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full"
+                          onClick={() => setUnclaimConfirmOpen(true)}
+                          disabled={isUnclaiming}
+                        >
+                          차량 연결 해제
+                        </Button>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">등록된 차량이 없습니다.</p>
+                    )}
+
+                    <div className="h-px bg-border" />
+
+                    <div className="space-y-3">
+                      <p className="text-xs text-muted-foreground">차량 등록</p>
+                      <Input
+                        value={claimCode}
+                        onChange={(e) => setClaimCode(e.target.value)}
+                        placeholder="클레임 코드"
+                        className="bg-input border-border"
+                      />
+                      <Input
+                        value={claimNickname}
+                        onChange={(e) => setClaimNickname(e.target.value)}
+                        placeholder="닉네임 (선택)"
+                        className="bg-input border-border"
+                      />
+                      <Button
+                        className="w-full"
+                        onClick={() => {
+                          if (!claimCode.trim()) {
+                            setCarError("클레임 코드를 입력해 주세요.")
+                            toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+                            return
+                          }
+                          setClaimConfirmOpen(true)
+                        }}
+                        disabled={isClaiming}
+                      >
+                        차량 등록
+                      </Button>
+                    </div>
+                  </>
+                )}
+
+                {carError && <p className="text-xs text-red-400">{carError}</p>}
+              </CardContent>
+            </Card>
+
+            <AlertDialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>차량을 등록할까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    클레임 코드 {claimCode ? `“${claimCode}”` : ""}로 차량을 등록합니다.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleClaim}>등록</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
+            <AlertDialog open={unclaimConfirmOpen} onOpenChange={setUnclaimConfirmOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>차량 연결을 해제할까요?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {primaryCar
+                      ? `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제됩니다.`
+                      : "차량 연결을 해제합니다."}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>취소</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleUnclaim}>해제</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
             <SystemAlertsSection
               alerts={alerts}
               isLoading={alertsLoading}

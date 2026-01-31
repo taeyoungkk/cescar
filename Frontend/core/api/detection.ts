@@ -54,6 +54,18 @@ type DetectionDetailResponse = DetectionListItemResponse & {
   videoUrl: string | null
 }
 
+type LogStatisticsResponse = Record<string, any>
+
+type CarLogResponse = {
+  id: number
+  mapId: number | null
+  mapName?: string | null
+  startAt: string
+  endAt: string | null
+  status: string
+  detectionCount: number
+}
+
 function mapToUiDetection(raw: DetectionListItemResponse, opts?: { robotId?: string }): Detection {
   const { date, time } = toDateParts(raw.createdAt)
   return {
@@ -80,6 +92,55 @@ function toIsoEnd(dateStr: string) {
   return `${dateStr}T23:59:59`
 }
 
+function normalizeLogStats(raw: LogStatisticsResponse, fallbackLastTime?: string): DetectionStats {
+  if (Array.isArray(raw)) {
+    const total = raw.reduce((sum, item) => sum + Number(item?.count ?? 0), 0)
+    return {
+      todayCount: total,
+      weekCount: total,
+      falseAlarmRate: 0,
+      lastDetectionTime: fallbackLastTime ?? "-",
+    }
+  }
+
+  const total =
+    raw?.totalDetections ??
+    raw?.detectionCount ??
+    raw?.totalCount ??
+    raw?.count ??
+    raw?.total ??
+    0
+
+  const todayCount = raw?.todayCount ?? total ?? 0
+  const weekCount = raw?.weekCount ?? total ?? 0
+  const falseAlarmRate = raw?.falseAlarmRate ?? raw?.falseRate ?? 0
+  const lastDetectionTime =
+    raw?.lastDetectionTime ??
+    raw?.latestDetectionTime ??
+    raw?.lastDetectedAt ??
+    fallbackLastTime ??
+    "-"
+
+  return {
+    todayCount: Number.isFinite(todayCount) ? Number(todayCount) : 0,
+    weekCount: Number.isFinite(weekCount) ? Number(weekCount) : 0,
+    falseAlarmRate: Number.isFinite(falseAlarmRate) ? Math.round(Number(falseAlarmRate)) : 0,
+    lastDetectionTime: String(lastDetectionTime),
+  }
+}
+
+function normalizeLog(raw: any): CarLogResponse {
+  return {
+    id: Number(raw?.id),
+    mapId: raw?.mapId ?? raw?.map_id ?? null,
+    mapName: raw?.mapName ?? raw?.map_name ?? null,
+    startAt: String(raw?.startAt ?? raw?.start_at ?? raw?.createdAt ?? ""),
+    endAt: raw?.endAt ?? raw?.end_at ?? null,
+    status: String(raw?.status ?? "UNKNOWN"),
+    detectionCount: Number(raw?.detectionCount ?? raw?.detection_count ?? raw?.count ?? 0),
+  }
+}
+
 // ?쒕쾭 ?듦퀎 ?붾뱶?ъ씤???앷린湲????붾?
 export async function getDetectionStats(): Promise<ApiResponse<DetectionStats>> {
   return ok({ todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "" })
@@ -98,7 +159,89 @@ export async function getRecentDetections(carId: number, limit: number = 5): Pro
     const robotId = `car-${carId}`
     return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
   } catch (e: any) {
-    return fail(e?.message ?? "理쒓렐 ?먯? 議고쉶 ?ㅽ뙣")
+    return fail(e?.message ?? "최근 감지 조회 실패")
+  }
+}
+
+export async function getLatestLogStatistics(
+  carId: number,
+  fallbackLastTime?: string
+): Promise<ApiResponse<DetectionStats | null>> {
+  try {
+    const logs = await apiFetch<SpringPage<any>>(`/api/cars/${carId}/logs?page=0&size=1&sort=startAt,desc`)
+    const latestLog = logs.content?.[0]
+    if (!latestLog?.id) return ok(null)
+
+    const raw = await apiFetch<LogStatisticsResponse>(`/api/logs/${latestLog.id}/statistics`)
+    return ok(normalizeLogStats(raw, fallbackLastTime))
+  } catch (e: any) {
+    return fail(e?.message ?? "통계 조회 실패")
+  }
+}
+
+export async function getCarLogs(carId: number, size: number = 20): Promise<ApiResponse<CarLogResponse[]>> {
+  try {
+    const page = await apiFetch<SpringPage<any>>(`/api/cars/${carId}/logs?page=0&size=${size}&sort=startAt,desc`)
+    const logs = Array.isArray(page?.content) ? page.content.map(normalizeLog) : []
+    return ok(logs)
+  } catch (e: any) {
+    return fail(e?.message ?? "운행 기록 조회 실패")
+  }
+}
+
+export async function getDetectionsByLog(logId: number, limit: number = 50, carId?: number): Promise<ApiResponse<Detection[]>> {
+  try {
+    const detPage = await apiFetch<SpringPage<DetectionListItemResponse>>(
+      `/api/logs/${logId}/detections?page=0&size=${limit}&sort=createdAt,desc`
+    )
+    const robotId = carId ? `car-${carId}` : "unknown"
+    return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
+  } catch (e: any) {
+    return fail(e?.message ?? "감지 목록 조회 실패")
+  }
+}
+
+export async function getLogStatistics(logId: number, fallbackLastTime?: string): Promise<ApiResponse<DetectionStats | null>> {
+  try {
+    const raw = await apiFetch<LogStatisticsResponse>(`/api/logs/${logId}/statistics`)
+    return ok(normalizeLogStats(raw, fallbackLastTime))
+  } catch (e: any) {
+    return fail(e?.message ?? "통계 조회 실패")
+  }
+}
+
+export async function deleteDetection(id: string): Promise<ApiResponse<void>> {
+  try {
+    await apiFetch(`/api/detections/${id}`, { method: "DELETE" })
+    return ok(undefined)
+  } catch (e: any) {
+    return fail(e?.message ?? "감지 삭제 실패")
+  }
+}
+
+export async function searchDetections(params: {
+  startDate?: string
+  endDate?: string
+  label?: string
+}): Promise<ApiResponse<Detection[]>> {
+  try {
+    const query = new URLSearchParams()
+    const normalizeDateTime = (value?: string, fallbackTime?: string) => {
+      if (!value) return undefined
+      if (value.includes("T")) return value
+      return `${value}${fallbackTime ?? "T00:00:00"}`
+    }
+    const start = normalizeDateTime(params.startDate, "T00:00:00")
+    const end = normalizeDateTime(params.endDate, "T23:59:59")
+    if (start) query.set("startDate", start)
+    if (end) query.set("endDate", end)
+    if (params.label) query.set("label", params.label)
+
+    const res = await apiFetch<any>(`/api/detections/search?${query.toString()}`)
+    const content = Array.isArray(res) ? res : Array.isArray(res?.content) ? res.content : []
+    return ok(content.map((d: any) => mapToUiDetection(d)))
+  } catch (e: any) {
+    return fail(e?.message ?? "통합 감지 검색 실패")
   }
 }
 
@@ -140,7 +283,7 @@ export async function getDetectionHistory(
     // status???쒕쾭 誘몄??먯씠???꾪꽣留곹븯吏 ?딆쓬
     return ok(items)
   } catch (e: any) {
-    return fail(e?.message ?? "?먯? 湲곕줉 議고쉶 ?ㅽ뙣")
+    return fail(e?.message ?? "감지 기록 조회 실패")
   }
 }
 

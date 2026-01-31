@@ -25,9 +25,11 @@ export function AppSidebar() {
 
   return (
     <aside className="hidden lg:flex flex-col w-64 bg-card border-r border-border">
-      <div className="flex items-center gap-3 h-16 px-6 border-b border-border">
-        <CescarLogo size={32} className="text-primary" />
-        <span className="text-lg font-semibold text-foreground">Cescar</span>
+      <div className="h-16 px-6 border-b border-border flex items-center">
+        <Link href="/home" className="flex items-center gap-3">
+          <CescarLogo size={32} className="text-primary" />
+          <span className="text-lg font-semibold text-foreground">Cescar</span>
+        </Link>
       </div>
 
       <nav className="flex-1 p-4 space-y-1">

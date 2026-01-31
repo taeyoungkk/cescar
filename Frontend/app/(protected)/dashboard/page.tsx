@@ -8,6 +8,7 @@ import {
   Clock,
   Search,
   Filter,
+  Map as MapIcon,
   Eye,
   AlertTriangle,
   CheckCircle,
@@ -26,17 +27,26 @@ import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet"
-import { Textarea } from "@/components/ui/textarea"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { useDetectionHistory } from "@/hooks/useDetectionHistory"
+import { useCarLogs } from "@/hooks/useCarLogs"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import * as detectionApi from "@/core/api/detection"
 import type { Detection, DetectionStats, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
+import { Switch } from "@/components/ui/switch"
+import { useToast } from "@/components/ui/use-toast"
 
-import { DEMO_MODE } from "@/core/demo/config"
-import { robotDemoEngine } from "@/core/demo/robotDemoEngine"
-import { useDashboardDemoData } from "@/hooks/useDashboardDemoData"
 
 // ============================================
 // Presentational Components (UI Only)
@@ -220,19 +230,12 @@ interface DetailPanelProps {
   record: Detection | null
   open: boolean
   onClose: () => void
-  onMarkFalseAlarm: (id: string) => void
-  onMarkResolved: (id: string) => void
-  onSaveNotes?: (id: string, notes: string) => void
+  onDelete?: (id: string) => void
 }
 
-function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, onSaveNotes, }: DetailPanelProps) {
-  const [notes, setNotes] = useState(record?.notes || "")
+function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
   const [isVideoOpen, setIsVideoOpen] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
-
-  React.useEffect(() => {
-    setNotes(record?.notes || "")
-  }, [record?.id])
 
   const typeLabels: Record<string, string> = {
     cockroach: "바퀴벌레",
@@ -327,36 +330,20 @@ function DetailPanel({ record, open, onClose, onMarkFalseAlarm, onMarkResolved, 
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">메모</label>
-            <Textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="메모를 입력하세요."
-              className="bg-input border-border resize-none min-h-[100px]"
-            />
+            <div className="min-h-[80px] rounded-md border border-border bg-secondary/20 p-3 text-sm text-muted-foreground">
+              {record.notes?.trim() ? record.notes : "메모가 없습니다."}
+            </div>
           </div>
         </div>
 
         <SheetFooter className="border-t border-border px-5 pb-5 pt-4 gap-2">
-          {onSaveNotes && (
+          {onDelete && (
             <Button
-              variant="outline"
-              className="flex-1 bg-transparent"
-              onClick={() => onSaveNotes(record.id, notes)}
+              variant="destructive"
+              className="flex-1"
+              onClick={() => onDelete(record.id)}
             >
-              저장
-            </Button>
-          )}
-
-          {record.status !== "false_alarm" && (
-            <Button variant="outline" className="flex-1 bg-transparent" onClick={() => onMarkFalseAlarm(record.id)}>
-              <XCircle className="h-4 w-4 mr-2" />
-              오탐으로 표시
-            </Button>
-          )}
-          {record.status !== "resolved" && (
-            <Button variant="default" className="flex-1" onClick={() => onMarkResolved(record.id)}>
-              <CheckCircle className="h-4 w-4 mr-2" />
-              해결 처리
+              삭제
             </Button>
           )}
         </SheetFooter>
@@ -398,87 +385,6 @@ function EmptyState() {
       </div>
       <h3 className="text-lg font-medium text-foreground mb-2">검색 결과가 없습니다</h3>
       <p className="text-sm text-muted-foreground max-w-sm">필터 조건을 변경하고 다시 검색해 주세요.</p>
-    </div>
-  )
-}
-
-interface FiltersBarProps {
-  filters: DetectionHistoryFilters
-  onFiltersChange: (filters: DetectionHistoryFilters) => void
-  onClearFilters: () => void
-  totalCount: number
-}
-
-function FiltersBar({ filters, onFiltersChange, onClearFilters, totalCount }: FiltersBarProps) {
-  const hasActiveFilters =
-    filters.dateFrom || filters.dateTo || (filters.type && filters.type !== "all") || (filters.status && filters.status !== "all") || filters.searchId
-
-  return (
-    <div className="mb-4 pb-4 border-b border-border space-y-3">
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[220px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="ID로 검색..."
-            value={filters.searchId || ""}
-            onChange={(e) => onFiltersChange({ ...filters, searchId: e.target.value })}
-            className="pl-9 bg-input border-border"
-          />
-        </div>
-
-        <DateRangePicker
-          startDate={filters.dateFrom || ""}
-          endDate={filters.dateTo || ""}
-          onStartDateChange={(date) => onFiltersChange({ ...filters, dateFrom: date })}
-          onEndDateChange={(date) => onFiltersChange({ ...filters, dateTo: date })}
-        />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3">
-        <Select
-          value={filters.type || "all"}
-          onValueChange={(value) => onFiltersChange({ ...filters, type: value as DetectionType | "all" })}
-        >
-          <SelectTrigger className="w-[140px] bg-input border-border">
-            <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
-            <SelectValue placeholder="유형" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">모든 유형</SelectItem>
-            <SelectItem value="cockroach">바퀴벌레</SelectItem>
-            <SelectItem value="ant">개미</SelectItem>
-            <SelectItem value="fly">파리</SelectItem>
-            <SelectItem value="mosquito">모기</SelectItem>
-            <SelectItem value="spider">거미</SelectItem>
-            <SelectItem value="unknown">미확인</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select
-          value={filters.status || "all"}
-          onValueChange={(value) => onFiltersChange({ ...filters, status: value as DetectionStatus | "all" })}
-        >
-          <SelectTrigger className="w-[140px] bg-input border-border">
-            <SelectValue placeholder="상태" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">모든 상태</SelectItem>
-            <SelectItem value="detected">탐지됨</SelectItem>
-            <SelectItem value="confirmed">확인됨</SelectItem>
-            <SelectItem value="false_alarm">오탐</SelectItem>
-            <SelectItem value="resolved">해결됨</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {hasActiveFilters && (
-          <Button variant="ghost" size="sm" onClick={onClearFilters} className="text-xs h-8 px-2">
-            <X className="h-3 w-3 mr-1" />
-            필터 초기화
-          </Button>
-        )}
-
-        <span className="ml-auto text-sm text-muted-foreground">총 {totalCount}건</span>
-      </div>
     </div>
   )
 }
@@ -574,124 +480,171 @@ function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableP
 function DashboardContent() {
   const searchParams = useSearchParams()
   const deepLinkId = searchParams.get("detectionId")
-  /**
-   * ============================
-   * DEMO MODE
-   * ============================
-   */
-  if (DEMO_MODE) {
-    const { batterySeries, detectionsPerMinute, detectionByType } = useDashboardDemoData()
-
-    // Demo engine snapshot
-    const snap = robotDemoEngine.getSnapshot()
-
-    // Detection 紐⑸줉 (CameraEvent ??Detection 蹂??
-    const detections: Detection[] = snap.cameraEvents.map((e, idx) => ({
-      id: e.id,
-      robotId: "CESCAR-01",
-      type: e.type as DetectionType,
-      confidence: Math.round(70 + Math.random() * 25),
-      status: "detected",
-      date: new Date().toISOString().slice(0, 10),
-      time: e.time,
-      notes: "",
-    }))
-
-    // Stats 怨꾩궛
-    const stats: DetectionStats = {
-      todayCount: detections.length,
-      weekCount: detections.length,
-      falseAlarmRate: 8,
-      lastDetectionTime: detections[0]?.time ?? "-",
-    }
-
-    const [selectedDetection, setSelectedDetection] = useState<Detection | null>(null)
-    const [isDetailOpen, setIsDetailOpen] = useState(false)
-    const [filters, setFilters] = useState<DetectionHistoryFilters>({})
-
-    const filteredDetections = detections.filter((d) => {
-      if (filters.type && filters.type !== "all" && d.type !== filters.type) return false
-      if (filters.status && filters.status !== "all" && d.status !== filters.status) return false
-      if (filters.searchId && !d.id.includes(filters.searchId)) return false
-      return true
-    })
-
-    return (
-      <div className="p-4 lg:p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-foreground">탐지 기록</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              탐지 기록 및 통계를 확인하세요. (DEMO MODE)
-            </p>
-          </div>
-
-          <div className="mb-6">
-            <StatsSection stats={stats} isLoading={false} />
-          </div>
-
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-4">
-            <CardTitle className="text-base font-medium">탐지 기록</CardTitle>
-            </CardHeader>
-            <CardContent>
-            {error && (
-              <Alert variant="destructive" className="mb-4">
-                <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}            <FiltersBar
-                filters={filters}
-                onFiltersChange={setFilters}
-                onClearFilters={() => setFilters({})}
-                totalCount={filteredDetections.length}
-              />
-              <DetectionTable
-                detections={filteredDetections}
-                onViewDetail={(d) => {
-                  setSelectedDetection(d)
-                  setIsDetailOpen(true)
-                }}
-                isLoading={false}
-              />
-            </CardContent>
-          </Card>
-
-          <DetailPanel
-            record={selectedDetection}
-            open={isDetailOpen}
-            onClose={() => setIsDetailOpen(false)}
-            onMarkFalseAlarm={() => setIsDetailOpen(false)}
-            onMarkResolved={() => setIsDetailOpen(false)}
-            onSaveNotes={() => {}}
-          />
-        </div>
-      </div>
-    )
-  }
-
-  /**
-   * ============================
-   * REAL MODE
-   * ============================
-   */
+  const { toast } = useToast()
   const { carId } = usePrimaryCarId()
+  const { logs, isLoading: logsLoading } = useCarLogs(carId)
   const {
     detections,
     stats,
     selectedDetection,
     filters,
+    logId,
+    useSearch,
     isLoading,
     error,
     setFilters,
     clearFilters,
+    setLogId,
+    setUseSearch,
     selectDetection,
-    updateStatus,
-    updateNotes,
+    deleteDetection,
   } = useDetectionHistory(carId)
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Detection | null>(null)
   const lastOpenedRef = React.useRef<string | null>(null)
+  const [mapFilter, setMapFilter] = useState<string>("all")
+  const [logSort, setLogSort] = useState<"desc" | "asc">("desc")
+
+  const formatLogLabel = (log: {
+    id: number
+    startAt: string
+    endAt: string | null
+    status: string
+    detectionCount: number
+    mapName?: string | null
+  }) => {
+    const start = log.startAt ? new Date(log.startAt) : null
+    const end = log.endAt ? new Date(log.endAt) : null
+    const startLabel = start && !Number.isNaN(start.getTime()) ? start.toLocaleString("ko-KR") : log.startAt
+    const endLabel = end && !Number.isNaN(end.getTime()) ? end.toLocaleString("ko-KR") : "-"
+    const mapLabel = log.mapName ? ` · ${log.mapName}` : ""
+    return `${startLabel} ~ ${endLabel} · ${log.status} · ${log.detectionCount}건${mapLabel}`
+  }
+
+  const mapOptions = React.useMemo(() => {
+    const names = logs
+      .map((log) => log.mapName)
+      .filter((name): name is string => Boolean(name && name.trim()))
+    return Array.from(new Set(names))
+  }, [logs])
+
+  const filteredLogs = React.useMemo(() => {
+    if (mapFilter === "all") return logs
+    return logs.filter((log) => log.mapName === mapFilter)
+  }, [logs, mapFilter])
+
+  const sortedLogs = React.useMemo(() => {
+    const items = [...filteredLogs]
+    items.sort((a, b) => {
+      const aTime = new Date(a.startAt).getTime()
+      const bTime = new Date(b.startAt).getTime()
+      if (!Number.isNaN(aTime) && !Number.isNaN(bTime)) {
+        return logSort === "desc" ? bTime - aTime : aTime - bTime
+      }
+      return logSort === "desc" ? b.id - a.id : a.id - b.id
+    })
+    return items
+  }, [filteredLogs, logSort])
+
+  React.useEffect(() => {
+    if (useSearch) return
+    if (logId) return
+    if (!sortedLogs.length) return
+    setLogId(sortedLogs[0].id)
+  }, [sortedLogs, logId, setLogId, useSearch])
+
+  React.useEffect(() => {
+    if (useSearch) return
+    if (!logId) return
+    if (!sortedLogs.length) return
+    const exists = sortedLogs.some((log) => log.id === logId)
+    if (!exists) setLogId(sortedLogs[0].id)
+  }, [sortedLogs, logId, setLogId, useSearch])
+
+  React.useEffect(() => {
+    const detectionId = searchParams.get("detectionId")
+    if (useSearch) {
+      const params = new URLSearchParams()
+      params.set("search", "1")
+      if (filters.type && filters.type !== "all") params.set("type", filters.type)
+      if (filters.status && filters.status !== "all") params.set("status", filters.status)
+      if (filters.dateFrom) params.set("from", filters.dateFrom)
+      if (filters.dateTo) params.set("to", filters.dateTo)
+      if (detectionId) params.set("detectionId", detectionId)
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`)
+      return
+    }
+    if (logId) {
+      const params = new URLSearchParams()
+      params.set("logId", String(logId))
+      if (mapFilter && mapFilter !== "all") params.set("map", mapFilter)
+      if (logSort) params.set("sort", logSort)
+      if (detectionId) params.set("detectionId", detectionId)
+      window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`)
+    }
+  }, [filters.dateFrom, filters.dateTo, filters.status, filters.type, logId, mapFilter, logSort, searchParams, useSearch])
+
+  React.useEffect(() => {
+    const search = searchParams.get("search")
+    const logParam = searchParams.get("logId")
+    const mapParam = searchParams.get("map")
+    const sortParam = searchParams.get("sort")
+    if (search === "1") {
+      setUseSearch(true)
+      setLogId(null)
+      setFilters({
+        ...filters,
+        type: (searchParams.get("type") as DetectionType) || filters.type,
+        status: (searchParams.get("status") as DetectionStatus) || filters.status,
+        dateFrom: searchParams.get("from") || filters.dateFrom,
+        dateTo: searchParams.get("to") || filters.dateTo,
+      })
+      return
+    }
+    if (logParam) {
+      setUseSearch(false)
+      setLogId(Number(logParam))
+    }
+    if (mapParam) {
+      setMapFilter(mapParam)
+    }
+    if (sortParam === "asc" || sortParam === "desc") {
+      setLogSort(sortParam)
+    }
+  }, [searchParams])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const raw = window.localStorage.getItem("dashboard.filters")
+    if (!raw) return
+    try {
+      const parsed = JSON.parse(raw)
+      if (parsed?.mapFilter) setMapFilter(parsed.mapFilter)
+      if (parsed?.logSort === "asc" || parsed?.logSort === "desc") setLogSort(parsed.logSort)
+      if (parsed?.filters) setFilters({ ...filters, ...parsed.filters })
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(
+      "dashboard.filters",
+      JSON.stringify({
+        mapFilter,
+        logSort,
+        filters,
+      })
+    )
+  }, [filters, logSort, mapFilter])
+
+  React.useEffect(() => {
+    if (!useSearch) return
+    if (!error) return
+    toast({ title: "통합 검색 실패", description: "로그 기준 조회로 전환합니다." })
+    setUseSearch(false)
+  }, [error, setUseSearch, toast, useSearch])
 
   React.useEffect(() => {
     if (!deepLinkId) return
@@ -721,6 +674,154 @@ function DashboardContent() {
           <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요.</p>
         </div>
 
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <div className="min-w-[280px] flex-1 sm:flex-none">
+            <Select
+              value={logId ? String(logId) : ""}
+              onValueChange={(value) => {
+                setUseSearch(false)
+                setLogId(Number(value))
+              }}
+              disabled={useSearch || logsLoading || sortedLogs.length === 0}
+            >
+              <SelectTrigger className="bg-input border-border">
+                <SelectValue placeholder={logsLoading ? "운행 로그 불러오는 중..." : "운행 로그 선택"} />
+              </SelectTrigger>
+              <SelectContent>
+                {sortedLogs.map((log) => (
+                  <SelectItem key={log.id} value={String(log.id)}>
+                    {formatLogLabel(log)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="relative flex-1 min-w-[220px] max-w-sm">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="ID로 검색..."
+              value={filters.searchId || ""}
+              onChange={(e) => setFilters({ ...filters, searchId: e.target.value })}
+              className="pl-9 bg-input border-border"
+            />
+          </div>
+          <DateRangePicker
+            startDate={filters.dateFrom || ""}
+            endDate={filters.dateTo || ""}
+            onStartDateChange={(date) => setFilters({ ...filters, dateFrom: date })}
+            onEndDateChange={(date) => setFilters({ ...filters, dateTo: date })}
+          />
+          <Select
+            value={mapFilter}
+            onValueChange={(value) => {
+              setMapFilter(value)
+              setUseSearch(false)
+            }}
+            disabled={useSearch || mapOptions.length === 0}
+          >
+            <SelectTrigger className="w-[160px] bg-input border-border">
+              <MapIcon className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectValue placeholder="지도" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">모든 지도</SelectItem>
+              {mapOptions.map((name) => (
+                <SelectItem key={name} value={name}>
+                  {name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+            <Select
+              value={logSort}
+              onValueChange={(value) => setLogSort(value as "desc" | "asc")}
+              disabled={useSearch || sortedLogs.length === 0}
+            >
+              <SelectTrigger className="w-[140px] bg-input border-border">
+                <SelectValue placeholder="정렬" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="desc">최신 로그</SelectItem>
+                <SelectItem value="asc">오래된 로그</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={filters.type || "all"}
+              onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
+            >
+            <SelectTrigger className="w-[140px] bg-input border-border">
+              <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
+              <SelectValue placeholder="유형" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">모든 유형</SelectItem>
+              <SelectItem value="cockroach">바퀴벌레</SelectItem>
+              <SelectItem value="ant">개미</SelectItem>
+              <SelectItem value="fly">파리</SelectItem>
+              <SelectItem value="mosquito">모기</SelectItem>
+              <SelectItem value="spider">거미</SelectItem>
+              <SelectItem value="unknown">미확인</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.status || "all"}
+            onValueChange={(value) => setFilters({ ...filters, status: value as DetectionStatus | "all" })}
+          >
+            <SelectTrigger className="w-[140px] bg-input border-border">
+              <SelectValue placeholder="상태" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">모든 상태</SelectItem>
+              <SelectItem value="detected">탐지됨</SelectItem>
+              <SelectItem value="confirmed">확인됨</SelectItem>
+              <SelectItem value="false_alarm">오탐</SelectItem>
+              <SelectItem value="resolved">해결됨</SelectItem>
+            </SelectContent>
+          </Select>
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={useSearch}
+              onCheckedChange={(checked) => {
+                setUseSearch(checked)
+                if (checked) setLogId(null)
+              }}
+            />
+            <span className="text-sm text-muted-foreground">통합 검색</span>
+          </div>
+          {useSearch && (
+            <Badge variant="secondary" className="text-xs">
+              통합 검색 결과
+            </Badge>
+          )}
+          {!useSearch && mapFilter !== "all" && (
+            <Badge variant="secondary" className="text-xs">
+              지도: {mapFilter}
+            </Badge>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (typeof window !== "undefined") {
+                window.localStorage.removeItem("dashboard.filters")
+              }
+              setMapFilter("all")
+              setLogSort("desc")
+              clearFilters()
+              window.history.replaceState(null, "", window.location.pathname)
+              toast({ title: "필터 초기화", description: "필터와 저장값을 초기화했습니다." })
+            }}
+            className="text-xs h-8 px-2"
+          >
+            <X className="h-3 w-3 mr-1" />
+            필터 초기화
+          </Button>
+          <span className="text-sm text-muted-foreground">총 {detections.length}건</span>
+        </div>
+        {isLoading && (
+          <div className="mb-4 h-2 w-full rounded-full bg-secondary/30 animate-pulse" />
+        )}
+
         <div className="mb-6">
           <StatsSection stats={stats} isLoading={isLoading} />
         </div>
@@ -736,12 +837,6 @@ function DashboardContent() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
-            <FiltersBar
-              filters={filters}
-              onFiltersChange={setFilters}
-              onClearFilters={clearFilters}
-              totalCount={detections.length}
-            />
             <DetectionTable
               detections={detections}
               onViewDetail={(d) => {
@@ -757,18 +852,41 @@ function DashboardContent() {
           record={selectedDetection}
           open={isDetailOpen}
           onClose={() => setIsDetailOpen(false)}
-          onMarkFalseAlarm={async (id) => {
-            await updateStatus(id, "false_alarm")
-            setIsDetailOpen(false)
-          }}
-          onMarkResolved={async (id) => {
-            await updateStatus(id, "resolved")
-            setIsDetailOpen(false)
-          }}
-          onSaveNotes={async (id, notes) => {
-            await updateNotes(id, notes)
+          onDelete={async (id) => {
+            const target = detections.find((d) => d.id === id) ?? null
+            setDeleteTarget(target)
           }}
         />
+
+        <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>탐지 내역 삭제</AlertDialogTitle>
+              <AlertDialogDescription>
+                삭제하면 복구할 수 없습니다. 정말 삭제할까요?
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => setDeleteTarget(null)}>취소</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-500 hover:bg-red-500/90"
+                onClick={async () => {
+                  if (!deleteTarget) return
+                  const ok = await deleteDetection(deleteTarget.id)
+                  if (ok) {
+                    setIsDetailOpen(false)
+                    toast({ title: "삭제 완료", description: "탐지 내역을 삭제했습니다." })
+                  } else {
+                    toast({ title: "삭제 실패", description: "삭제 중 오류가 발생했습니다." })
+                  }
+                  setDeleteTarget(null)
+                }}
+              >
+                삭제
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   )

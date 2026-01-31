@@ -3,7 +3,6 @@
 import { getToken, onMessage } from "firebase/messaging"
 import { getFirebaseMessaging } from "@/lib/firebase"
 import * as notificationApi from "@/core/api/notification"
-import { DEMO_MODE } from "@/core/demo/config"
 
 const FCM_TOKEN_KEY = "fcmToken"
 
@@ -20,7 +19,6 @@ function canRequestPermission(requestPermission: boolean) {
 
 export async function registerFcmToken(options: RegisterOptions = {}): Promise<string | null> {
   if (typeof window === "undefined") return null
-  if (DEMO_MODE) return null
 
   const requestPermission = options.requestPermission ?? true
   if (!canRequestPermission(requestPermission)) return null
@@ -79,7 +77,6 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
 
 export async function unregisterFcmToken(): Promise<void> {
   if (typeof window === "undefined") return
-  if (DEMO_MODE) return
   const token = localStorage.getItem(FCM_TOKEN_KEY)
   if (!token) return
 

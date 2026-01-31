@@ -1,9 +1,9 @@
-// core/api/car.ts
+﻿// core/api/car.ts
 import { apiFetch } from "./http"
 import type { CarDetail, CarStatus, CarSummary, CarMode } from "../types"
 
 function normalizeCarStatus(raw: any): CarStatus {
-  // 1) 평탄형을 우선 신뢰
+  // 1) ?됲깂?뺤쓣 ?곗꽑 ?좊ː
   const x = raw?.x ?? raw?.pose?.x ?? null
   const y = raw?.y ?? raw?.pose?.y ?? null
   const heading = Number(raw?.heading ?? raw?.pose?.heading ?? 0)
@@ -49,10 +49,36 @@ export async function getCarDetail(carId: number): Promise<CarDetail> {
 export async function getCarStatus(carId: number): Promise<CarStatus> {
   const raw = await apiFetch<any>(`/api/cars/${carId}/status`)
   const normalized = normalizeCarStatus(raw)
-  console.log("[getCarStatus]", raw, "=>", normalized) // 임시
+  console.log("[getCarStatus]", raw, "=>", normalized) // ?꾩떆
   return normalized
 }
 
+
+export async function claimCar(claimCode: string, nickname?: string): Promise<CarDetail> {
+  const raw = await apiFetch<any>("/api/cars/claim", {
+    method: "POST",
+    body: JSON.stringify({
+      claimCode,
+      claim_code: claimCode,
+      nickname,
+    }),
+  })
+  return normalizeCarDetail(raw)
+}
+
+export async function unclaimCar(carId: number): Promise<void> {
+  await apiFetch<any>(`/api/cars/${carId}/claim`, {
+    method: "DELETE",
+  })
+}
+
+export async function updateCarNickname(carId: number, nickname: string): Promise<CarDetail> {
+  const raw = await apiFetch<any>(`/api/cars/${carId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ nickname }),
+  })
+  return normalizeCarDetail(raw)
+}
 export async function setCarMode(carId: number, mode: CarMode): Promise<void> {
   await apiFetch<any>(`/api/cars/${carId}/mode`, {
     method: "PATCH",
@@ -66,3 +92,13 @@ export async function controlCar(carId: number, v: number, w: number): Promise<v
     body: JSON.stringify({ v, w }),
   })
 }
+
+export async function startMission(carId: number, payload: { points: { x: number; y: number }[] }): Promise<void> {
+  await apiFetch<any>(`/api/cars/${carId}/mission`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      area: payload.points,
+    }),
+  })
+}
+

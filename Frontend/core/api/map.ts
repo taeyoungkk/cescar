@@ -54,3 +54,38 @@ export async function getMapDetail(carId: number, mapId: number): Promise<CarMap
     return null
   }
 }
+
+export async function createMap(
+  carId: number,
+  payload: {
+    name: string
+    imageUrl: string
+    width: number
+    height: number
+    resolution: number
+    originX: number
+    originY: number
+  }
+): Promise<CarMap> {
+  const raw = await apiFetch<any>(`/api/cars/${carId}/maps`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: payload.name,
+      imageUrl: payload.imageUrl,
+      width: payload.width,
+      height: payload.height,
+      resolution: payload.resolution,
+      originX: payload.originX,
+      originY: payload.originY,
+    }),
+  })
+  return normalizeMap(raw)
+}
+
+export async function renameMap(carId: number, mapId: number, name: string): Promise<CarMap> {
+  const raw = await apiFetch<any>(`/api/cars/${carId}/maps/${mapId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  })
+  return normalizeMap(raw)
+}

@@ -17,8 +17,9 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
   const [recentDetections, setRecentDetections] = useState<Detection[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [stats, setStats] = useState<DetectionStats | null>(null)
 
-  const stats = useMemo<DetectionStats | null>(() => {
+  const fallbackStats = useMemo<DetectionStats | null>(() => {
     const items = recentDetections
     if (!items.length) {
       return { todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "-" }
@@ -55,6 +56,7 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
   const fetchData = useCallback(async () => {
     if (!carId) {
       setRecentDetections([])
+      setStats(null)
       setIsLoading(false)
       return
     }
@@ -62,10 +64,15 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
     setIsLoading(true)
     try {
       const detectionsResponse = await detectionApi.getRecentDetections(carId, limit)
-      setRecentDetections(detectionsResponse.success && detectionsResponse.data ? detectionsResponse.data : [])
+      const items = detectionsResponse.success && detectionsResponse.data ? detectionsResponse.data : []
+      setRecentDetections(items)
+
+      const latestTime = items[0]?.time ?? "-"
+      const statsResponse = await detectionApi.getLatestLogStatistics(carId, latestTime)
+      setStats(statsResponse.success ? statsResponse.data : null)
       setError(null)
     } catch {
-      setError("탐지 데이터를 불러오는데 실패했습니다.")
+      setError("?먯? ?곗씠?곕? 遺덈윭?ㅻ뒗???ㅽ뙣?덉뒿?덈떎.")
     } finally {
       setIsLoading(false)
     }
@@ -77,7 +84,7 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
 
   return {
     recentDetections,
-    stats,
+    stats: stats ?? fallbackStats,
     isLoading,
     error,
     refresh: fetchData,

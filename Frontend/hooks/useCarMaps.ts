@@ -12,6 +12,16 @@ interface UseCarMapsReturn {
   refresh: () => Promise<void>
   selectMap: (mapId: number) => Promise<boolean>
   deleteMap: (mapId: number) => Promise<boolean>
+  createMap: (payload: {
+    name: string
+    imageUrl: string
+    width: number
+    height: number
+    resolution: number
+    originX: number
+    originY: number
+  }) => Promise<CarMap | null>
+  renameMap: (mapId: number, name: string) => Promise<boolean>
 }
 
 export function useCarMaps(carId: number | null): UseCarMapsReturn {
@@ -64,6 +74,34 @@ export function useCarMaps(carId: number | null): UseCarMapsReturn {
     [carId, refresh]
   )
 
+  const createMap = useCallback(
+    async (payload: {
+      name: string
+      imageUrl: string
+      width: number
+      height: number
+      resolution: number
+      originX: number
+      originY: number
+    }) => {
+      if (!carId) return null
+      const created = await mapApi.createMap(carId, payload)
+      await refresh()
+      return created ?? null
+    },
+    [carId, refresh]
+  )
+
+  const renameMap = useCallback(
+    async (mapId: number, name: string) => {
+      if (!carId) return false
+      await mapApi.renameMap(carId, mapId, name)
+      await refresh()
+      return true
+    },
+    [carId, refresh]
+  )
+
   return {
     maps,
     currentMap,
@@ -72,5 +110,7 @@ export function useCarMaps(carId: number | null): UseCarMapsReturn {
     refresh,
     selectMap,
     deleteMap,
+    createMap,
+    renameMap,
   }
 }

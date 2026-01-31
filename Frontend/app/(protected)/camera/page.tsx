@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import React, { useMemo, useRef, useState } from "react"
+import React, { useCallback, useMemo, useRef, useState } from "react"
 import {
   Wifi,
   WifiOff,
@@ -22,7 +22,8 @@ import { Button } from "@/components/ui/button"
 import { useCarStatus } from "@/hooks/useCarStatus"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
 import * as carApi from "@/core/api/car"
-import type { CarStatus, Detection } from "@/core/types"
+import * as mapApi from "@/core/api/map"
+import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 
 // ============================================
@@ -735,6 +736,21 @@ interface ControlPanelProps {
   onChangeMode: (mode: "AUTO" | "MANUAL" | "STOP") => void
   onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
   onDriveStop: () => void
+  onStartMission: () => void
+  onStopMission: () => void
+  missionDisabled: boolean
+  missionStopDisabled: boolean
+  missionInput: string
+  onMissionInputChange: (value: string) => void
+  missionPointCount: number
+  missionError: string | null
+  missionPoints: { x: number; y: number }[]
+  invalidLines: string[]
+  onAddMissionPoints: () => void
+  onRemoveMissionPoint: (index: number) => void
+  onAddFromDetections: () => void
+  onMoveMissionPoint: (from: number, to: number) => void
+  maxMissionPoints: number
   modeError: string | null
 }
 
@@ -745,8 +761,26 @@ function ControlPanel({
   onChangeMode,
   onDriveStart,
   onDriveStop,
+  onStartMission,
+  onStopMission,
+  missionDisabled,
+  missionStopDisabled,
+  missionInput,
+  onMissionInputChange,
+  missionPointCount,
+  missionError,
+  missionPoints,
+  invalidLines,
+  onAddMissionPoints,
+  onRemoveMissionPoint,
+  onAddFromDetections,
+  onMoveMissionPoint,
+  maxMissionPoints,
   modeError,
 }: ControlPanelProps) {
+  const [dragIndex, setDragIndex] = React.useState<number | null>(null)
+  const reachedLimit = missionPointCount >= maxMissionPoints
+
   return (
     <Card className="bg-card border-border">
       <CardContent className="space-y-5">
@@ -776,6 +810,96 @@ function ControlPanel({
             </Button>
           </div>
           {modeError && <p className="text-xs text-red-400">{modeError}</p>}
+        </div>
+
+        <div className="h-px bg-border" />
+
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">자율주행 제어</p>
+          <div className="space-y-2">
+            <textarea
+              value={missionInput}
+              onChange={(e) => onMissionInputChange(e.target.value)}
+              rows={4}
+              className="w-full min-h-[120px] rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              placeholder={`좌표를 줄마다 입력\n예시:\n12.3, 45.6\n14 48`}
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={onAddMissionPoints} disabled={reachedLimit}>
+                좌표 추가
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={onAddFromDetections} disabled={reachedLimit}>
+                최근 탐지 좌표 추가
+              </Button>
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <span>
+                좌표 {missionPointCount}개 / {maxMissionPoints}개
+              </span>
+              <span>x,y 순서로 입력</span>
+            </div>
+            {invalidLines.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[11px] text-red-400">잘못된 줄</p>
+                <div className="space-y-1">
+                  {invalidLines.map((line, idx) => (
+                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
+                      {line}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {missionError && <p className="text-[11px] text-red-400">{missionError}</p>}
+          </div>
+          {missionPoints.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {missionPoints.map((point, index) => (
+                <div
+                  key={`${point.x}-${point.y}-${index}`}
+                  className="flex items-center gap-1 rounded-full bg-secondary px-2 py-1 text-[11px] text-foreground"
+                  draggable
+                  onDragStart={() => setDragIndex(index)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => {
+                    if (dragIndex == null) return
+                    onMoveMissionPoint(dragIndex, index)
+                    setDragIndex(null)
+                  }}
+                >
+                  <span>
+                    ({point.x.toFixed(2)}, {point.y.toFixed(2)})
+                  </span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-foreground"
+                    onClick={() => onRemoveMissionPoint(index)}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={onStartMission}
+              disabled={missionDisabled}
+            >
+              탐지 시작
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={onStopMission}
+              disabled={missionStopDisabled}
+            >
+              탐지 중지
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">AUTO 모드에서 좌표가 있어야 시작됩니다.</p>
         </div>
       </CardContent>
     </Card>
@@ -847,6 +971,41 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
         <div className="rounded-md border border-border bg-secondary/30 p-2.5 text-xs text-muted-foreground">
           좌표: X {xLabel} / Y {yLabel} · 방향: {headingLabel}°
         </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+interface DetectionStatsPanelProps {
+  stats: DetectionStats | null
+  isLoading: boolean
+}
+
+function DetectionStatsPanel({ stats, isLoading }: DetectionStatsPanelProps) {
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">탐지 통계</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {isLoading || !stats ? (
+          <p className="text-xs text-muted-foreground">불러오는 중...</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">오늘 탐지</span>
+              <span className="font-medium text-foreground">{stats.todayCount}건</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">이번 주 탐지</span>
+              <span className="font-medium text-foreground">{stats.weekCount}건</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">마지막 탐지</span>
+              <span className="text-xs text-muted-foreground font-mono">{stats.lastDetectionTime}</span>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   )
@@ -962,13 +1121,22 @@ export default function CameraPage() {
   const { isOnline: networkOnline } = useNetworkStatus()
   const { toast } = useToast()
   const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
-  const detectionWsUrl =
-    process.env.NEXT_PUBLIC_DETECTION_WS_URL ?? (baseUrl ? `${baseUrl.replace(/^http/, "ws")}/ws/detections` : "")
-
+  const wsBaseUrl = useMemo(() => (baseUrl ? baseUrl.replace(/^http/, "ws") : ""), [baseUrl])
+  const detectionWsUrl = useMemo(() => {
+    return process.env.NEXT_PUBLIC_DETECTION_WS_URL ?? (wsBaseUrl ? `${wsBaseUrl}/ws/detections` : "")
+  }, [wsBaseUrl])
+  const signalingUrl = useMemo(() => {
+    return process.env.NEXT_PUBLIC_SIGNALING_URL ?? (wsBaseUrl ? `${wsBaseUrl}/ws/webrtc` : "")
+  }, [wsBaseUrl])
   const [cars, setCars] = useState<{ carId: number; nickname: string }[]>([])
   const [carsLoading, setCarsLoading] = useState(true)
   const [carsError, setCarsError] = useState<string | null>(null)
   const [selectedCarId, setSelectedCarId] = useState<number | null>(null)
+  const [carDetail, setCarDetail] = useState<CarDetail | null>(null)
+  const [carDetailLoading, setCarDetailLoading] = useState(false)
+  const [currentMap, setCurrentMap] = useState<{ width: number; height: number; resolution: number; originX: number; originY: number } | null>(null)
+  const fallbackRoomId = process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"
+  const roomId = carDetail?.deviceId || (selectedCarId ? `car-${selectedCarId}` : fallbackRoomId)
 
   const carStatus = useCarStatus(selectedCarId ?? 0, { enabled: !!selectedCarId, intervalMs: 1000 })
   const recentDetections = useRecentDetections(selectedCarId, 10)
@@ -977,6 +1145,10 @@ export default function CameraPage() {
   const [showOverlay, setShowOverlay] = useState(true)
   const [driveMode, setDriveMode] = useState<"AUTO" | "MANUAL" | "STOP">("STOP")
   const [modeError, setModeError] = useState<string | null>(null)
+  const [missionInput, setMissionInput] = useState("")
+  const [missionError, setMissionError] = useState<string | null>(null)
+  const [missionPoints, setMissionPoints] = useState<{ x: number; y: number }[]>([])
+  const [invalidMissionLines, setInvalidMissionLines] = useState<string[]>([])
   const lastDriveToastRef = useRef<number>(0)
 
   const driveTimerRef = useRef<number | null>(null)
@@ -1007,6 +1179,102 @@ export default function CameraPage() {
     }
   }, [])
 
+  React.useEffect(() => {
+    if (!selectedCarId) {
+      setCarDetail(null)
+      return
+    }
+
+    let mounted = true
+    setCarDetailLoading(true)
+    carApi
+      .getCarDetail(selectedCarId)
+      .then((detail) => {
+        if (!mounted) return
+        setCarDetail(detail)
+      })
+      .catch((e: any) => {
+        if (!mounted) return
+        setCarDetail(null)
+        toast({ title: "차량 정보 불러오기 실패", description: e?.message ?? "차량 정보를 불러오지 못했습니다." })
+      })
+      .finally(() => {
+        if (!mounted) return
+        setCarDetailLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [selectedCarId, toast])
+
+  React.useEffect(() => {
+    if (!selectedCarId) {
+      setCurrentMap(null)
+      return
+    }
+    let mounted = true
+    mapApi
+      .getCurrentMap(selectedCarId)
+      .then((map) => {
+        if (!mounted) return
+        if (!map) {
+          setCurrentMap(null)
+          return
+        }
+        setCurrentMap({
+          width: map.width,
+          height: map.height,
+          resolution: map.resolution,
+          originX: map.originX,
+          originY: map.originY,
+        })
+      })
+      .catch(() => {
+        if (!mounted) return
+        setCurrentMap(null)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [selectedCarId])
+
+  React.useEffect(() => {
+    if (!selectedCarId) return
+    const key = `missionPoints:${selectedCarId}`
+    const raw = window.localStorage.getItem(key)
+    if (!raw) {
+      setMissionPoints([])
+      return
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const points = parsed
+          .map((item: any) => {
+            if (!item) return null
+            const x = Number(item.x ?? item[0])
+            const y = Number(item.y ?? item[1])
+            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+          })
+          .filter(Boolean) as { x: number; y: number }[]
+        setMissionPoints(points)
+      }
+    } catch {
+      setMissionPoints([])
+    }
+  }, [selectedCarId])
+
+  React.useEffect(() => {
+    if (!selectedCarId) return
+    const key = `missionPoints:${selectedCarId}`
+    if (!missionPoints.length) {
+      window.localStorage.removeItem(key)
+      return
+    }
+    window.localStorage.setItem(key, JSON.stringify(missionPoints))
+  }, [missionPoints, selectedCarId])
+
   const lastDetectionLabel = useMemo(() => {
     const latest = recentDetections.recentDetections[0]
     if (!latest) return "-"
@@ -1020,6 +1288,164 @@ export default function CameraPage() {
     if (Number.isNaN(last.getTime())) return false
     return Date.now() - last.getTime() < 60_000
   }, [recentDetections.recentDetections])
+
+  const MAX_MISSION_POINTS = 20
+
+  const missionBounds = useMemo(() => {
+    if (currentMap && currentMap.width > 0 && currentMap.height > 0 && currentMap.resolution > 0) {
+      const widthMeters = currentMap.width * currentMap.resolution
+      const heightMeters = currentMap.height * currentMap.resolution
+      return {
+        minX: currentMap.originX,
+        minY: currentMap.originY,
+        maxX: currentMap.originX + widthMeters,
+        maxY: currentMap.originY + heightMeters,
+      }
+    }
+
+    const parse = (value?: string) => {
+      const num = Number(value)
+      return Number.isFinite(num) ? num : null
+    }
+    return {
+      minX: parse(process.env.NEXT_PUBLIC_MISSION_MIN_X) ?? 0,
+      minY: parse(process.env.NEXT_PUBLIC_MISSION_MIN_Y) ?? 0,
+      maxX: parse(process.env.NEXT_PUBLIC_MISSION_MAX_X),
+      maxY: parse(process.env.NEXT_PUBLIC_MISSION_MAX_Y),
+    }
+  }, [currentMap])
+
+  const isPointInBounds = useCallback(
+    (point: { x: number; y: number }) => {
+      if (missionBounds.minX != null && point.x < missionBounds.minX) return false
+      if (missionBounds.minY != null && point.y < missionBounds.minY) return false
+      if (missionBounds.maxX != null && point.x > missionBounds.maxX) return false
+      if (missionBounds.maxY != null && point.y > missionBounds.maxY) return false
+      return true
+    },
+    [missionBounds]
+  )
+
+  const parsedMissionInput = useMemo(() => {
+    const raw = missionInput.trim()
+    if (!raw) {
+      return { points: [] as { x: number; y: number }[], invalidLines: [] as string[] }
+    }
+
+    if (raw.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(raw)
+        const list = Array.isArray(parsed) ? parsed : []
+        const points = list
+          .map((item: any) => {
+            if (Array.isArray(item) && item.length >= 2) {
+              const x = Number(item[0])
+              const y = Number(item[1])
+              return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+            }
+            if (item && typeof item === "object") {
+              const x = Number(item.x)
+              const y = Number(item.y)
+              return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+            }
+            return null
+          })
+          .filter(Boolean) as { x: number; y: number }[]
+
+        return { points, invalidLines: points.length ? [] : ["JSON 형식 좌표가 비어있습니다."] }
+      } catch {
+        return { points: [] as { x: number; y: number }[], invalidLines: ["JSON 형식이 올바르지 않습니다."] }
+      }
+    }
+
+    const lines = raw
+      .split(/[\n;]+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    const invalidLines: string[] = []
+    const points = lines
+      .map((line) => {
+        const parts = line.split(/[,\s]+/).filter(Boolean)
+        if (parts.length < 2) {
+          invalidLines.push(line)
+          return null
+        }
+        const x = Number(parts[0])
+        const y = Number(parts[1])
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          invalidLines.push(line)
+          return null
+        }
+        return { x, y }
+      })
+      .filter(Boolean) as { x: number; y: number }[]
+
+    const outOfRange = points.filter((p) => !isPointInBounds(p)).map((p) => `범위 밖: ${p.x}, ${p.y}`)
+    return { points, invalidLines: [...invalidLines, ...outOfRange] }
+  }, [isPointInBounds, missionInput])
+
+  const appendMissionPoints = useCallback((points: { x: number; y: number }[]) => {
+    if (points.length === 0) return
+    setMissionPoints((prev) => {
+      const next = [...prev]
+      points.forEach((point) => {
+        const exists = next.some((p) => p.x === point.x && p.y === point.y)
+        if (!exists) next.push(point)
+      })
+      if (next.length > MAX_MISSION_POINTS) {
+        setMissionError(`좌표는 최대 ${MAX_MISSION_POINTS}개까지 추가할 수 있습니다.`)
+        return next.slice(0, MAX_MISSION_POINTS)
+      }
+      return next
+    })
+  }, [MAX_MISSION_POINTS])
+
+  const handleAddMissionPoints = useCallback(() => {
+    if (parsedMissionInput.invalidLines.length > 0) {
+      setInvalidMissionLines(parsedMissionInput.invalidLines)
+      setMissionError("좌표를 확인해 주세요.")
+      return
+    }
+    setInvalidMissionLines([])
+    setMissionError(null)
+    appendMissionPoints(parsedMissionInput.points)
+    setMissionInput("")
+  }, [appendMissionPoints, parsedMissionInput])
+
+  const handleAddFromDetections = useCallback(() => {
+    const points = recentDetections.recentDetections
+      .filter((d) => d.x != null && d.y != null)
+      .map((d) => ({ x: d.x as number, y: d.y as number }))
+    if (!points.length) {
+      toast({ title: "탐지 좌표 없음", description: "최근 탐지 좌표가 없습니다." })
+      return
+    }
+    setMissionError(null)
+    setInvalidMissionLines([])
+    const validPoints = points.filter(isPointInBounds)
+    appendMissionPoints(validPoints)
+    if (validPoints.length !== points.length) {
+      toast({ title: "범위 밖 좌표 제외", description: "유효 범위 밖 좌표는 제외되었습니다." })
+    } else {
+      toast({ title: "좌표 추가 완료", description: "최근 탐지 좌표가 추가되었습니다." })
+    }
+  }, [appendMissionPoints, isPointInBounds, recentDetections.recentDetections, toast])
+
+  const handleRemoveMissionPoint = useCallback((index: number) => {
+    setMissionPoints((prev) => prev.filter((_, i) => i !== index))
+    setMissionError(null)
+  }, [])
+
+  const handleMoveMissionPoint = useCallback((from: number, to: number) => {
+    setMissionPoints((prev) => {
+      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev
+      const next = [...prev]
+      const [item] = next.splice(from, 1)
+      next.splice(to, 0, item)
+      return next
+    })
+  }, [])
 
   React.useEffect(() => {
     if (carStatus.data?.mode) {
@@ -1045,6 +1471,42 @@ export default function CameraPage() {
       setDriveMode(prev)
       setModeError("모드 변경에 실패했습니다. 다시 시도해 주세요.")
       toast({ title: "모드 변경 실패", description: "잠시 후 다시 시도해 주세요." })
+    }
+  }
+
+  const handleStartMission = async () => {
+    if (!selectedCarId) return
+    if (driveMode !== "AUTO") {
+      toast({ title: "AUTO 모드 필요", description: "AUTO 모드에서만 미션을 시작할 수 있습니다." })
+      return
+    }
+    if (!networkOnline) {
+      toast({ title: "미션 시작 실패", description: "오프라인 상태입니다." })
+      return
+    }
+    if (missionPoints.length === 0) {
+      toast({ title: "미션 좌표 없음", description: "미션 좌표를 입력한 뒤 다시 시도해 주세요." })
+      return
+    }
+    try {
+      await carApi.startMission(selectedCarId, { points: missionPoints })
+      toast({ title: "미션 시작 완료", description: "미션이 차량으로 전송되었습니다." })
+    } catch {
+      toast({ title: "미션 시작 실패", description: "미션 전송에 실패했습니다." })
+    }
+  }
+
+  const handleStopMission = async () => {
+    if (!selectedCarId) return
+    if (!networkOnline) {
+      toast({ title: "탐지 중지 실패", description: "오프라인 상태입니다." })
+      return
+    }
+    try {
+      await carApi.setCarMode(selectedCarId, "STOP")
+      toast({ title: "탐지 중지 완료", description: "차량이 정지 모드로 전환되었습니다." })
+    } catch {
+      toast({ title: "탐지 중지 실패", description: "요청에 실패했습니다." })
     }
   }
 
@@ -1125,9 +1587,9 @@ export default function CameraPage() {
                   manualDisabled={!networkOnline || carStatus.isLoading}
                   onDriveStart={handleDriveStart}
                   onDriveStop={handleDriveStop}
-                  wsUrl={process.env.NEXT_PUBLIC_SIGNALING_URL ?? "ws://I14B201.p.ssafy.io/ws/webrtc"}
+                  wsUrl={signalingUrl || "ws://I14B201.p.ssafy.io/ws/webrtc"}
                   detectionWsUrl={detectionWsUrl}
-                  roomId={process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"}
+                  roomId={roomId}
                 />
               </div>
             </div>
@@ -1139,6 +1601,21 @@ export default function CameraPage() {
                 onChangeMode={handleChangeMode}
                 onDriveStart={handleDriveStart}
                 onDriveStop={handleDriveStop}
+                onStartMission={handleStartMission}
+                onStopMission={handleStopMission}
+                missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
+                missionStopDisabled={!selectedCarId || !networkOnline}
+                missionInput={missionInput}
+                onMissionInputChange={setMissionInput}
+                missionPointCount={missionPoints.length}
+                missionError={missionError}
+                missionPoints={missionPoints}
+                invalidLines={invalidMissionLines}
+                onAddMissionPoints={handleAddMissionPoints}
+                onRemoveMissionPoint={handleRemoveMissionPoint}
+                onAddFromDetections={handleAddFromDetections}
+                onMoveMissionPoint={handleMoveMissionPoint}
+                maxMissionPoints={MAX_MISSION_POINTS}
                 modeError={modeError}
               />
             </div>
@@ -1176,7 +1653,35 @@ export default function CameraPage() {
                 <p className="min-h-[14px] text-[11px] text-red-400">{carsError ?? ""}</p>
               </CardContent>
             </Card>
+            <Card className="bg-card border-border">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 정보</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                {carDetailLoading ? (
+                  <p className="text-xs text-muted-foreground">불러오는 중...</p>
+                ) : carDetail ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">닉네임</span>
+                      <span className="font-medium text-foreground">{carDetail.nickname}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">디바이스 ID</span>
+                      <span className="text-xs text-foreground font-mono">{carDetail.deviceId || "-"}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">클레임 코드</span>
+                      <span className="text-xs text-foreground font-mono">{carDetail.claimCode || "-"}</span>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-muted-foreground">차량을 선택해 주세요.</p>
+                )}
+              </CardContent>
+            </Card>
             <RobotStatusPanel status={carStatus.data} isLoading={carStatus.isLoading} />
+            <DetectionStatsPanel stats={recentDetections.stats} isLoading={recentDetections.isLoading} />
 
             <EventLog
               detections={recentDetections.recentDetections}

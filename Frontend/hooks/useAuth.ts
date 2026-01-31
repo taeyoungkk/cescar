@@ -26,7 +26,6 @@ export function useAuth(): UseAuthReturn {
 
   const isAuthenticated = user !== null
 
-  // Check auth on mount
   useEffect(() => {
     async function checkAuth() {
       try {
@@ -46,34 +45,37 @@ export function useAuth(): UseAuthReturn {
     registerFcmToken({ requestPermission: false }).catch(() => {})
   }, [user?.id])
 
-  const login = useCallback(async (request: LoginRequest): Promise<boolean> => {
-    setIsLoading(true)
-    setError(null)
+  const login = useCallback(
+    async (request: LoginRequest): Promise<boolean> => {
+      setIsLoading(true)
+      setError(null)
 
-    try {
-      const response = await authApi.login(request)
+      try {
+        const response = await authApi.login(request)
 
-      if (response.success) {
-        if (response.user) {
-          setUser(response.user)
-        } else {
-          const currentUser = await authApi.getCurrentUser()
-          setUser(currentUser)
+        if (response.success) {
+          if (response.user) {
+            setUser(response.user)
+          } else {
+            const currentUser = await authApi.getCurrentUser()
+            setUser(currentUser)
+          }
+          registerFcmToken({ requestPermission: true }).catch(() => {})
+          router.push("/home")
+          return true
         }
-        registerFcmToken({ requestPermission: true }).catch(() => {})
-        router.push("/home")
-        return true
-      }
 
-      setError(response.error || "로그인에 실패했습니다.")
-      return false
-    } catch {
-      setError("로그인 중 오류가 발생했습니다.")
-      return false
-    } finally {
-      setIsLoading(false)
-    }
-  }, [router])
+        setError(response.error || "로그인에 실패했습니다.")
+        return false
+      } catch {
+        setError("로그인 중 오류가 발생했습니다.")
+        return false
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [router]
+  )
 
   const signup = useCallback(async (request: SignupRequest): Promise<boolean> => {
     setIsLoading(true)

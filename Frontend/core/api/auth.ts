@@ -1,7 +1,5 @@
 import type { AuthResponse, LoginRequest, SignupRequest, User } from "../types"
-import { mockUser } from "../mockData"
 import { apiFetch } from "./http"
-import { DEMO_MODE } from "@/core/demo/config"
 
 const AUTH_TOKEN_KEY = "accessToken"
 const MOCK_DELAY = 800
@@ -32,26 +30,6 @@ export function isAuthenticated(): boolean {
 // Auth API Functions
 // ============================================
 export async function login(request: LoginRequest): Promise<AuthResponse> {
-  if (DEMO_MODE) {
-    await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
-    
-    if (!request.email || !request.password) {
-      return {
-        success: false,
-        error: "이메일과 비밀번호를 입력해주세요.",
-      }
-    }
-
-    const token = `mock-token-${Date.now()}`
-    setAuthToken(token)
-
-    return {
-      success: true,
-      token,
-      user: mockUser,
-    }
-  }
-
   try {
     const res: any = await apiFetch<any>("/api/members/login", {
       method: "POST",
@@ -83,34 +61,6 @@ export async function login(request: LoginRequest): Promise<AuthResponse> {
 }
 
 export async function signup(request: SignupRequest): Promise<AuthResponse> {
-  if (DEMO_MODE) {
-    await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
-
-    if (!request.name || !request.email || !request.password) {
-      return {
-        success: false,
-        error: "모든 필드를 입력해주세요.",
-      }
-    }
-
-    if (request.password.length < 8) {
-      return {
-        success: false,
-        error: "비밀번호는 8자 이상이어야 합니다.",
-      }
-    }
-
-    return {
-      success: true,
-      user: {
-        ...mockUser,
-        id: `user-${Date.now()}`,
-        email: request.email,
-        name: request.name,
-      },
-    }
-  }
-
   try {
     await apiFetch<any>("/api/members/signup", {
       method: "POST",
@@ -123,20 +73,12 @@ export async function signup(request: SignupRequest): Promise<AuthResponse> {
 }
 
 export async function logout(): Promise<void> {
-  if (DEMO_MODE) {
-    await new Promise((resolve) => setTimeout(resolve, 300))
-  }
   removeAuthToken()
 }
 
 export async function getCurrentUser(): Promise<User | null> {
   const token = getAuthToken()
   if (!token) return null
-
-  if (DEMO_MODE) {
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    return mockUser
-  }
 
   try {
     const res: any = await apiFetch<any>("/api/members/me")
@@ -155,17 +97,10 @@ export async function getCurrentUser(): Promise<User | null> {
 
 export async function requestPasswordReset(email: string): Promise<AuthResponse> {
   await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY))
-
   if (!email) {
-    return {
-      success: false,
-      error: "이메일을 입력해주세요.",
-    }
+    return { success: false, error: "이메일을 입력해 주세요." }
   }
-
-  return {
-    success: true,
-  }
+  return { success: false, error: "비밀번호 재설정 기능은 아직 지원하지 않습니다." }
 }
 
 // ============================================

@@ -141,7 +141,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
       }
       setError(null)
     } catch {
-      setError("?먯? 湲곕줉??遺덈윭?ㅻ뒗???ㅽ뙣?덉뒿?덈떎.")
+      setError("감지 내역을 불러오지 못했습니다.")
     } finally {
       setIsLoading(false)
     }
@@ -179,7 +179,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, status })
         return true
       } catch {
-        setError("?곹깭 ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.")
+        setError("상태 변경에 실패했습니다.")
         return false
       }
     },
@@ -196,7 +196,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, notes })
         return true
       } catch {
-        setError("硫붾え ?낅뜲?댄듃???ㅽ뙣?덉뒿?덈떎.")
+        setError("메모 저장에 실패했습니다.")
         return false
       }
     },

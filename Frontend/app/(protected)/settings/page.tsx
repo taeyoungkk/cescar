@@ -72,7 +72,7 @@ export default function SettingsPage() {
 
   const onChangePassword = async () => {
     if (!passwords.currentPassword || !passwords.newPassword) {
-      toast({ title: "입력 필요", description: "현재 비밀번호와 새 비밀번호를 입력해주세요." })
+      toast({ title: "입력 필요", description: "현재 비밀번호와 새 비밀번호를 입력해 주세요." })
       return
     }
     if (passwords.newPassword !== passwords.confirmPassword) {
@@ -199,7 +199,7 @@ export default function SettingsPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>정말 탈퇴하시겠어요?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    계정과 연결된 차량 정보가 해제될 수 있으며, 이 작업은 되돌릴 수 없습니다.
+                    탈퇴하면 계정과 연결된 차량 연동이 해제됩니다. 이 작업은 되돌릴 수 없습니다.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

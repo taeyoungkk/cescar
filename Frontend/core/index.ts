@@ -4,9 +4,6 @@
 // Types
 export * from "./types"
 
-// Mock Data (for development/testing)
-export * from "./mockData"
-
 // API Functions
 export * as authApi from "./api/auth"
 export * as detectionApi from "./api/detection"

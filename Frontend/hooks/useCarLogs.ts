@@ -7,6 +7,7 @@ import * as detectionApi from "@/core/api/detection"
 export interface CarLogSummary {
   id: number
   mapId: number | null
+  mapName?: string | null
   startAt: string
   endAt: string | null
   status: string

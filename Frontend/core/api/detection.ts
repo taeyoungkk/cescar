@@ -59,6 +59,7 @@ type LogStatisticsResponse = Record<string, any>
 type CarLogResponse = {
   id: number
   mapId: number | null
+  mapName?: string | null
   startAt: string
   endAt: string | null
   status: string
@@ -132,6 +133,7 @@ function normalizeLog(raw: any): CarLogResponse {
   return {
     id: Number(raw?.id),
     mapId: raw?.mapId ?? raw?.map_id ?? null,
+    mapName: raw?.mapName ?? raw?.map_name ?? null,
     startAt: String(raw?.startAt ?? raw?.start_at ?? raw?.createdAt ?? ""),
     endAt: raw?.endAt ?? raw?.end_at ?? null,
     status: String(raw?.status ?? "UNKNOWN"),
@@ -157,7 +159,7 @@ export async function getRecentDetections(carId: number, limit: number = 5): Pro
     const robotId = `car-${carId}`
     return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
   } catch (e: any) {
-    return fail(e?.message ?? "理쒓렐 ?먯? 議고쉶 ?ㅽ뙣")
+    return fail(e?.message ?? "최근 감지 조회 실패")
   }
 }
 
@@ -281,7 +283,7 @@ export async function getDetectionHistory(
     // status???쒕쾭 誘몄??먯씠???꾪꽣留곹븯吏 ?딆쓬
     return ok(items)
   } catch (e: any) {
-    return fail(e?.message ?? "?먯? 湲곕줉 議고쉶 ?ㅽ뙣")
+    return fail(e?.message ?? "감지 기록 조회 실패")
   }
 }
 

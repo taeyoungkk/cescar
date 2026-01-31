@@ -10,7 +10,6 @@ import {
   MapPin,
   Bug,
   Clock,
-  Download,
   RefreshCw,
   Info,
   History,
@@ -21,6 +20,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
 import {
   Dialog,
   DialogContent,
@@ -28,6 +28,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import { useToast } from "@/components/ui/use-toast"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useCarMaps } from "@/hooks/useCarMaps"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
@@ -330,10 +342,12 @@ function MapHistoryDialog({
   maps,
   onSelect,
   onDelete,
+  currentMapId,
 }: {
   maps: CarMap[]
   onSelect: (mapId: string) => void
   onDelete: (mapId: string) => void
+  currentMapId?: number | null
 }) {
   const [open, setOpen] = React.useState(false)
 
@@ -360,13 +374,22 @@ function MapHistoryDialog({
               {maps.map((map) => (
                 <div
                   key={map.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-secondary/30 transition-colors"
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                    currentMapId === map.id
+                      ? "border-emerald-500/40 bg-emerald-500/10"
+                      : "border-border hover:bg-secondary/30"
+                  }`}
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{map.name}</p>
                     <div className="flex items-center gap-3 mt-1">
                       <span className="text-xs text-muted-foreground">{formatDateLabel(map.createdAt)}</span>
                       <span className="text-xs text-muted-foreground">{toAreaSize(map)}</span>
+                      {currentMapId === map.id && (
+                        <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">
+                          현재 지도
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 ml-3">
@@ -401,8 +424,13 @@ function MapHistoryDialog({
 
 export default function MapDetailPage() {
   const { carId } = usePrimaryCarId()
-  const { maps, currentMap, isLoading, refresh, selectMap, deleteMap, error: mapsError } = useCarMaps(carId)
+  const { maps, currentMap, isLoading, refresh, selectMap, deleteMap, renameMap, error: mapsError } = useCarMaps(carId)
   const { recentDetections, isLoading: detectionsLoading, error: detectionsError } = useRecentDetections(carId, 20)
+  const { toast } = useToast()
+
+  const [renameOpen, setRenameOpen] = useState(false)
+  const [renameDraft, setRenameDraft] = useState("")
+  const [renaming, setRenaming] = useState(false)
 
   const mapStatus: MapStatus = currentMap ? "completed" : "no_map"
 
@@ -413,6 +441,47 @@ export default function MapDetailPage() {
   const handleDeleteMap = useCallback(async (mapId: string) => {
     await deleteMap(Number(mapId))
   }, [deleteMap])
+
+  const handleDeleteAndSelectNext = useCallback(async () => {
+    if (!currentMap) return
+    await handleDeleteMap(String(currentMap.id))
+    const remaining = maps.filter((map) => map.id !== currentMap.id)
+    if (remaining.length > 0) {
+      await handleSelectMap(String(remaining[0].id))
+      toast({ title: "다음 지도 선택", description: `“${remaining[0].name}”로 전환했습니다.` })
+    } else {
+      toast({ title: "지도 삭제 완료", description: "선택 가능한 지도가 없습니다." })
+    }
+  }, [currentMap, handleDeleteMap, handleSelectMap, maps, toast])
+
+  const nextMap = useMemo(() => {
+    if (!currentMap) return null
+    return maps.filter((map) => map.id !== currentMap.id)[0] ?? null
+  }, [currentMap, maps])
+
+  useEffect(() => {
+    if (!renameOpen) return
+    setRenameDraft(currentMap?.name ?? "")
+  }, [renameOpen, currentMap?.name])
+
+  const handleRename = useCallback(async () => {
+    if (!currentMap) return
+    const nextName = renameDraft.trim()
+    if (!nextName) {
+      toast({ title: "이름 변경 실패", description: "지도 이름을 입력해 주세요." })
+      return
+    }
+    setRenaming(true)
+    try {
+      await renameMap(currentMap.id, nextName)
+      toast({ title: "이름 변경 완료", description: "지도 이름이 변경되었습니다." })
+      setRenameOpen(false)
+    } catch (e: any) {
+      toast({ title: "이름 변경 실패", description: e?.message ?? "지도 이름 변경에 실패했습니다." })
+    } finally {
+      setRenaming(false)
+    }
+  }, [currentMap, renameDraft, renameMap, toast])
 
   const detectionPoints = useMemo(() => {
     const typeLabels: Record<string, string> = {
@@ -467,6 +536,11 @@ export default function MapDetailPage() {
                 <span className="sm:hidden">지도 상세</span>
                 <span className="hidden sm:inline">지도 상세 보기</span>
               </h1>
+              {currentMap && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  현재 지도: <span className="text-foreground font-medium">{currentMap.name}</span>
+                </p>
+              )}
               <p className="text-sm text-muted-foreground mt-0.5 break-words">
                 <span className="sm:hidden">SLAM 지도 결과</span>
                 <span className="hidden sm:inline">SLAM 기반 지도 결과</span>
@@ -477,13 +551,88 @@ export default function MapDetailPage() {
           {/* Right */}
           <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
             {maps.length > 0 && (
-              <MapHistoryDialog maps={maps} onSelect={handleSelectMap} onDelete={handleDeleteMap} />
+              <MapHistoryDialog
+                maps={maps}
+                onSelect={handleSelectMap}
+                onDelete={handleDeleteMap}
+                currentMapId={currentMap?.id ?? null}
+              />
             )}
 
-            {mapStatus === "completed" && (
+            {mapStatus === "completed" && currentMap && (
+              <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm" className="bg-transparent">
+                    지도 이름 수정
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="sm:max-w-md bg-card border-border">
+                  <DialogHeader>
+                    <DialogTitle>지도 이름 수정</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div className="space-y-2">
+                      <p className="text-xs text-muted-foreground">지도 이름</p>
+                      <Input
+                        value={renameDraft}
+                        onChange={(e) => setRenameDraft(e.target.value)}
+                        placeholder="지도 이름"
+                        className="bg-input border-border"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setRenameOpen(false)}>
+                        취소
+                      </Button>
+                      <Button onClick={handleRename} disabled={renaming}>
+                        저장
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
+
+            {mapStatus === "completed" && currentMap && (
+              <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" className="bg-transparent text-red-400 hover:text-red-300">
+                  지도 삭제
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>현재 지도를 삭제할까요?</AlertDialogTitle>
+                  <AlertDialogDescription className="space-y-2">
+                    <div>삭제하면 현재 지도 선택이 해제됩니다. 필요하면 기존 지도 목록에서 다시 선택할 수 있습니다.</div>
+                    <div className="text-xs text-muted-foreground">
+                      다음 지도:{" "}
+                      <span className="text-foreground font-medium">{nextMap?.name ?? "없음"}</span>
+                    </div>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>취소</AlertDialogCancel>
+                    <AlertDialogAction
+                      disabled={!nextMap}
+                      onClick={async () => {
+                        await handleDeleteAndSelectNext()
+                      }}
+                    >
+                      삭제
+                    </AlertDialogAction>
+                    {!nextMap && (
+                      <span className="text-xs text-muted-foreground">선택 가능한 다음 지도가 없습니다.</span>
+                    )}
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+
+            {mapStatus === "completed" && currentMap && (
               <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shrink-0">
                 <MapPin className="h-3 w-3 mr-1" />
-                지도 완료
+                현재 지도
               </Badge>
             )}
           </div>
@@ -508,13 +657,14 @@ export default function MapDetailPage() {
                       <Target className="h-3 w-3 mr-1" />
                       Occupancy Grid
                     </Badge>
+                    {currentMap && (
+                      <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
+                        {currentMap.name}
+                      </Badge>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
-                    <Button variant="outline" size="sm" className="bg-transparent">
-                      <Download className="h-4 w-4 sm:mr-1" />
-                      <span className="hidden sm:inline">내보내기</span>
-                    </Button>
                     <Button variant="outline" size="sm" className="bg-transparent" onClick={refresh} disabled={isLoading}>
                       <RefreshCw className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">새로고침</span>
@@ -548,7 +698,13 @@ export default function MapDetailPage() {
             {/* Map metadata */}
             <div className="space-y-3">
               <h3 className="text-sm font-medium text-muted-foreground px-1">지도 정보</h3>
+              {currentMap && (
+                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 w-fit">
+                  현재 지도
+                </Badge>
+              )}
               <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+                <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} />
                 <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} />
                 <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
                 <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} />

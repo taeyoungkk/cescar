@@ -737,7 +737,9 @@ interface ControlPanelProps {
   onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
   onDriveStop: () => void
   onStartMission: () => void
+  onStopMission: () => void
   missionDisabled: boolean
+  missionStopDisabled: boolean
   missionInput: string
   onMissionInputChange: (value: string) => void
   missionPointCount: number
@@ -760,7 +762,9 @@ function ControlPanel({
   onDriveStart,
   onDriveStop,
   onStartMission,
+  onStopMission,
   missionDisabled,
+  missionStopDisabled,
   missionInput,
   onMissionInputChange,
   missionPointCount,
@@ -811,13 +815,13 @@ function ControlPanel({
         <div className="h-px bg-border" />
 
         <div className="space-y-3">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">미션 제어</p>
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">자율주행 제어</p>
           <div className="space-y-2">
             <textarea
               value={missionInput}
               onChange={(e) => onMissionInputChange(e.target.value)}
-              rows={3}
-              className="w-full rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              rows={4}
+              className="w-full min-h-[120px] rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder={`좌표를 줄마다 입력\n예시:\n12.3, 45.6\n14 48`}
             />
             <div className="flex flex-wrap items-center gap-2">
@@ -877,14 +881,24 @@ function ControlPanel({
               ))}
             </div>
           )}
-          <Button
-            variant="secondary"
-            className="w-full"
-            onClick={onStartMission}
-            disabled={missionDisabled}
-          >
-            미션 시작
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={onStartMission}
+              disabled={missionDisabled}
+            >
+              탐지 시작
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={onStopMission}
+              disabled={missionStopDisabled}
+            >
+              탐지 중지
+            </Button>
+          </div>
           <p className="text-xs text-muted-foreground">AUTO 모드에서 좌표가 있어야 시작됩니다.</p>
         </div>
       </CardContent>
@@ -1482,6 +1496,20 @@ export default function CameraPage() {
     }
   }
 
+  const handleStopMission = async () => {
+    if (!selectedCarId) return
+    if (!networkOnline) {
+      toast({ title: "탐지 중지 실패", description: "오프라인 상태입니다." })
+      return
+    }
+    try {
+      await carApi.setCarMode(selectedCarId, "STOP")
+      toast({ title: "탐지 중지 완료", description: "차량이 정지 모드로 전환되었습니다." })
+    } catch {
+      toast({ title: "탐지 중지 실패", description: "요청에 실패했습니다." })
+    }
+  }
+
   const sendDriveCommand = async (command: "forward" | "backward" | "left" | "right" | "stop") => {
     if (!selectedCarId || !networkOnline || driveMode !== "MANUAL") return
     const map: Record<typeof command, { v: number; w: number }> = {
@@ -1574,7 +1602,9 @@ export default function CameraPage() {
                 onDriveStart={handleDriveStart}
                 onDriveStop={handleDriveStop}
                 onStartMission={handleStartMission}
+                onStopMission={handleStopMission}
                 missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
+                missionStopDisabled={!selectedCarId || !networkOnline}
                 missionInput={missionInput}
                 onMissionInputChange={setMissionInput}
                 missionPointCount={missionPoints.length}

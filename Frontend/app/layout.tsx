@@ -4,7 +4,6 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { AnalyticsClient } from "./analytics-client"
 import { SwRegister } from "./sw-register"
 import { OfflineBanner } from "@/components/offline-banner"
-import { DemoBadge } from "@/components/demo-badge"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
@@ -45,7 +44,6 @@ export default function RootLayout({
         <SwRegister />
         <OfflineBanner />
         {children}
-        <DemoBadge />
         <Toaster />
         {isProd ? <AnalyticsClient /> : null}
       </body>

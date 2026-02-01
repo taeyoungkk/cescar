@@ -3,8 +3,12 @@ package com.ssafy.backend.domain.device.application;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.backend.domain.car.dao.CarRepository;
+import com.ssafy.backend.domain.car.dao.CarStatusRepository;
 import com.ssafy.backend.domain.car.domain.Car;
+import com.ssafy.backend.domain.car.domain.CarMode;
+import com.ssafy.backend.domain.car.domain.CarStatus;
 import com.ssafy.backend.domain.detection.ws.DetectionWsBroadcaster;
+import com.ssafy.backend.domain.device.dto.CarStatusMqttRequest;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
 import com.ssafy.backend.domain.notification.application.FcmService;
@@ -16,9 +20,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.integration.annotation.ServiceActivator;
 import org.springframework.messaging.Message;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
@@ -29,14 +35,20 @@ import java.util.concurrent.ConcurrentHashMap;
 public class MqttInboundService {
 
     private static final String EMQX_API_URL = "http://localhost:18083/api/v5/clients/";
+    private static final long CAR_STATUS_DB_INTERVAL_MS = 2_000L;
+    private static final double CAR_STATUS_MOVE_THRESHOLD = 0.5d;
     private final ObjectMapper objectMapper;
     private final FcmService fcmService;
     private final CarRepository carRepository;
+    private final CarStatusRepository carStatusRepository;
     private final DetectionWsBroadcaster detectionWsBroadcaster;
+    private final TransactionTemplate transactionTemplate;
 
     // 로봇 ID별 최신 상태/탐지 캐시
     private final Map<String, DeviceStatusRequest> statusCache = new ConcurrentHashMap<>();
     private final Map<String, DetectionRequest> detectionCache = new ConcurrentHashMap<>();
+    private final Map<String, CarStatusMqttRequest> carStatusCache = new ConcurrentHashMap<>();
+    private final Map<String, CarStatusSnapshot> carStatusSnapshots = new ConcurrentHashMap<>();
 
     @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleDeviceStatus(Message<byte[]> message) {
@@ -72,6 +84,10 @@ public class MqttInboundService {
                     // 탐지 메시지 처리
                     DetectionRequest detectionDto = objectMapper.readValue(payload, DetectionRequest.class);
                     handleRobotDetection(robotId, detectionDto, payload, fullTopic);
+                    break;
+                case "car_status":
+                    CarStatusMqttRequest carStatusDto = objectMapper.readValue(payload, CarStatusMqttRequest.class);
+                    handleCarStatus(robotId, carStatusDto);
                     break;
                 default:
                     // 알 수 없는 command는 로그만 남김
@@ -150,6 +166,54 @@ public class MqttInboundService {
         }
     }
 
+    private void handleCarStatus(String robotId, CarStatusMqttRequest status) {
+        if (status == null) {
+            return;
+        }
+        carStatusCache.put(robotId, status);
+
+        Car car = carRepository.findByDeviceId(robotId).orElse(null);
+        if (car == null) {
+            System.out.println("No car found for deviceId=" + robotId + ", skip car_status");
+            return;
+        }
+
+        CarMode newMode = status.getMode();
+        double x = status.getX() != null ? status.getX() : 0.0d;
+        double y = status.getY() != null ? status.getY() : 0.0d;
+        float heading = status.getHeading() != null ? status.getHeading() : 0.0f;
+
+        CarStatusSnapshot snapshot = carStatusSnapshots.get(robotId);
+        long now = System.currentTimeMillis();
+
+        boolean modeChanged = snapshot != null && newMode != null && snapshot.mode != newMode;
+        boolean movedEnough = snapshot != null && distance(snapshot.x, snapshot.y, x, y) >= CAR_STATUS_MOVE_THRESHOLD;
+        boolean intervalPassed = snapshot == null || (now - snapshot.lastDbUpdateMillis) >= CAR_STATUS_DB_INTERVAL_MS;
+
+        if (snapshot == null || modeChanged || movedEnough || intervalPassed) {
+            transactionTemplate.executeWithoutResult(statusTx -> {
+                CarStatus carStatus = carStatusRepository.findById(car.getId())
+                        .orElseGet(() -> carStatusRepository.save(CarStatus.create(car)));
+
+                carStatus.updateStatus(
+                        BigDecimal.valueOf(x),
+                        BigDecimal.valueOf(y),
+                        heading,
+                        newMode != null ? newMode : carStatus.getMode());
+                carStatusRepository.save(carStatus);
+            });
+
+            carStatusSnapshots.put(robotId, new CarStatusSnapshot(x, y,
+                    newMode != null ? newMode : (snapshot != null ? snapshot.mode : null), now));
+        }
+    }
+
+    private double distance(double x1, double y1, double x2, double y2) {
+        double dx = x1 - x2;
+        double dy = y1 - y2;
+        return Math.hypot(dx, dy);
+    }
+
     // EMQX API로 현재 MQTT 클라이언트 연결 여부 확인
     public boolean isJetsonOnline(String clientId) {
         RestTemplate restTemplate = new RestTemplate();
@@ -203,6 +267,20 @@ public class MqttInboundService {
             statusCache.put(robotId, status);
         } catch (Exception e) {
             System.err.println("MQTT status parse error: " + e.getMessage());
+        }
+    }
+
+    private static class CarStatusSnapshot {
+        private final double x;
+        private final double y;
+        private final CarMode mode;
+        private final long lastDbUpdateMillis;
+
+        private CarStatusSnapshot(double x, double y, CarMode mode, long lastDbUpdateMillis) {
+            this.x = x;
+            this.y = y;
+            this.mode = mode;
+            this.lastDbUpdateMillis = lastDbUpdateMillis;
         }
     }
 }

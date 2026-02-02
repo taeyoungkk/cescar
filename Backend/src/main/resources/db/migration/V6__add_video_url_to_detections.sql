@@ -1,2 +1,0 @@
-ALTER TABLE detections
-ADD COLUMN video_url VARCHAR(255);

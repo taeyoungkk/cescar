@@ -12,6 +12,9 @@ v24.13.0 로 깔았음
 ### 프론트는 Vercel, 백은 EC2인 경우 (웹, 모바일 모두 가능)
 `cd Frontend` 후
 
+`npm i -g vercel` (vercel 설치)
+`vercel login`
+
 `vercel link`
 (마지막 `Would you like to pull environment variables now?` 질문에만 n 하면 되는 것으로 알고 있음)
 

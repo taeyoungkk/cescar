@@ -1,10 +1,12 @@
 package com.ssafy.backend.domain.device.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.Getter;
 import lombok.ToString;
 
 @Getter
 @ToString
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class DetectionRequest {
     private String timestamp;
     private String object_type;

@@ -35,7 +35,7 @@ public class DetectionWebSocketHandler extends TextWebSocketHandler implements D
     @Override
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
         String payload = message.getPayload();
-        // 간단한 프로토콜: {"type": "join", "roomId": "..."}
+        // 간단한 프로토콜: {"type": "join", "roomId": "..."} 또는 {"type": "detections", "roomId": "...", "data": {...}}
         try {
             var node = objectMapper.readTree(payload);
             String type = node.path("type").asText();
@@ -45,6 +45,22 @@ public class DetectionWebSocketHandler extends TextWebSocketHandler implements D
                 sessionRoom.put(session.getId(), roomId);
                 rooms.computeIfAbsent(roomId, k -> new CopyOnWriteArraySet<>()).add(session);
                 log.info("[WS][DETECTION] Session {} joined room {}", session.getId(), roomId);
+            } else if ("detections".equals(type) && roomId != null && !roomId.isBlank()) {
+                // Jetson에서 온 detection 메시지를 같은 room의 다른 클라이언트들에게 relay
+                var sessions = rooms.get(roomId);
+                if (sessions != null) {
+                    TextMessage relayMessage = new TextMessage(payload);
+                    for (WebSocketSession s : sessions) {
+                        // 보낸 세션(Jetson)을 제외하고 전송
+                        if (s.isOpen() && !s.getId().equals(session.getId())) {
+                            try {
+                                s.sendMessage(relayMessage);
+                            } catch (IOException e) {
+                                log.error("[WS][DETECTION] Failed to relay to session {}", s.getId(), e);
+                            }
+                        }
+                    }
+                }
             }
         } catch (Exception e) {
             log.warn("[WS][DETECTION] Invalid message from {}: {}", session.getId(), payload);

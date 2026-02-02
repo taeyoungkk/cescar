@@ -76,7 +76,7 @@ class YoloService:
         
         try:
             # YOLO 추론 수행
-            results = self.model(frame, verbose=False)
+            results = self.model(frame, verbose=False, save=False)
             
             detections = []
             for result in results:

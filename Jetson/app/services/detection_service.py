@@ -8,6 +8,7 @@ from app.services.mqtt_service import mqtt_service
 from app.services.storage_service import storage_service
 from app.services.yolo_service import yolo_service
 from app.services.detection_ws_service import detection_ws_service
+from app.services.camera_service import camera_service
 from app.core.config import settings
 
 logging.basicConfig(
@@ -28,11 +29,8 @@ class DetectionService:
         self._last_detection_time = 0
         self._detection_cooldown = 5.0  # 5초 쿨다운
 
-        # OpenCV 관련
-        self.cap = None
+        # 프레임 설정 (CameraService에서 검색)
         self.writer = None
-        self.frame_width = 640
-        self.frame_height = 480
         
         # 저장 경로 설정
         self.base_dir = "data"
@@ -44,37 +42,28 @@ class DetectionService:
                 os.makedirs(d)
 
     def start_monitoring(self):
-        """카메라 스트림 모니터링을 시작합니다."""
-        self.cap = cv2.VideoCapture(0)  # 기본 카메라 연결
-        if not self.cap.isOpened():
-            logger.error("❌ 카메라를 열 수 없습니다.")
+        """Detection 모니터링 시작 (CameraService가 이미 시작되어 있어야 함)"""
+        if not camera_service.is_running:
+            logger.error("❌ CameraService가 실행 중이 아닙니다. 먼저 camera_service.start() 호출 필요.")
             return
-
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
         
         self.is_monitoring = True
-        logger.info("📸 Camera monitoring started using OpenCV.")
+        logger.info("🐛 Detection monitoring started (using CameraService)")
 
     def stop_monitoring(self):
-        """모니터링 중지 및 자원 해제"""
+        """모니터링 중지"""
         self.is_monitoring = False
         if self.is_recording:
             self._stop_recording()
-            
-        if self.cap:
-            self.cap.release()
-            self.cap = None
-        logger.info("🛑 Camera monitoring stopped.")
+        logger.info("🛑 Detection monitoring stopped.")
 
     def process_frame(self):
-        """카메라에서 프레임을 읽고 YOLO로 탐지 수행. bbox는 항상 WebSocket으로 스트리밍."""
-        if not self.is_monitoring or self.cap is None:
+        """CameraService에서 프레임을 가져와 YOLO 탐지 수행. bbox는 WebSocket으로 스트리밍."""
+        if not self.is_monitoring:
             return None
 
-        ret, frame = self.cap.read()
-        if not ret:
-            logger.warning("⚠️ 프레임을 읽어오지 못했습니다.")
+        frame = camera_service.get_frame()
+        if frame is None:
             return None
 
         # 1. YOLO 추론 (매 프레임)
@@ -83,8 +72,8 @@ class DetectionService:
         # 2. WebSocket으로 bbox 실시간 스트리밍 (항상 전송, 빈 배열이어도)
         detection_ws_service.send_detections(
             detections,
-            frame_width=self.frame_width,
-            frame_height=self.frame_height
+            frame_width=camera_service.width,
+            frame_height=camera_service.height
         )
         
         # 3. 탐지가 있고, 녹화 중이 아니며, 쿨다운이 지났을 때만 이벤트 발생
@@ -131,44 +120,51 @@ class DetectionService:
         logger.info(f"🐛 [DETECTION EVENT] {top_detection['label']} (conf: {top_detection['confidence']})")
         return detection_data
 
-    def _start_recording(self, timestamp): # frame 인자 대신 함수 내에서 읽기
-        """녹화 시작: 실제 카메라 프레임을 FPS에 맞춰 10초간 기록"""
+    def _start_recording(self, timestamp):
+        """녹화 시작: CameraService에서 프레임을 가져와 5초간 기록"""
         file_path = os.path.join(self.video_dir, f"record_{timestamp}.mp4")
         self.current_video_path = file_path
         
         fps = 20.0
-        frame_duration = 1.0 / fps # 프레임당 필요한 시간 (0.05초)
+        frame_duration = 1.0 / fps
+        frame_width = camera_service.width
+        frame_height = camera_service.height
         
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        self.writer = cv2.VideoWriter(file_path, fourcc, fps, (self.frame_width, self.frame_height))
+        self.writer = cv2.VideoWriter(file_path, fourcc, fps, (frame_width, frame_height))
         logger.info(f"🎥 [RECORDING] 5초간 시작됨: {file_path}")
         
-        frames_to_record = int(fps * 5) # 5초 동안 필요한 총 프레임 수 (100개)
+        frames_to_record = int(fps * 5)  # 5초 동안 필요한 총 프레임 수
+        self.is_recording = True
+        
         try:
             for _ in range(frames_to_record):
                 loop_start = time.time()
                 
-                # 1. 카메라에서 새로운 프레임 읽기 (실시간 기록)
-                ret, frame = self.cap.read()
-                if not ret:
+                # CameraService에서 프레임 가져오기
+                frame = camera_service.get_frame()
+                if frame is None:
                     break
                 
-                # 2. 크기 맞추기
-                if frame.shape[1] != self.frame_width or frame.shape[0] != self.frame_height:
-                    frame = cv2.resize(frame, (self.frame_width, self.frame_height))
-                # 3. 프레임 쓰기
+                # 크기 맞추기
+                if frame.shape[1] != frame_width or frame.shape[0] != frame_height:
+                    frame = cv2.resize(frame, (frame_width, frame_height))
+                
                 self.writer.write(frame)
                 
-                # 4. FPS 유지를 위한 정밀한 지연 시간 계산
+                # FPS 유지
                 elapsed = time.time() - loop_start
                 wait_time = max(0, frame_duration - elapsed)
                 time.sleep(wait_time)
+            
             logger.info(f"✅ 5초 녹화 완료.")
         
         except Exception as e:
             logger.error(f"🔥 녹화 중 에러: {e}")
         finally:
+            self.is_recording = False
             video_url = self._stop_recording()
+        
         return video_url
 
 

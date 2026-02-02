@@ -11,6 +11,7 @@ from app.services.monitoring_service import monitoring_service
 from app.services.detection_service import detection_service
 from app.services.yolo_service import yolo_service
 from app.services.detection_ws_service import detection_ws_service
+from app.services.camera_service import camera_service
 from app.core.config import settings
 
 # WebRTC 서비스는 Linux(Jetson) 환경에서만 로드 (gi 모듈 의존성 때문)
@@ -116,7 +117,14 @@ async def lifespan(app: FastAPI):
     else:
         print("[!] Detection WebSocket connection failed - bbox streaming disabled")
     
-    # Startup: WebRTC 송출 시작
+    # Startup: CameraService 시작 (WebRTC와 Detection에서 공유)
+    print("[*] Starting CameraService...")
+    if camera_service.start():
+        print("[*] CameraService started successfully")
+    else:
+        print("[!] CameraService failed to start - video streaming disabled")
+    
+    # Startup: WebRTC 송출 시작 (CameraService에서 프레임 수신)
     if webrtc_service:
         print("[*] Starting WebRTC Service...")
         webrtc_service.start(settings.ROBOT_ID)
@@ -150,6 +158,10 @@ async def lifespan(app: FastAPI):
     if webrtc_service:
         print("[*] Stopping WebRTC Service...")
         webrtc_service.stop()
+    
+    # Shutdown: CameraService 종료
+    print("[*] Stopping CameraService...")
+    camera_service.stop()
     
     mqtt_service.disconnect()
 

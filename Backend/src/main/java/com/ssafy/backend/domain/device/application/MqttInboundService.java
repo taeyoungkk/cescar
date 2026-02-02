@@ -7,6 +7,7 @@ import com.ssafy.backend.domain.car.dao.CarStatusRepository;
 import com.ssafy.backend.domain.car.domain.Car;
 import com.ssafy.backend.domain.car.domain.CarMode;
 import com.ssafy.backend.domain.car.domain.CarStatus;
+import com.ssafy.backend.domain.car.ws.CarStatusWsBroadcaster;
 import com.ssafy.backend.domain.detection.ws.DetectionWsBroadcaster;
 import com.ssafy.backend.domain.device.dto.CarStatusMqttRequest;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
@@ -42,6 +43,7 @@ public class MqttInboundService {
     private final FcmService fcmService;
     private final CarRepository carRepository;
     private final CarStatusRepository carStatusRepository;
+    private final CarStatusWsBroadcaster carStatusWsBroadcaster;
     private final DetectionWsBroadcaster detectionWsBroadcaster;
     private final DetectionHistoryService detectionHistoryService;
     private final TransactionTemplate transactionTemplate;
@@ -89,7 +91,7 @@ public class MqttInboundService {
                     break;
                 case "car_status":
                     CarStatusMqttRequest carStatusDto = objectMapper.readValue(payload, CarStatusMqttRequest.class);
-                    handleCarStatus(robotId, carStatusDto);
+                    handleCarStatus(robotId, carStatusDto, payload);
                     break;
                 default:
                     // 알 수 없는 command는 로그만 남김
@@ -178,11 +180,14 @@ public class MqttInboundService {
         }
     }
 
-    private void handleCarStatus(String robotId, CarStatusMqttRequest status) {
+    private void handleCarStatus(String robotId, CarStatusMqttRequest status, String payload) {
         if (status == null) {
             return;
         }
         carStatusCache.put(robotId, status);
+        if (payload != null && !payload.isBlank()) {
+            carStatusWsBroadcaster.broadcastToRoom(robotId, payload);
+        }
 
         Car car = carRepository.findByDeviceId(robotId).orElse(null);
         if (car == null) {

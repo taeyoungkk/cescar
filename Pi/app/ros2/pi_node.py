@@ -17,7 +17,7 @@ from std_msgs.msg import String
 from tf2_ros import TransformBroadcaster
 
 from app.controllers.encoder_controller import EncoderController
-from app.services.control_service import control_service
+from app.services.control_service import control_service, CmdVel
 from app.core.config import settings
 
 
@@ -85,6 +85,7 @@ class PiRos2Node(Node):
         self._watchdog_timer = self.create_timer(0.1, self._watchdog_callback)
         
         self._last_cmd_time = self.get_clock().now()
+        self._watchdog_triggered = False  # 중복 정지 명령 방지
         
         self.get_logger().info('=== Pi ROS2 Node Started ===')
         self.get_logger().info(f'  Publishing: /odom')
@@ -158,6 +159,7 @@ class PiRos2Node(Node):
     def _cmd_vel_callback(self, msg: Twist) -> None:
         """cmd_vel 콜백."""
         self._last_cmd_time = self.get_clock().now()
+        self._watchdog_triggered = False  # 명령 받으면 리셋
         
         linear_x = msg.linear.x
         angular_z = msg.angular.z
@@ -169,13 +171,15 @@ class PiRos2Node(Node):
         throttle = max(-1.0, min(1.0, linear_x / max_speed))
         steering = max(-1.0, min(1.0, angular_z / max_angular))
         
-        control_service.handle_command(throttle, steering)
+        # CmdVel 객체로 전달
+        cmd = CmdVel(v=throttle, w=steering)
+        control_service.apply_cmd(cmd, source="ros2")
     
     def _mode_callback(self, msg: String) -> None:
         """모드 변경 콜백."""
         mode = msg.data.upper()
         if mode in ['MANUAL', 'AUTO']:
-            control_service.set_mode(mode)
+            control_service.on_mode({'mode': mode})
             self.get_logger().info(f'Mode: {mode}')
     
     def _watchdog_callback(self) -> None:
@@ -184,7 +188,11 @@ class PiRos2Node(Node):
         elapsed_ms = (now - self._last_cmd_time).nanoseconds / 1e6
         
         if elapsed_ms > settings.WATCHDOG_MS:
-            control_service.handle_command(0.0, 0.0)
+            # 한 번만 정지 명령 보내기
+            if not self._watchdog_triggered:
+                self._watchdog_triggered = True
+                cmd = CmdVel(v=0.0, w=0.0)
+                control_service.apply_cmd(cmd, source="watchdog")
         
         # control_service watchdog도 호출
         control_service.tick()
@@ -205,22 +213,14 @@ class PiRos2Node(Node):
         self.get_logger().info('Cleanup complete')
 
 
-# 전역 노드 참조 (시그널 핸들러용)
+# 전역 노드 참조
 _node: Optional[PiRos2Node] = None
-
-
-def signal_handler(sig, frame):
-    """Ctrl+C 핸들러."""
-    print("\n[*] Shutting down...")
-    if _node:
-        _node.cleanup()
-    rclpy.shutdown()
-    sys.exit(0)
+_shutdown_requested = False
 
 
 def main(args=None):
     """메인 함수."""
-    global _node
+    global _node, _shutdown_requested
     
     print("=" * 50)
     print("  Raspberry Pi ROS2 Motor Controller")
@@ -233,11 +233,8 @@ def main(args=None):
     # ROS2 초기화
     rclpy.init(args=args)
     
-    # 시그널 핸들러
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     # 엔코더 초기화
+    encoder = None
     try:
         encoder = EncoderController(
             pin_a=settings.ENCODER_PIN_A,
@@ -248,7 +245,6 @@ def main(args=None):
         print("[*] Encoder: ENABLED")
     except Exception as e:
         print(f"[!] Encoder failed: {e}")
-        encoder = None
     
     # 노드 생성
     _node = PiRos2Node(encoder=encoder)
@@ -258,12 +254,15 @@ def main(args=None):
     try:
         rclpy.spin(_node)
     except KeyboardInterrupt:
-        pass
+        print("\n[*] Shutting down...")
     finally:
-        _node.cleanup()
-        _node.destroy_node()
-        rclpy.shutdown()
+        if _node:
+            _node.cleanup()
+            _node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
     main()
+

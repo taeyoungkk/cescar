@@ -3,6 +3,7 @@ import json
 from datetime import datetime
 import os
 import time
+import threading
 import cv2
 from app.services.mqtt_service import mqtt_service
 from app.services.storage_service import storage_service
@@ -10,6 +11,13 @@ from app.services.yolo_service import yolo_service
 from app.services.detection_ws_service import detection_ws_service
 from app.services.camera_service import camera_service
 from app.core.config import settings
+
+# ffmpeg는 선택적 의존성 (없으면 영상 변환 스킵)
+try:
+    import ffmpeg
+except ImportError:
+    ffmpeg = None
+    logging.warning("ffmpeg-python 모듈이 없습니다. 영상 변환이 스킵됩니다. 'pip install ffmpeg-python'으로 설치하세요.")
 
 logging.basicConfig(
     level=logging.INFO, # INFO 레벨 이상의 모든 로그를 표시 (DEBUG < INFO < WARNING < ERROR)
@@ -28,6 +36,11 @@ class DetectionService:
         # Detection 쿨다운 (연속 이벤트 방지)
         self._last_detection_time = 0
         self._detection_cooldown = 5.0  # 5초 쿨다운
+        
+        # bbox persistence (탐지 없을 때도 잠시 유지)
+        self._last_detections = []
+        self._last_detections_time = 0
+        self._bbox_persistence_sec = 1.0  # 1초간 유지
 
         # 프레임 설정 (CameraService에서 검색)
         self.writer = None
@@ -68,16 +81,27 @@ class DetectionService:
 
         # 1. YOLO 추론 (매 프레임)
         detections = yolo_service.detect(frame)
+        current_time = time.time()
         
-        # 2. WebSocket으로 bbox 실시간 스트리밍 (항상 전송, 빈 배열이어도)
+        # 2. bbox persistence: 탐지가 있으면 저장, 없으면 마지막 결과를 잠시 유지
+        if detections:
+            self._last_detections = detections
+            self._last_detections_time = current_time
+        elif current_time - self._last_detections_time < self._bbox_persistence_sec:
+            # 마지막 탐지 후 1초 이내면 이전 결과 유지
+            detections = self._last_detections
+        else:
+            # 1초 지나면 빈 배열
+            self._last_detections = []
+        
+        # 3. WebSocket으로 bbox 실시간 스트리밍
         detection_ws_service.send_detections(
             detections,
             frame_width=camera_service.width,
             frame_height=camera_service.height
         )
         
-        # 3. 탐지가 있고, 녹화 중이 아니며, 쿨다운이 지났을 때만 이벤트 발생
-        current_time = time.time()
+        # 4. 탐지가 있고, 녹화 중이 아니며, 쿨다운이 지났을 때만 이벤트 발생
         if detections and not self.is_recording:
             if current_time - self._last_detection_time > self._detection_cooldown:
                 self._last_detection_time = current_time
@@ -86,39 +110,53 @@ class DetectionService:
         return None
     
     def _handle_detection_event(self, frame, detections: list[dict]):
-        """탐지 이벤트 처리: 스크린샷, 녹화, MQTT 발행"""
+        """탐지 이벤트 처리: 스크린샷, 녹화, MQTT 발행 (백그라운드에서 실행)"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # 가장 높은 신뢰도의 탐지 결과 사용
         top_detection = max(detections, key=lambda x: x['confidence'])
 
-        # 스크린샷 저장
+        # 스크린샷 저장 (빠르게 완료)
         screenshot_path = os.path.join(self.screenshot_dir, f"detect_{timestamp}.jpg")
         cv2.imwrite(screenshot_path, frame)
         logger.info(f"📸 [SCREENSHOT] Saved: {screenshot_path}")
         
-        # 녹화 시작 (5초 blocking)
-        video_url = self._start_recording(timestamp)
+        # 녹화+업로드+MQTT발행은 별도 스레드에서 처리 (detection 루프 blocking 방지)
+        thread = threading.Thread(
+            target=self._background_recording_task,
+            args=(timestamp, screenshot_path, top_detection, len(detections)),
+            daemon=True
+        )
+        thread.start()
         
-        # 클라우드 업로드
-        screenshot_url = storage_service.upload_file(screenshot_path)
+        return {"status": "recording_started", "label": top_detection['label']}
+    
+    def _background_recording_task(self, timestamp: str, screenshot_path: str, top_detection: dict, detection_count: int):
+        """백그라운드에서 녹화, 업로드, MQTT 발행 수행"""
+        try:
+            # 녹화 (5초)
+            video_url = self._start_recording(timestamp)
+            
+            # 클라우드 업로드
+            screenshot_url = storage_service.upload_file(screenshot_path)
 
-        detection_data = {
-            "timestamp": datetime.now().isoformat(),
-            "object_type": top_detection['label'],
-            "confidence": top_detection['confidence'],
-            "bbox": top_detection['bbox'],
-            "status": "detected",
-            "robot_id": settings.ROBOT_ID,
-            "screenshot_url": screenshot_url,
-            "video_url": video_url,
-            "detection_count": len(detections),
-            "note": "YOLO real-time detection"
-        }
-        
-        self._publish_detection(detection_data)
-        logger.info(f"🐛 [DETECTION EVENT] {top_detection['label']} (conf: {top_detection['confidence']})")
-        return detection_data
+            detection_data = {
+                "timestamp": datetime.now().isoformat(),
+                "object_type": top_detection['label'],
+                "confidence": top_detection['confidence'],
+                "bbox": top_detection['bbox'],
+                "status": "detected",
+                "robot_id": settings.ROBOT_ID,
+                "screenshot_url": screenshot_url,
+                "video_url": video_url,
+                "detection_count": detection_count,
+                "note": "YOLO real-time detection"
+            }
+            
+            self._publish_detection(detection_data)
+            logger.info(f"🐛 [DETECTION EVENT] {top_detection['label']} (conf: {top_detection['confidence']})")
+        except Exception as e:
+            logger.error(f"❌ 백그라운드 녹화 태스크 에러: {e}")
 
     def _start_recording(self, timestamp):
         """녹화 시작: CameraService에서 프레임을 가져와 5초간 기록"""
@@ -169,7 +207,6 @@ class DetectionService:
 
 
     def _stop_recording(self):
-        import ffmpeg
         """녹화 중지 -> H.264 변환 -> 클라우드 업로드"""
         if self.writer:
             self.writer.release()
@@ -178,38 +215,43 @@ class DetectionService:
         time.sleep(1.0) # 파일 쓰기 완료 대기
         
         raw_path = self.current_video_path # mp4v로 저장된 원본 경로
-        web_path = raw_path.replace(".mp4", "_web.mp4") # 변환될 파일 경로
         video_url = None
 
         if raw_path and os.path.exists(raw_path):
-            try:
-                logger.info(f"🔄 웹 재생용으로 변환 시작 (H.264): {raw_path}")
-                
-                # FFmpeg를 이용한 H.264 변환 (소프트웨어 인코딩)
-                # 젯슨 나노의 CPU를 사용하여 크롬 표준 코덱으로 변환합니다.
-                (
-                    ffmpeg
-                    .input(raw_path)
-                    .output(web_path, vcodec='libx264', crf=28, preset='ultrafast')
-                    .overwrite_output()
-                    .run(capture_stdout=True, capture_stderr=True)
-                )
-
-                # 변환된 파일이 정상적이라면 변환된 파일을 업로드
-                if os.path.exists(web_path) and os.path.getsize(web_path) > 0:
-                    logger.info(f"✅ 변환 완료. 업로드 시도: {web_path}")
-                    video_url = storage_service.upload_file(web_path)
-                    
-                    # 업로드 후 임시 파일들 삭제 (로컬 용량 관리)
-                    os.remove(raw_path)
-                    os.remove(web_path)
-                else:
-                    logger.error("❌ 변환된 파일이 생성되지 않았습니다.")
-            
-            except ffmpeg.Error as e:
-                logger.error(f"❌ FFmpeg 변환 에러: {e.stderr.decode()}")
-                # 변환 실패 시 아쉬운 대로 원본이라도 업로드 시도
+            # ffmpeg가 없으면 원본 파일을 바로 업로드
+            if ffmpeg is None:
+                logger.warning("ffmpeg 모듈이 없어 원본 파일을 업로드합니다.")
                 video_url = storage_service.upload_file(raw_path)
+                os.remove(raw_path)
+            else:
+                web_path = raw_path.replace(".mp4", "_web.mp4") # 변환될 파일 경로
+                try:
+                    logger.info(f"🔄 웹 재생용으로 변환 시작 (H.264): {raw_path}")
+                    
+                    # FFmpeg를 이용한 H.264 변환 (소프트웨어 인코딩)
+                    (
+                        ffmpeg
+                        .input(raw_path)
+                        .output(web_path, vcodec='libx264', crf=28, preset='ultrafast')
+                        .overwrite_output()
+                        .run(capture_stdout=True, capture_stderr=True)
+                    )
+
+                    # 변환된 파일이 정상적이라면 변환된 파일을 업로드
+                    if os.path.exists(web_path) and os.path.getsize(web_path) > 0:
+                        logger.info(f"✅ 변환 완료. 업로드 시도: {web_path}")
+                        video_url = storage_service.upload_file(web_path)
+                        
+                        # 업로드 후 임시 파일들 삭제 (로컬 용량 관리)
+                        os.remove(raw_path)
+                        os.remove(web_path)
+                    else:
+                        logger.error("❌ 변환된 파일이 생성되지 않았습니다.")
+                
+                except Exception as e:
+                    logger.error(f"❌ FFmpeg 변환 에러: {e}")
+                    # 변환 실패 시 원본 업로드 시도
+                    video_url = storage_service.upload_file(raw_path)
 
         self.current_video_path = None
         return video_url

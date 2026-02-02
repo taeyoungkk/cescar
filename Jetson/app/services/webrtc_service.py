@@ -376,7 +376,28 @@ class WebRTCService:
             "candidate": candidate,
             "sdpMLineIndex": mlineindex,
         })
-        logger.debug("Sent ICE candidate: %s", candidate[:50] if candidate else "")
+        logger.info("Sent ICE candidate: %s", candidate[:80] if candidate else "(empty)")
+
+    def _on_ice_connection_state_change(self, element, prop) -> None:
+        """ICE 연결 상태 변경 핸들러"""
+        state = element.get_property("ice-connection-state")
+        state_map = {
+            0: "new",
+            1: "checking",
+            2: "connected",
+            3: "completed",
+            4: "failed",
+            5: "disconnected",
+            6: "closed",
+        }
+        state_name = state_map.get(state, f"unknown({state})")
+        logger.info("🧊 ICE connection state: %s", state_name)
+        
+        if state == 4:  # failed
+            logger.error("❌ ICE connection failed!")
+            self._set_state(WebRTCState.ERROR, "ICE connection failed")
+        elif state in (2, 3):  # connected or completed
+            logger.info("✅ ICE connection established!")
 
     def _handle_answer(self, data: dict) -> None:
         """answer SDP 수신 처리"""
@@ -411,7 +432,7 @@ class WebRTCService:
         
         if candidate and self._webrtc:
             self._webrtc.emit("add-ice-candidate", sdp_mline_index, candidate)
-            logger.debug("Added ICE candidate")
+            logger.info("Added remote ICE candidate: %s", candidate[:80] if candidate else "(empty)")
 
     def _handle_ready(self) -> None:
         """Viewer ready 메시지 처리 - 파이프라인 재시작 및 새 offer 생성"""
@@ -454,6 +475,7 @@ class WebRTCService:
             # 3) 시그널 연결
             self._webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
             self._webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+            self._webrtc.connect("notify::ice-connection-state", self._on_ice_connection_state_change)
 
             # 4) bus watch
             bus = self._pipeline.get_bus()
@@ -505,6 +527,7 @@ class WebRTCService:
             # webrtcbin 시그널 연결
             self._webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
             self._webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+            self._webrtc.connect("notify::ice-connection-state", self._on_ice_connection_state_change)
             
             bus = self._pipeline.get_bus()
             bus.add_signal_watch()
@@ -601,17 +624,17 @@ class WebRTCService:
 
         pipeline = Gst.Pipeline.new("webrtc-pipeline")
 
-        # 요소 생성 (appsrc 사용)
+        # 요소 생성
         appsrc = Gst.ElementFactory.make("appsrc", "src")
         conv = Gst.ElementFactory.make("videoconvert", "conv")
         i420caps = Gst.ElementFactory.make("capsfilter", "i420caps")
-        x264 = Gst.ElementFactory.make("x264enc", "enc")
+        encoder = Gst.ElementFactory.make("x264enc", "enc")
         pay = Gst.ElementFactory.make("rtph264pay", "pay")
         rtpcaps = Gst.ElementFactory.make("capsfilter", "rtpcaps")
         q = Gst.ElementFactory.make("queue", "q")
         webrtc = Gst.ElementFactory.make("webrtcbin", "webrtc")
 
-        if not all([appsrc, conv, i420caps, x264, pay, rtpcaps, q, webrtc]):
+        if not all([appsrc, conv, i420caps, encoder, pay, rtpcaps, q, webrtc]):
             raise RuntimeError("missing gstreamer elements (check plugins)")
 
         # appsrc 설정
@@ -626,24 +649,25 @@ class WebRTCService:
         appsrc.set_property("format", 3)  # GST_FORMAT_TIME
         appsrc.set_property("do-timestamp", True)
         
-        # appsrc 참조 저장 (push용)
+        # appsrc 참조 저장
         self._appsrc = appsrc
 
-        # I420 강제 변환 (x264enc baseline profile은 4:2:2 지원 안함)
+        # I420 변환용 capsfilter
         i420caps.set_property(
             "caps",
             Gst.Caps.from_string("video/x-raw,format=I420"),
         )
 
-        # 인코더 설정 (저지연)
-        x264.set_property("tune", "zerolatency")
-        x264.set_property("speed-preset", "veryfast")
-        x264.set_property("bitrate", cfg.bitrate_kbps)
-        x264.set_property("key-int-max", cfg.keyint)
+        # x264enc 설정 (저지연)
+        encoder.set_property("tune", "zerolatency")
+        encoder.set_property("speed-preset", "ultrafast")
+        encoder.set_property("bitrate", cfg.bitrate_kbps)
+        encoder.set_property("key-int-max", cfg.keyint)
 
         # RTP 페이로더 설정
         pay.set_property("config-interval", 1)
         pay.set_property("pt", 96)
+        pay.set_property("aggregate-mode", 1)  # zero-latency
 
         # RTP caps
         rtpcaps.set_property(
@@ -653,13 +677,14 @@ class WebRTCService:
 
         # STUN 서버 설정
         webrtc.set_property("stun-server", cfg.stun_server)
+        webrtc.set_property("bundle-policy", 3)  # max-bundle
 
         # 파이프라인에 요소 추가
-        for e in [appsrc, conv, i420caps, x264, pay, rtpcaps, q, webrtc]:
+        for e in [appsrc, conv, i420caps, encoder, pay, rtpcaps, q, webrtc]:
             pipeline.add(e)
 
-        # 요소 연결 (appsrc -> ... -> queue)
-        elements = [appsrc, conv, i420caps, x264, pay, rtpcaps, q]
+        # 요소 연결
+        elements = [appsrc, conv, i420caps, encoder, pay, rtpcaps, q]
         for i in range(len(elements) - 1):
             if not elements[i].link(elements[i + 1]):
                 raise RuntimeError(f"failed to link {elements[i].get_name()} -> {elements[i+1].get_name()}")

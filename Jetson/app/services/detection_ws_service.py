@@ -118,6 +118,21 @@ class DetectionWebSocketService:
                 return False
         
         try:
+            # Frontend가 이해하는 형식으로 변환
+            # Jetson: {label, confidence, bbox: {x1, y1, x2, y2}}
+            # Frontend expects: {label, confidence, x1, y1, x2, y2} (flat)
+            formatted_detections = []
+            for det in detections:
+                bbox = det.get("bbox", {})
+                formatted_detections.append({
+                    "label": det.get("label"),
+                    "confidence": det.get("confidence"),
+                    "x1": bbox.get("x1"),
+                    "y1": bbox.get("y1"),
+                    "x2": bbox.get("x2"),
+                    "y2": bbox.get("y2"),
+                })
+            
             message = {
                 "type": "detections",
                 "roomId": self._room_id,
@@ -125,12 +140,14 @@ class DetectionWebSocketService:
                     "timestamp": datetime.now().isoformat(),
                     "frameWidth": frame_width,
                     "frameHeight": frame_height,
-                    "count": len(detections),
-                    "detections": detections
+                    "count": len(formatted_detections),
+                    "detections": formatted_detections
                 }
             }
             
             self._ws.send(json.dumps(message))
+            if formatted_detections:
+                logger.info(f"📦 Sent {len(formatted_detections)} bbox(es) via WebSocket")
             return True
             
         except websocket.WebSocketConnectionClosedException:

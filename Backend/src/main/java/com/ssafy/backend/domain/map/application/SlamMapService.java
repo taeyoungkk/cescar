@@ -162,6 +162,9 @@ public class SlamMapService {
         if (objectPath == null || objectPath.isBlank()) {
             return null;
         }
+        if (objectPath.startsWith("http://") || objectPath.startsWith("https://")) {
+            return objectPath;
+        }
         return storageService.generateSignedUrl(objectPath, signedUrlTtl);
     }
 }

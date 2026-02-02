@@ -35,15 +35,26 @@ public class DetectionListItemResponse {
     private LocalDateTime createdAt;
 
     public static DetectionListItemResponse from(Detection detection) {
+        String imageUrl = detection.getImageUrl();
+        String resolvedImageUrl = isAbsoluteUrl(imageUrl)
+                ? imageUrl
+                : "/api/detections/" + detection.getId() + "/image";
         return DetectionListItemResponse.builder()
                 .id(detection.getId())
                 .label(detection.getLabel())
                 .confidence(detection.getConfidence())
                 .x(detection.getX())
                 .y(detection.getY())
-                // 목록에서는 리다이렉트 API 경로만 제공 (/api/detections/{id}/image)
-                .imageUrl("/api/detections/" + detection.getId() + "/image")
+                // 목록에서는 절대 URL이면 그대로, 아니면 리다이렉트 API 경로 제공
+                .imageUrl(resolvedImageUrl)
                 .createdAt(detection.getCreatedAt())
                 .build();
+    }
+
+    private static boolean isAbsoluteUrl(String value) {
+        if (value == null) {
+            return false;
+        }
+        return value.startsWith("http://") || value.startsWith("https://");
     }
 }

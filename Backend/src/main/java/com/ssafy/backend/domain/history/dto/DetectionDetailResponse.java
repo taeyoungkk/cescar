@@ -38,9 +38,17 @@ public class DetectionDetailResponse {
     private LocalDateTime createdAt;
 
     public static DetectionDetailResponse from(Detection detection) {
-        String videoPath = detection.getVideoUrl() != null && !detection.getVideoUrl().isEmpty()
-                ? "/api/detections/" + detection.getId() + "/video"
-                : null;
+        String imageUrl = detection.getImageUrl();
+        String videoUrl = detection.getVideoUrl();
+        String resolvedImageUrl = isAbsoluteUrl(imageUrl)
+                ? imageUrl
+                : "/api/detections/" + detection.getId() + "/image";
+        String resolvedVideoUrl = null;
+        if (videoUrl != null && !videoUrl.isEmpty()) {
+            resolvedVideoUrl = isAbsoluteUrl(videoUrl)
+                    ? videoUrl
+                    : "/api/detections/" + detection.getId() + "/video";
+        }
 
         return DetectionDetailResponse.builder()
                 .id(detection.getId())
@@ -48,9 +56,16 @@ public class DetectionDetailResponse {
                 .confidence(detection.getConfidence())
                 .x(detection.getX())
                 .y(detection.getY())
-                .imageUrl("/api/detections/" + detection.getId() + "/image")
-                .videoUrl(videoPath)
+                .imageUrl(resolvedImageUrl)
+                .videoUrl(resolvedVideoUrl)
                 .createdAt(detection.getCreatedAt())
                 .build();
+    }
+
+    private static boolean isAbsoluteUrl(String value) {
+        if (value == null) {
+            return false;
+        }
+        return value.startsWith("http://") || value.startsWith("https://");
     }
 }

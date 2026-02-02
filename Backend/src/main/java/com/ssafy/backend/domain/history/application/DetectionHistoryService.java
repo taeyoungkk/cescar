@@ -5,10 +5,13 @@ import com.ssafy.backend.domain.history.domain.Detection;
 import com.ssafy.backend.domain.history.domain.LogStatus;
 import com.ssafy.backend.domain.history.dto.DetectionDetailResponse;
 import com.ssafy.backend.domain.history.dto.DetectionListItemResponse;
+import com.ssafy.backend.global.exception.CustomException;
+import com.ssafy.backend.global.exception.ErrorCode;
 import com.ssafy.backend.global.storage.StorageService;
 import com.ssafy.backend.domain.car.domain.Car;
 import com.ssafy.backend.domain.map.domain.SlamMap;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.MediaType;
@@ -17,7 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.math.BigDecimal;
-import java.net.URI;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional(readOnly = true)
@@ -27,6 +32,8 @@ public class DetectionHistoryService {
     private final DetectionRepository detectionRepository;
     private final com.ssafy.backend.domain.history.dao.CarLogRepository carLogRepository;
     private final StorageService storageService;
+    @Value("${storage.allowed-hosts:storage.googleapis.com}")
+    private String allowedHosts;
 
     // TODO: 프로덕션 환경에서는 Config로 분리 권장 (10분)
     private static final Duration SIGNED_URL_TTL = Duration.ofMinutes(10);
@@ -90,35 +97,35 @@ public class DetectionHistoryService {
                 confidence,
                 BigDecimal.valueOf(x),
                 BigDecimal.valueOf(y),
-                normalizeObjectPath(imageUrl),
-                normalizeObjectPath(videoUrl));
+                imageUrl,
+                videoUrl);
 
         detectionRepository.save(detection);
         carLog.increaseDetectionCount();
     }
 
-    private String normalizeObjectPath(String value) {
-        if (value == null || value.isBlank()) {
-            return null;
+    private boolean isAbsoluteUrl(String value) {
+        if (value == null) {
+            return false;
         }
+        return value.startsWith("http://") || value.startsWith("https://");
+    }
+
+    private boolean isAllowedRedirectHost(String value) {
         try {
-            if (value.startsWith("http://") || value.startsWith("https://")) {
-                URI uri = URI.create(value);
-                String path = uri.getPath();
-                if (path == null || path.isBlank()) {
-                    return null;
-                }
-                String normalized = path.startsWith("/") ? path.substring(1) : path;
-                int firstSlash = normalized.indexOf('/');
-                if (firstSlash > 0 && firstSlash + 1 < normalized.length()) {
-                    return normalized.substring(firstSlash + 1);
-                }
-                return normalized;
+            java.net.URI uri = java.net.URI.create(value);
+            String host = uri.getHost();
+            if (host == null || host.isBlank()) {
+                return false;
             }
+            List<String> allowed = Arrays.stream(allowedHosts.split(","))
+                    .map(String::trim)
+                    .filter(h -> !h.isBlank())
+                    .collect(Collectors.toList());
+            return allowed.contains(host);
         } catch (Exception e) {
-            return value;
+            return false;
         }
-        return value;
     }
 
     /**
@@ -140,6 +147,12 @@ public class DetectionHistoryService {
             throw new IllegalArgumentException("이미지 경로가 존재하지 않습니다.");
         }
 
+        if (isAbsoluteUrl(objectPath)) {
+            if (!isAllowedRedirectHost(objectPath)) {
+                throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+            }
+            return objectPath;
+        }
         return storageService.generateSignedUrl(objectPath, SIGNED_URL_TTL);
     }
 
@@ -154,6 +167,12 @@ public class DetectionHistoryService {
             throw new IllegalArgumentException("영상 경로가 존재하지 않습니다.");
         }
 
+        if (isAbsoluteUrl(objectPath)) {
+            if (!isAllowedRedirectHost(objectPath)) {
+                throw new CustomException(ErrorCode.INVALID_INPUT_VALUE);
+            }
+            return objectPath;
+        }
         return storageService.generateSignedUrl(objectPath, SIGNED_URL_TTL);
     }
 

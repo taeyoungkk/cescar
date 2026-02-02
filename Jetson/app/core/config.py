@@ -10,8 +10,15 @@ class Settings(BaseSettings):
     GOOGLE_CLOUD_PROJECT: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
     
+    # YOLO Model Settings
+    YOLO_MODEL_PATH: str = "models/one_class_nano.pt"
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.5
+    
     # WebRTC 시그널링 서버 URL
     SIGNALING_WS_URL: str = "ws://localhost:8080/ws/webrtc"
+    
+    # Detection WebSocket URL (bbox 스트리밍용)
+    DETECTION_WS_URL: str = "ws://localhost:8080/ws/detections"
     
     @property
     def TOPIC_COMMAND(self) -> str:

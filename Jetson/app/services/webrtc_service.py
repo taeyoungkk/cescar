@@ -25,8 +25,10 @@ gi.require_version("GstSdp", "1.0")
 from gi.repository import Gst, GLib, GstWebRTC, GstSdp
 
 import websocket
+import numpy as np
 
 from app.core.config import settings
+from app.services.camera_service import camera_service
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,6 @@ class WebRTCState(str, Enum):
 @dataclass
 class WebRTCConfig:
     """WebRTC 파이프라인 설정"""
-    device: str = "/dev/video0"
     width: int = 640
     height: int = 480
     fps: int = 30
@@ -112,6 +113,9 @@ class WebRTCService:
         self._reconnect_attempts: int = 0
         self._should_reconnect: bool = False
         self._reconnect_timer: Optional[threading.Timer] = None
+
+        # appsrc for CameraService integration
+        self._appsrc: Optional[Gst.Element] = None
 
         Gst.init(None)
 
@@ -372,7 +376,28 @@ class WebRTCService:
             "candidate": candidate,
             "sdpMLineIndex": mlineindex,
         })
-        logger.debug("Sent ICE candidate: %s", candidate[:50] if candidate else "")
+        logger.info("Sent ICE candidate: %s", candidate[:80] if candidate else "(empty)")
+
+    def _on_ice_connection_state_change(self, element, prop) -> None:
+        """ICE 연결 상태 변경 핸들러"""
+        state = element.get_property("ice-connection-state")
+        state_map = {
+            0: "new",
+            1: "checking",
+            2: "connected",
+            3: "completed",
+            4: "failed",
+            5: "disconnected",
+            6: "closed",
+        }
+        state_name = state_map.get(state, f"unknown({state})")
+        logger.info("🧊 ICE connection state: %s", state_name)
+        
+        if state == 4:  # failed
+            logger.error("❌ ICE connection failed!")
+            self._set_state(WebRTCState.ERROR, "ICE connection failed")
+        elif state in (2, 3):  # connected or completed
+            logger.info("✅ ICE connection established!")
 
     def _handle_answer(self, data: dict) -> None:
         """answer SDP 수신 처리"""
@@ -407,7 +432,7 @@ class WebRTCService:
         
         if candidate and self._webrtc:
             self._webrtc.emit("add-ice-candidate", sdp_mline_index, candidate)
-            logger.debug("Added ICE candidate")
+            logger.info("Added remote ICE candidate: %s", candidate[:80] if candidate else "(empty)")
 
     def _handle_ready(self) -> None:
         """Viewer ready 메시지 처리 - 파이프라인 재시작 및 새 offer 생성"""
@@ -450,6 +475,7 @@ class WebRTCService:
             # 3) 시그널 연결
             self._webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
             self._webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+            self._webrtc.connect("notify::ice-connection-state", self._on_ice_connection_state_change)
 
             # 4) bus watch
             bus = self._pipeline.get_bus()
@@ -501,6 +527,7 @@ class WebRTCService:
             # webrtcbin 시그널 연결
             self._webrtc.connect("on-negotiation-needed", self._on_negotiation_needed)
             self._webrtc.connect("on-ice-candidate", self._on_ice_candidate)
+            self._webrtc.connect("notify::ice-connection-state", self._on_ice_connection_state_change)
             
             bus = self._pipeline.get_bus()
             bus.add_signal_watch()
@@ -535,6 +562,12 @@ class WebRTCService:
     def _cleanup_pipeline(self) -> None:
         """파이프라인 자원 정리"""
         with self._lock:
+            # CameraService 콜백 해제
+            try:
+                camera_service.unregister_callback(self._push_frame)
+            except Exception:
+                pass
+            
             if self._pipeline is not None:
                 try:
                     self._pipeline.set_state(Gst.State.NULL)
@@ -550,6 +583,7 @@ class WebRTCService:
 
                 self._pipeline = None
                 self._webrtc = None
+                self._appsrc = None
                 self._bus_watch_id = None
                 logger.info("webrtc pipeline cleaned up")
 
@@ -583,7 +617,7 @@ class WebRTCService:
 
     def _build_pipeline(self) -> tuple:
         """
-        GStreamer 파이프라인 구성
+        GStreamer 파이프라인 구성 (appsrc 기반 - CameraService 연동)
         Returns: (pipeline, webrtcbin)
         """
         cfg = self.config
@@ -591,45 +625,49 @@ class WebRTCService:
         pipeline = Gst.Pipeline.new("webrtc-pipeline")
 
         # 요소 생성
-        v4l2src = Gst.ElementFactory.make("v4l2src", "src")
-        caps = Gst.ElementFactory.make("capsfilter", "caps")
+        appsrc = Gst.ElementFactory.make("appsrc", "src")
         conv = Gst.ElementFactory.make("videoconvert", "conv")
-        i420caps = Gst.ElementFactory.make("capsfilter", "i420caps")  # I420 강제 변환
-        x264 = Gst.ElementFactory.make("x264enc", "enc")
+        i420caps = Gst.ElementFactory.make("capsfilter", "i420caps")
+        encoder = Gst.ElementFactory.make("x264enc", "enc")
         pay = Gst.ElementFactory.make("rtph264pay", "pay")
         rtpcaps = Gst.ElementFactory.make("capsfilter", "rtpcaps")
         q = Gst.ElementFactory.make("queue", "q")
         webrtc = Gst.ElementFactory.make("webrtcbin", "webrtc")
 
-        if not all([v4l2src, caps, conv, i420caps, x264, pay, rtpcaps, q, webrtc]):
+        if not all([appsrc, conv, i420caps, encoder, pay, rtpcaps, q, webrtc]):
             raise RuntimeError("missing gstreamer elements (check plugins)")
 
-        # 소스 설정
-        v4l2src.set_property("device", cfg.device)
+        # appsrc 설정
+        width = camera_service.width if camera_service.is_running else cfg.width
+        height = camera_service.height if camera_service.is_running else cfg.height
+        fps = camera_service.fps if camera_service.is_running else cfg.fps
+        
+        appsrc.set_property("caps", Gst.Caps.from_string(
+            f"video/x-raw,format=BGR,width={width},height={height},framerate={fps}/1"
+        ))
+        appsrc.set_property("is-live", True)
+        appsrc.set_property("format", 3)  # GST_FORMAT_TIME
+        appsrc.set_property("do-timestamp", True)
+        
+        # appsrc 참조 저장
+        self._appsrc = appsrc
 
-        # 비디오 캡처 caps
-        caps.set_property(
-            "caps",
-            Gst.Caps.from_string(
-                f"video/x-raw,width={cfg.width},height={cfg.height},framerate={cfg.fps}/1"
-            ),
-        )
-
-        # I420 강제 변환 (x264enc baseline profile은 4:2:2 지원 안함)
+        # I420 변환용 capsfilter
         i420caps.set_property(
             "caps",
             Gst.Caps.from_string("video/x-raw,format=I420"),
         )
 
-        # 인코더 설정 (저지연)
-        x264.set_property("tune", "zerolatency")
-        x264.set_property("speed-preset", "veryfast")
-        x264.set_property("bitrate", cfg.bitrate_kbps)
-        x264.set_property("key-int-max", cfg.keyint)
+        # x264enc 설정 (저지연)
+        encoder.set_property("tune", "zerolatency")
+        encoder.set_property("speed-preset", "ultrafast")
+        encoder.set_property("bitrate", cfg.bitrate_kbps)
+        encoder.set_property("key-int-max", cfg.keyint)
 
         # RTP 페이로더 설정
         pay.set_property("config-interval", 1)
         pay.set_property("pt", 96)
+        pay.set_property("aggregate-mode", 1)  # zero-latency
 
         # RTP caps
         rtpcaps.set_property(
@@ -639,13 +677,14 @@ class WebRTCService:
 
         # STUN 서버 설정
         webrtc.set_property("stun-server", cfg.stun_server)
+        webrtc.set_property("bundle-policy", 3)  # max-bundle
 
         # 파이프라인에 요소 추가
-        for e in [v4l2src, caps, conv, i420caps, x264, pay, rtpcaps, q, webrtc]:
+        for e in [appsrc, conv, i420caps, encoder, pay, rtpcaps, q, webrtc]:
             pipeline.add(e)
 
-        # 요소 연결 (v4l2src -> ... -> queue) - 하나씩 link
-        elements = [v4l2src, caps, conv, i420caps, x264, pay, rtpcaps, q]
+        # 요소 연결
+        elements = [appsrc, conv, i420caps, encoder, pay, rtpcaps, q]
         for i in range(len(elements) - 1):
             if not elements[i].link(elements[i + 1]):
                 raise RuntimeError(f"failed to link {elements[i].get_name()} -> {elements[i+1].get_name()}")
@@ -662,8 +701,29 @@ class WebRTCService:
         if q_src.link(sinkpad) != Gst.PadLinkReturn.OK:
             raise RuntimeError("failed to link queue -> webrtcbin")
 
-        logger.info("webrtc pipeline built successfully")
+        # CameraService 콜백 등록
+        camera_service.register_callback(self._push_frame)
+        logger.info("webrtc pipeline built with appsrc (CameraService integration)")
+        
         return pipeline, webrtc
+
+    def _push_frame(self, frame: np.ndarray) -> None:
+        """CameraService로부터 프레임을 받아 appsrc에 push"""
+        if self._appsrc is None or self._state != WebRTCState.RUNNING:
+            return
+        
+        try:
+            # numpy array를 GStreamer buffer로 변환
+            data = frame.tobytes()
+            buf = Gst.Buffer.new_allocate(None, len(data), None)
+            buf.fill(0, data)
+            
+            # appsrc에 push
+            ret = self._appsrc.emit("push-buffer", buf)
+            if ret != Gst.FlowReturn.OK:
+                logger.warning("appsrc push-buffer returned: %s", ret)
+        except Exception as e:
+            logger.error("Failed to push frame to appsrc: %s", e)
 
     def _set_state(self, state: WebRTCState, reason: str) -> None:
         """내부 상태 설정"""

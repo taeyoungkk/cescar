@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     # Watchdog timeout (ms)
     WATCHDOG_MS: int = 300
     
+    # Encoder GPIO pins (BCM numbering)
+    ENCODER_PIN_A: int = 17
+    ENCODER_PIN_B: int = 27
+    
+    # 차량 물리 파라미터
+    WHEEL_DIAMETER_M: float = 0.06  # 60mm
+    ENCODER_PPR: int = 231  # 25GA-370: 11 PPR × 21 gear ratio
+    WHEELBASE_M: float = 0.16  # 축간 거리 (조정 필요)
+    
     # === MQTT Topics (모두 robot/ 접두사로 통일) ===
     
     # 모드 제어 (MANUAL/AUTO)
@@ -45,6 +54,11 @@ class Settings(BaseSettings):
     @property
     def TOPIC_STATUS(self) -> str:
         return f"robot/{self.ROBOT_ID}/status"
+    
+    # Odometry 발행
+    @property
+    def TOPIC_ODOM(self) -> str:
+        return f"robot/{self.ROBOT_ID}/odom"
 
     model_config = SettingsConfigDict(
         env_file=".env",

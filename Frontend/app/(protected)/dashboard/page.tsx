@@ -237,6 +237,8 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
   const [isVideoOpen, setIsVideoOpen] = useState(false)
   const [snapshotSrc, setSnapshotSrc] = useState<string | null>(null)
   const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [videoSrc, setVideoSrc] = useState<string | null>(null)
+  const [videoLoading, setVideoLoading] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
   const toAbsUrl = (url?: string | null) => {
     if (!url) return null
@@ -294,6 +296,45 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
       }
     }
   }, [snapshotUrl])
+
+  useEffect(() => {
+    if (!isVideoOpen || !videoUrl) {
+      setVideoSrc(null)
+      return
+    }
+
+    const controller = new AbortController()
+    const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
+    let objectUrl: string | null = null
+
+    setVideoLoading(true)
+    fetch(videoUrl, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("video fetch failed")
+        const blob = await res.blob()
+        objectUrl = URL.createObjectURL(blob)
+        setVideoSrc(objectUrl)
+      })
+      .catch(() => {
+        setVideoSrc(null)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setVideoLoading(false)
+        }
+      })
+
+    return () => {
+      controller.abort()
+      setVideoLoading(false)
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [isVideoOpen, videoUrl])
 
   if (!record) return null
 
@@ -357,7 +398,12 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
               <p className="text-xs text-muted-foreground">탐지 영상 확인</p>
               <p className="text-xs text-muted-foreground/70">탐지 전후 영상을 확인하세요.</p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setIsVideoOpen(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsVideoOpen(true)}
+              disabled={!videoUrl}
+            >
               <Play className="h-4 w-4 mr-1" />
               영상 확인
             </Button>
@@ -407,15 +453,17 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
             </DialogDescription>
           </DialogHeader>
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
-            {videoUrl ? (
+            {videoSrc ? (
               <video className="absolute inset-0 w-full h-full" controls>
-                <source src={videoUrl} />
+                <source src={videoSrc} />
               </video>
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center space-y-2">
                   <Play className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-                  <p className="text-sm text-muted-foreground">영상 준비 중...</p>
+                  <p className="text-sm text-muted-foreground">
+                    {videoLoading ? "영상 불러오는 중..." : "영상 준비 중..."}
+                  </p>
                 </div>
               </div>
             )}
@@ -733,7 +781,7 @@ function DashboardContent() {
     if (!deepLinkId) return
     if (lastOpenedRef.current === deepLinkId) return
 
-    const existing = detections.find((d) => d.id === deepLinkId)
+    const existing = detections.find((d) => String(d.id) === deepLinkId)
     if (existing) {
       selectDetection(existing)
       setIsDetailOpen(true)

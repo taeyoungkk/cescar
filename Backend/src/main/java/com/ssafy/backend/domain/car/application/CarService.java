@@ -247,8 +247,10 @@ public class CarService {
         try {
             // v: linear velocity, w: angular velocity
             Map<String, Double> payload = new HashMap<>();
-            payload.put("v", request.v());
-            payload.put("w", request.w());
+            double v = request.v() != null ? -request.v() : 0.0;
+            double w = request.w() != null ? -request.w() : 0.0;
+            payload.put("v", v);
+            payload.put("w", w);
 
             String jsonPayload = objectMapper.writeValueAsString(payload);
 
@@ -259,7 +261,7 @@ public class CarService {
             throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
         }
 
-        return CarResponse.ControlResponse.of("v=" + request.v() + ",w=" + request.w());
+        return CarResponse.ControlResponse.of("v=" + (-request.v()) + ",w=" + (-request.w()));
     }
 
     /**

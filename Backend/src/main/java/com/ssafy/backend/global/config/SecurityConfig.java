@@ -97,7 +97,11 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
 
         // 프론트엔드 주소 허용 (localhost:3000, localhost:5173 등 프론트 포트에 맞춰 수정)
-        configuration.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:5173"));
+        //configuration.setAllowedOrigins(List.of("http://localhost:3000", "http://localhost:5173"));
+        configuration.setAllowedOriginPatterns(List.of(
+                "http://localhost:*",
+                "https://*.vercel.app"
+        ));
 
         // 허용할 HTTP 메서드 (OPTIONS 필수)
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));

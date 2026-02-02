@@ -14,37 +14,51 @@ class Settings(BaseSettings):
     # Watchdog timeout (ms)
     WATCHDOG_MS: int = 300
     
-    # === MQTT Topics (백엔드 구조: pi/{deviceId}/...) ===
+    # Encoder GPIO pins (BCM numbering)
+    ENCODER_PIN_A: int = 17
+    ENCODER_PIN_B: int = 27
+    
+    # 차량 물리 파라미터
+    WHEEL_DIAMETER_M: float = 0.06  # 60mm
+    ENCODER_PPR: int = 231  # 25GA-370: 11 PPR × 21 gear ratio
+    WHEELBASE_M: float = 0.16  # 축간 거리 (조정 필요)
+    
+    # === MQTT Topics (모두 robot/ 접두사로 통일) ===
     
     # 모드 제어 (MANUAL/AUTO)
     @property
     def TOPIC_MODE(self) -> str:
-        return f"pi/{self.ROBOT_ID}/mode"
+        return f"robot/{self.ROBOT_ID}/mode"
     
     # UI에서 오는 제어 명령 (MANUAL 모드용)
     @property
     def TOPIC_UI_CMD(self) -> str:
-        return f"pi/{self.ROBOT_ID}/control"
+        return f"robot/{self.ROBOT_ID}/control"
     
     # Jetson에서 오는 명령 (AUTO 모드용)
     @property
     def TOPIC_JETSON_CMD(self) -> str:
-        return f"jetson/{self.ROBOT_ID}/cmd_vel"
+        return f"robot/{self.ROBOT_ID}/cmd_vel"
     
     # 비상정지
     @property
     def TOPIC_ESTOP(self) -> str:
-        return f"pi/{self.ROBOT_ID}/estop"
+        return f"robot/{self.ROBOT_ID}/estop"
     
     # 모터 상태 발행
     @property
     def TOPIC_MOTOR_STATUS(self) -> str:
-        return f"pi/{self.ROBOT_ID}/motor/status"
+        return f"robot/{self.ROBOT_ID}/motor/status"
     
-    # 일반 상태 발행
+    # Pi 상태 발행
     @property
     def TOPIC_STATUS(self) -> str:
-        return f"pi/{self.ROBOT_ID}/status"
+        return f"robot/{self.ROBOT_ID}/status"
+    
+    # Odometry 발행
+    @property
+    def TOPIC_ODOM(self) -> str:
+        return f"robot/{self.ROBOT_ID}/odom"
 
     model_config = SettingsConfigDict(
         env_file=".env",

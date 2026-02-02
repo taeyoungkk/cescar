@@ -41,11 +41,27 @@ class MQTTService:
             self.initialize()
         
         try:
+            print(f"[MQTT] Connecting to {settings.MQTT_BROKER}:{settings.MQTT_PORT}...")
             logger.info(f"Connecting to MQTT Broker: {settings.MQTT_BROKER}:{settings.MQTT_PORT}")
             self.client.connect(settings.MQTT_BROKER, settings.MQTT_PORT)
             self.client.loop_start()
+            print("[MQTT] ✓ Connection initiated (waiting for on_connect callback)")
             logger.info("MQTT Service Started")
+        except ConnectionRefusedError as e:
+            print(f"[MQTT] ✗ Connection REFUSED: {e}")
+            print("[MQTT]   → Is the MQTT broker running?")
+            print(f"[MQTT]   → Check if {settings.MQTT_BROKER}:{settings.MQTT_PORT} is reachable")
+            logger.error(f"MQTT Connection Refused: {e}")
+            raise
+        except OSError as e:
+            print(f"[MQTT] ✗ Network ERROR: {e}")
+            print("[MQTT]   → Check network connectivity")
+            print(f"[MQTT]   → Verify broker address: {settings.MQTT_BROKER}")
+            logger.error(f"MQTT Network Error: {e}")
+            raise
         except Exception as e:
+            print(f"[MQTT] ✗ Connection FAILED: {e}")
+            print(f"[MQTT]   → Exception type: {type(e).__name__}")
             logger.error(f"MQTT Connection Failed: {e}")
             raise
     

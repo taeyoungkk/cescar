@@ -1,10 +1,7 @@
 package com.ssafy.backend.global.storage;
 
-import org.springframework.stereotype.Service;
-
 import java.time.Duration;
 
-@Service
 public class MockStorageService implements StorageService {
 
     private static final String MOCK_BASE_URL = "https://storage.googleapis.com/mock-bucket/";

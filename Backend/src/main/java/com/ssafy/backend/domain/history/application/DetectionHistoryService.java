@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.math.BigDecimal;
+import java.net.URI;
 
 @Service
 @Transactional(readOnly = true)
@@ -89,11 +90,35 @@ public class DetectionHistoryService {
                 confidence,
                 BigDecimal.valueOf(x),
                 BigDecimal.valueOf(y),
-                imageUrl,
-                videoUrl);
+                normalizeObjectPath(imageUrl),
+                normalizeObjectPath(videoUrl));
 
         detectionRepository.save(detection);
         carLog.increaseDetectionCount();
+    }
+
+    private String normalizeObjectPath(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            if (value.startsWith("http://") || value.startsWith("https://")) {
+                URI uri = URI.create(value);
+                String path = uri.getPath();
+                if (path == null || path.isBlank()) {
+                    return null;
+                }
+                String normalized = path.startsWith("/") ? path.substring(1) : path;
+                int firstSlash = normalized.indexOf('/');
+                if (firstSlash > 0 && firstSlash + 1 < normalized.length()) {
+                    return normalized.substring(firstSlash + 1);
+                }
+                return normalized;
+            }
+        } catch (Exception e) {
+            return value;
+        }
+        return value;
     }
 
     /**

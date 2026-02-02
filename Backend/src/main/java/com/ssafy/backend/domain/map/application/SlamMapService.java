@@ -37,7 +37,7 @@ public class SlamMapService {
         SlamMap map = SlamMap.create(
                 car,
                 request.name(),
-                request.imageUrl(),
+                normalizeObjectPath(request.imageUrl()),
                 request.width(),
                 request.height(),
                 request.resolution(),
@@ -163,5 +163,29 @@ public class SlamMapService {
             return null;
         }
         return storageService.generateSignedUrl(objectPath, signedUrlTtl);
+    }
+
+    private String normalizeObjectPath(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            if (value.startsWith("http://") || value.startsWith("https://")) {
+                java.net.URI uri = java.net.URI.create(value);
+                String path = uri.getPath();
+                if (path == null || path.isBlank()) {
+                    return null;
+                }
+                String normalized = path.startsWith("/") ? path.substring(1) : path;
+                int firstSlash = normalized.indexOf('/');
+                if (firstSlash > 0 && firstSlash + 1 < normalized.length()) {
+                    return normalized.substring(firstSlash + 1);
+                }
+                return normalized;
+            }
+        } catch (Exception e) {
+            return value;
+        }
+        return value;
     }
 }

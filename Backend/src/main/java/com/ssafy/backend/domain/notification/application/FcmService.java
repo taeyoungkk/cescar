@@ -11,34 +11,36 @@ import com.ssafy.backend.domain.member.domain.Member;
 import com.ssafy.backend.domain.notification.dao.NotificationTokenRepository;
 import com.ssafy.backend.domain.notification.domain.NotificationToken;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 
 @Service
 @RequiredArgsConstructor
 public class FcmService {
-
     private final NotificationTokenRepository notificationTokenRepository;
     private final MemberRepository memberRepository;
     private final TransactionTemplate transactionTemplate;
 
-    // 회원별 FCM 토큰을 DB에 저장합니다.
+
+    @Transactional
     public void registerToken(Long memberId, String token) {
         if (memberId == null) {
-            throw new IllegalArgumentException("회원 인증 정보가 없습니다.");
+            throw new IllegalArgumentException("Member authentication is required.");
         }
         if (token == null || token.trim().isEmpty()) {
             return;
         }
 
         NotificationToken existing = notificationTokenRepository.findByToken(token).orElse(null);
+
         if (existing != null) {
             if (!existing.getMember().getId().equals(memberId)) {
                 Member member = memberRepository.findById(memberId)
-                        .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+                        .orElseThrow(() -> new IllegalArgumentException("Member not found."));
                 existing.changeMember(member);
                 notificationTokenRepository.save(existing);
             }
@@ -46,31 +48,36 @@ public class FcmService {
         }
 
         Member member = memberRepository.findById(memberId)
-                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
-        notificationTokenRepository.save(NotificationToken.create(token, member));
-        System.out.println("✅ FCM 토큰 등록됨: " + token);
+                .orElseThrow(() -> new IllegalArgumentException("Member not found."));
+        try {
+            notificationTokenRepository.save(NotificationToken.create(token, member));
+            System.out.println("[FCM] token registered: " + token);
+        } catch (DataIntegrityViolationException e) {
+            // Possible race condition: another request inserted the same token.
+            System.out.println("[FCM] duplicate token ignored: " + token);
+        }
     }
+
 
     @Transactional
     public void removeToken(Long memberId, String token) {
         if (memberId == null) {
-            throw new IllegalArgumentException("회원 인증 정보가 없습니다.");
+            throw new IllegalArgumentException("Member authentication is required.");
         }
         if (token == null || token.trim().isEmpty()) {
             return;
         }
 
         int deleted = notificationTokenRepository.deleteByMemberIdAndToken(memberId, token);
+
         if (deleted > 0) {
-            System.out.println("[FCM] 토큰 삭제: " + token);
+            System.out.println("[FCM] token deleted: " + token);
         } else {
-            System.out.println("[FCM] 삭제할 토큰 없음 (memberId=" + memberId + ")");
+            System.out.println("[FCM] token not found (memberId=" + memberId + ")");
         }
     }
 
-    /**
-     * 지정한 토큰으로 알림을 전송합니다.
-     */
+
     public void sendMessage(String targetToken, String title, String body) {
         try {
             Message message = Message.builder()
@@ -82,15 +89,19 @@ public class FcmService {
                     .build();
 
             String response = FirebaseMessaging.getInstance().send(message);
-            System.out.println("알림 전송 성공: " + response);
+
+            System.out.println("[FCM] send success: " + response);
         } catch (FirebaseMessagingException e) {
-            System.err.println("알림 전송 실패: " + e.getMessage());
+            System.err.println("[FCM] send failed: " + e.getMessage());
+
             MessagingErrorCode errorCode = e.getMessagingErrorCode();
+
             if (errorCode == MessagingErrorCode.UNREGISTERED || errorCode == MessagingErrorCode.INVALID_ARGUMENT) {
                 transactionTemplate.executeWithoutResult(status -> {
                     int deleted = notificationTokenRepository.deleteByToken(targetToken);
+
                     if (deleted > 0) {
-                        System.out.println("[FCM] 유효하지 않은 토큰 삭제: " + targetToken);
+                        System.out.println("[FCM] invalid token removed: " + targetToken);
                     }
                 });
             }
@@ -99,33 +110,30 @@ public class FcmService {
 
     public void sendToMember(Long memberId, String title, String body) {
         List<NotificationToken> tokens = notificationTokenRepository.findAllByMemberId(memberId);
+
         if (tokens.isEmpty()) {
-            System.out.println("ℹ️ 등록된 FCM 토큰이 없어 알림을 보내지 않았습니다.");
+            System.out.println("[FCM] no tokens for member.");
             return;
         }
 
-        System.out.println("[FCM] 멤버 알림 전송 시작 memberId=" + memberId
-                + " tokenCount=" + tokens.size());
-
+        System.out.println("[FCM] send to member start memberId=" + memberId + " tokenCount=" + tokens.size());
         for (NotificationToken token : tokens) {
             sendMessage(token.getToken(), title, body);
         }
     }
 
-    /**
-     * 등록된 모든 토큰으로 알림을 보냅니다. (브로드캐스트)
-     */
     public void broadcastMessage(String title, String body) {
         List<NotificationToken> tokens = notificationTokenRepository.findAll();
+
         if (tokens.isEmpty()) {
-            System.out.println("ℹ️ 등록된 FCM 토큰이 없어 알림을 보내지 않았습니다.");
+            System.out.println("[FCM] no tokens for broadcast.");
             return;
         }
 
-        System.out.println("📢 " + tokens.size() + "개의 기기에 알림 전송 중...");
+        System.out.println("[FCM] broadcasting to " + tokens.size() + " tokens.");
+
         for (NotificationToken token : tokens) {
             sendMessage(token.getToken(), title, body);
         }
     }
-
 }

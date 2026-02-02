@@ -1,4 +1,3 @@
-import random
 import logging
 import json
 from datetime import datetime
@@ -7,6 +6,8 @@ import time
 import cv2
 from app.services.mqtt_service import mqtt_service
 from app.services.storage_service import storage_service
+from app.services.yolo_service import yolo_service
+from app.services.detection_ws_service import detection_ws_service
 from app.core.config import settings
 
 logging.basicConfig(
@@ -18,12 +19,14 @@ logger = logging.getLogger(__name__)
 
 class DetectionService:
     def __init__(self):
-        # 1% 확률로 벌레가 탐지되도록 설정 (10FPS 기준 10초에 한 번 꼴)
-        self.detection_probability = 0.01
         self.is_monitoring = False
         self.is_recording = False
         self.record_start_time = None
         self.current_video_path = None
+        
+        # Detection 쿨다운 (연속 이벤트 방지)
+        self._last_detection_time = 0
+        self._detection_cooldown = 5.0  # 5초 쿨다운
 
         # OpenCV 관련
         self.cap = None
@@ -65,7 +68,7 @@ class DetectionService:
         logger.info("🛑 Camera monitoring stopped.")
 
     def process_frame(self):
-        """카메라에서 프레임을 읽고 탐지 여부를 판단합니다."""
+        """카메라에서 프레임을 읽고 YOLO로 탐지 수행. bbox는 항상 WebSocket으로 스트리밍."""
         if not self.is_monitoring or self.cap is None:
             return None
 
@@ -74,36 +77,59 @@ class DetectionService:
             logger.warning("⚠️ 프레임을 읽어오지 못했습니다.")
             return None
 
-        # 2. 녹화 중이 아닐 때만 탐지 시뮬레이션 수행
-        if random.random() < self.detection_probability:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-            # 스크린샷 저장
-            screenshot_path = os.path.join(self.screenshot_dir, f"detect_{timestamp}.jpg")
-            cv2.imwrite(screenshot_path, frame)
-            logger.info(f"📸 [SCREENSHOT] Saved: {screenshot_path}")
-            
-            # 녹화 시작 의도적 blocking 시작 (10초)
-            video_url = self._start_recording(timestamp)
-            
-            # 클라우드 업로드
-            screenshot_url = storage_service.upload_file(screenshot_path)
-
-            detection_data = {
-                "timestamp": datetime.now().isoformat(),
-                "object_type": "insect",
-                "confidence": round(random.uniform(0.85, 0.99), 2),
-                "status": "detected",
-                "robot_id": settings.ROBOT_ID,
-                "screenshot_url": screenshot_url,
-                "video_url": video_url,
-                "note": "Real-time CV2 detection simulation"
-            }
-            
-            self._publish_detection(detection_data)
-            return detection_data
+        # 1. YOLO 추론 (매 프레임)
+        detections = yolo_service.detect(frame)
+        
+        # 2. WebSocket으로 bbox 실시간 스트리밍 (항상 전송, 빈 배열이어도)
+        detection_ws_service.send_detections(
+            detections,
+            frame_width=self.frame_width,
+            frame_height=self.frame_height
+        )
+        
+        # 3. 탐지가 있고, 녹화 중이 아니며, 쿨다운이 지났을 때만 이벤트 발생
+        current_time = time.time()
+        if detections and not self.is_recording:
+            if current_time - self._last_detection_time > self._detection_cooldown:
+                self._last_detection_time = current_time
+                return self._handle_detection_event(frame, detections)
 
         return None
+    
+    def _handle_detection_event(self, frame, detections: list[dict]):
+        """탐지 이벤트 처리: 스크린샷, 녹화, MQTT 발행"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # 가장 높은 신뢰도의 탐지 결과 사용
+        top_detection = max(detections, key=lambda x: x['confidence'])
+
+        # 스크린샷 저장
+        screenshot_path = os.path.join(self.screenshot_dir, f"detect_{timestamp}.jpg")
+        cv2.imwrite(screenshot_path, frame)
+        logger.info(f"📸 [SCREENSHOT] Saved: {screenshot_path}")
+        
+        # 녹화 시작 (5초 blocking)
+        video_url = self._start_recording(timestamp)
+        
+        # 클라우드 업로드
+        screenshot_url = storage_service.upload_file(screenshot_path)
+
+        detection_data = {
+            "timestamp": datetime.now().isoformat(),
+            "object_type": top_detection['label'],
+            "confidence": top_detection['confidence'],
+            "bbox": top_detection['bbox'],
+            "status": "detected",
+            "robot_id": settings.ROBOT_ID,
+            "screenshot_url": screenshot_url,
+            "video_url": video_url,
+            "detection_count": len(detections),
+            "note": "YOLO real-time detection"
+        }
+        
+        self._publish_detection(detection_data)
+        logger.info(f"🐛 [DETECTION EVENT] {top_detection['label']} (conf: {top_detection['confidence']})")
+        return detection_data
 
     def _start_recording(self, timestamp): # frame 인자 대신 함수 내에서 읽기
         """녹화 시작: 실제 카메라 프레임을 FPS에 맞춰 10초간 기록"""

@@ -9,6 +9,8 @@ import logging
 from app.services.mqtt_service import mqtt_service
 from app.services.monitoring_service import monitoring_service
 from app.services.detection_service import detection_service
+from app.services.yolo_service import yolo_service
+from app.services.detection_ws_service import detection_ws_service
 from app.core.config import settings
 
 # WebRTC 서비스는 Linux(Jetson) 환경에서만 로드 (gi 모듈 의존성 때문)
@@ -78,10 +80,10 @@ async def system_status_publisher():
 
 async def detection_publisher():
     """
-    주기적으로 벌레 탐지 시뮬레이션을 수행하고 MQTT로 발행합니다.
-    실제 AI 기능 탑재 시 카메라 프레임을 지속적으로 읽는 루프로 대체됩니다.
+    YOLO 모델을 사용하여 실시간 객체 탐지 수행.
+    탐지된 bbox는 WebSocket으로 스트리밍, 이벤트는 MQTT로 발행.
     """
-    print("[*] Bug Detection Monitor Started")
+    print("[*] YOLO Detection Monitor Started")
     detection_service.start_monitoring()
     
     while True:
@@ -100,6 +102,20 @@ async def lifespan(app: FastAPI):
     print("\n[*] Starting MQTT Service...")
     mqtt_service.connect()
     
+    # Startup: YOLO 모델 로드
+    print("[*] Loading YOLO model...")
+    if yolo_service.load_model():
+        print("[*] YOLO model loaded successfully")
+    else:
+        print("[!] YOLO model loading failed - detection will not work")
+    
+    # Startup: Detection WebSocket 연결
+    print("[*] Connecting to Detection WebSocket...")
+    if detection_ws_service.connect(settings.ROBOT_ID):
+        print("[*] Detection WebSocket connected")
+    else:
+        print("[!] Detection WebSocket connection failed - bbox streaming disabled")
+    
     # Startup: WebRTC 송출 시작
     if webrtc_service:
         print("[*] Starting WebRTC Service...")
@@ -109,7 +125,7 @@ async def lifespan(app: FastAPI):
     
     # 시스템 상태 발행 백그라운드 태스크 시작
     status_task = asyncio.create_task(system_status_publisher())
-    # 벌레 탐지 시뮬레이션 태스크 시작
+    # YOLO 탐지 태스크 시작
     detection_task = asyncio.create_task(detection_publisher())
     
     yield
@@ -125,6 +141,11 @@ async def lifespan(app: FastAPI):
         print(f"[*] Error during shutdown: {e}")
     
     print("[*] Background Tasks Stopped")
+    
+    # Shutdown: Detection WebSocket 종료
+    print("[*] Disconnecting Detection WebSocket...")
+    detection_ws_service.disconnect()
+    
     # Shutdown: WebRTC 중지
     if webrtc_service:
         print("[*] Stopping WebRTC Service...")

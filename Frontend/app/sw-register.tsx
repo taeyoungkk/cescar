@@ -1,20 +1,73 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
+import { toast } from "@/components/ui/use-toast"
+import { ToastAction } from "@/components/ui/toast"
 
 export function SwRegister() {
   const router = useRouter()
+  const hasPromptedRef = useRef(false)
 
   useEffect(() => {
     // prod에서만
     if (process.env.NODE_ENV !== "production") return
     if (!("serviceWorker" in navigator)) return
 
+    const handleUpdate = (reg: ServiceWorkerRegistration) => {
+      if (hasPromptedRef.current) return
+      hasPromptedRef.current = true
+
+      const reload = () => {
+        window.location.reload()
+      }
+
+      const waiting = reg.waiting
+      toast({
+        title: "새 버전이 준비되었습니다",
+        description: "업데이트를 적용하려면 새로고침하세요.",
+        action: (
+          <ToastAction
+            altText="새로고침"
+            onClick={() => {
+              if (waiting) {
+                waiting.postMessage({ type: "SKIP_WAITING" })
+              } else {
+                reload()
+              }
+            }}
+          >
+            새로고침
+          </ToastAction>
+        ),
+      })
+
+      let refreshed = false
+      navigator.serviceWorker.addEventListener("controllerchange", () => {
+        if (refreshed) return
+        refreshed = true
+        reload()
+      })
+    }
+
     navigator.serviceWorker
       .register("/sw.js", { scope: "/" })
       .then((reg) => {
         console.log("[SW] registered", reg)
+
+        if (reg.waiting && navigator.serviceWorker.controller) {
+          handleUpdate(reg)
+        }
+
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing
+          if (!newWorker) return
+          newWorker.addEventListener("statechange", () => {
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              handleUpdate(reg)
+            }
+          })
+        })
       })
       .catch((err) => {
         console.error("[SW] register failed", err)

@@ -420,56 +420,90 @@ function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableP
   }
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow className="border-border hover:bg-transparent">
-            <TableHead className="text-muted-foreground">시간</TableHead>
-            <TableHead className="text-muted-foreground">탐지 유형</TableHead>
-            <TableHead className="text-muted-foreground">확신도</TableHead>
-            <TableHead className="text-muted-foreground">상태</TableHead>
-            <TableHead className="text-muted-foreground text-right">액션</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {detections.map((record) => (
-            <TableRow key={record.id} className="border-border">
-              <TableCell>
-                <div className="space-y-0.5">
-                  <p className="text-sm font-medium text-foreground">{record.time}</p>
-                  <p className="text-xs text-muted-foreground">{record.date}</p>
-                </div>
-              </TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 rounded bg-secondary">
-                    <Bug className="h-3.5 w-3.5 text-primary" />
-                  </div>
-                  <span className="text-sm text-foreground">{typeLabels[record.type] || record.type}</span>
-                </div>
-              </TableCell>
-              <TableCell>
-                <ConfidenceBadge confidence={record.confidence} />
-              </TableCell>
-              <TableCell>
-                <StatusBadge status={record.status} />
-              </TableCell>
-              <TableCell className="text-right">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onViewDetail(record)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <Eye className="h-4 w-4 mr-1" />
-                  상세 보기
-                </Button>
-              </TableCell>
+    <>
+      <div className="space-y-3 sm:hidden">
+        {detections.map((record) => (
+          <div key={record.id} className="rounded-lg border border-border bg-card/60 p-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-foreground">{record.time}</p>
+                <p className="text-xs text-muted-foreground">{record.date}</p>
+              </div>
+              <StatusBadge status={record.status} />
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 rounded bg-secondary">
+                <Bug className="h-3.5 w-3.5 text-primary" />
+              </div>
+              <span className="text-sm text-foreground">{typeLabels[record.type] || record.type}</span>
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>확신도</span>
+              <ConfidenceBadge confidence={record.confidence} />
+            </div>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onViewDetail(record)}
+              className="w-full"
+            >
+              상세 보기
+            </Button>
+          </div>
+        ))}
+      </div>
+
+      <div className="hidden sm:block overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow className="border-border hover:bg-transparent">
+              <TableHead className="text-muted-foreground">시간</TableHead>
+              <TableHead className="text-muted-foreground">탐지 유형</TableHead>
+              <TableHead className="text-muted-foreground">확신도</TableHead>
+              <TableHead className="text-muted-foreground">상태</TableHead>
+              <TableHead className="text-muted-foreground text-right">액션</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+          </TableHeader>
+          <TableBody>
+            {detections.map((record) => (
+              <TableRow key={record.id} className="border-border">
+                <TableCell>
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-medium text-foreground">{record.time}</p>
+                    <p className="text-xs text-muted-foreground">{record.date}</p>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded bg-secondary">
+                      <Bug className="h-3.5 w-3.5 text-primary" />
+                    </div>
+                    <span className="text-sm text-foreground">{typeLabels[record.type] || record.type}</span>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <ConfidenceBadge confidence={record.confidence} />
+                </TableCell>
+                <TableCell>
+                  <StatusBadge status={record.status} />
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onViewDetail(record)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Eye className="h-4 w-4 mr-1" />
+                    상세 보기
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </>
   )
 }
 
@@ -674,8 +708,8 @@ function DashboardContent() {
           <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요.</p>
         </div>
 
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          <div className="min-w-[280px] flex-1 sm:flex-none">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="w-full sm:w-auto sm:min-w-[280px] sm:flex-none">
             <Select
               value={logId ? String(logId) : ""}
               onValueChange={(value) => {
@@ -696,7 +730,7 @@ function DashboardContent() {
               </SelectContent>
             </Select>
           </div>
-          <div className="relative flex-1 min-w-[220px] max-w-sm">
+          <div className="relative w-full sm:flex-1 sm:min-w-[220px] sm:max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="ID로 검색..."
@@ -719,7 +753,7 @@ function DashboardContent() {
             }}
             disabled={useSearch || mapOptions.length === 0}
           >
-            <SelectTrigger className="w-[160px] bg-input border-border">
+            <SelectTrigger className="w-full sm:w-[160px] bg-input border-border">
               <MapIcon className="h-4 w-4 mr-2 text-muted-foreground" />
               <SelectValue placeholder="지도" />
             </SelectTrigger>
@@ -737,7 +771,7 @@ function DashboardContent() {
               onValueChange={(value) => setLogSort(value as "desc" | "asc")}
               disabled={useSearch || sortedLogs.length === 0}
             >
-              <SelectTrigger className="w-[140px] bg-input border-border">
+              <SelectTrigger className="w-full sm:w-[140px] bg-input border-border">
                 <SelectValue placeholder="정렬" />
               </SelectTrigger>
               <SelectContent>
@@ -749,7 +783,7 @@ function DashboardContent() {
               value={filters.type || "all"}
               onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
             >
-            <SelectTrigger className="w-[140px] bg-input border-border">
+            <SelectTrigger className="w-full sm:w-[140px] bg-input border-border">
               <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
               <SelectValue placeholder="유형" />
             </SelectTrigger>
@@ -767,7 +801,7 @@ function DashboardContent() {
             value={filters.status || "all"}
             onValueChange={(value) => setFilters({ ...filters, status: value as DetectionStatus | "all" })}
           >
-            <SelectTrigger className="w-[140px] bg-input border-border">
+            <SelectTrigger className="w-full sm:w-[140px] bg-input border-border">
               <SelectValue placeholder="상태" />
             </SelectTrigger>
             <SelectContent>

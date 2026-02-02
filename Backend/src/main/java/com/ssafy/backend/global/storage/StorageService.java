@@ -11,4 +11,18 @@ public interface StorageService {
      * @return 서명된 URL
      */
     String generateSignedUrl(String objectPath, Duration ttl);
+
+    /**
+     * 업로드(PUT)용 서명된 URL을 생성합니다.
+     */
+    default String generateUploadSignedUrl(String objectPath, Duration ttl, String contentType) {
+        return generateSignedUrl(objectPath, ttl);
+    }
+
+    /**
+     * 다운로드(GET)용 서명된 URL을 생성합니다.
+     */
+    default String generateDownloadSignedUrl(String objectPath, Duration ttl) {
+        return generateSignedUrl(objectPath, ttl);
+    }
 }

@@ -14,6 +14,16 @@ export function SwRegister() {
     if (process.env.NODE_ENV !== "production") return
     if (!("serviceWorker" in navigator)) return
 
+    if ("caches" in window) {
+      caches.keys().then((keys) =>
+        Promise.all(
+          keys
+            .filter((key) => key.startsWith("workbox-precache"))
+            .map((key) => caches.delete(key))
+        )
+      )
+    }
+
     const handleUpdate = (reg: ServiceWorkerRegistration) => {
       if (hasPromptedRef.current) return
       hasPromptedRef.current = true

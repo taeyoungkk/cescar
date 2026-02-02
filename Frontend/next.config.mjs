@@ -4,7 +4,9 @@ const pwaConfig = withPWA({
   dest: "public",
   register: false,
   skipWaiting: true,
+  cleanupOutdatedCaches: true,
   disable: process.env.NODE_ENV === "development",
+  buildExcludes: [/\/_next\/static\/chunks\/.*\.js$/],
 
   // ✅ 핵심: runtimeCaching 커스터마이즈
   runtimeCaching: [

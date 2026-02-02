@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import React, { useState, Suspense } from "react"
+import React, { useState, useEffect, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import {
   Bug,
@@ -235,7 +235,14 @@ interface DetailPanelProps {
 
 function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
   const [isVideoOpen, setIsVideoOpen] = useState(false)
+  const [snapshotSrc, setSnapshotSrc] = useState<string | null>(null)
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+  const toAbsUrl = (url?: string | null) => {
+    if (!url) return null
+    if (url.startsWith("http://") || url.startsWith("https://")) return url
+    return `${BASE_URL}${url}`
+  }
 
   const typeLabels: Record<string, string> = {
     cockroach: "바퀴벌레",
@@ -246,9 +253,49 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
     unknown: "미확인",
   }
 
+  const snapshotUrl = record ? toAbsUrl(record.snapshotUrl ?? null) : null
+  const videoUrl = record ? toAbsUrl(record.videoUrl ?? null) : null
+
+  useEffect(() => {
+    if (!snapshotUrl) {
+      setSnapshotSrc(null)
+      return
+    }
+
+    const controller = new AbortController()
+    const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
+    let objectUrl: string | null = null
+
+    setSnapshotLoading(true)
+    fetch(snapshotUrl, {
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      signal: controller.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error("snapshot fetch failed")
+        const blob = await res.blob()
+        objectUrl = URL.createObjectURL(blob)
+        setSnapshotSrc(objectUrl)
+      })
+      .catch(() => {
+        setSnapshotSrc(null)
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setSnapshotLoading(false)
+        }
+      })
+
+    return () => {
+      controller.abort()
+      setSnapshotLoading(false)
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl)
+      }
+    }
+  }, [snapshotUrl])
+
   if (!record) return null
-  console.log("snapshotUrl:", record.snapshotUrl)
-  const videoUrl = record.videoUrl ? `${BASE_URL}${record.videoUrl}` : null
 
   return (
     <Sheet
@@ -287,9 +334,9 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
-            {record.snapshotUrl ? (
+            {snapshotSrc ? (
               <img
-                src={`${BASE_URL}${record.snapshotUrl}`}
+                src={snapshotSrc}
                 alt="snapshot"
                 className="absolute inset-0 w-full h-full object-cover"
               />
@@ -297,7 +344,9 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
               <div className="absolute inset-0 flex items-center justify-center">
                 <div className="text-center space-y-2">
                   <Camera className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-                  <p className="text-sm text-muted-foreground">탐지 순간 스냅샷</p>
+                  <p className="text-sm text-muted-foreground">
+                    {snapshotLoading ? "스냅샷 불러오는 중..." : "탐지 순간 스냅샷"}
+                  </p>
                 </div>
               </div>
             )}
@@ -873,9 +922,15 @@ function DashboardContent() {
             )}
             <DetectionTable
               detections={detections}
-              onViewDetail={(d) => {
+              onViewDetail={async (d) => {
                 selectDetection(d)
                 setIsDetailOpen(true)
+                const res = await detectionApi.getDetectionById(d.id)
+                if (res?.data) {
+                  selectDetection(res.data)
+                } else {
+                  toast({ title: "상세 불러오기 실패", description: "탐지 상세 정보를 불러오지 못했습니다." })
+                }
               }}
               isLoading={isLoading}
             />

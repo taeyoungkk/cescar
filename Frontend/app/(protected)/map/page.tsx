@@ -21,6 +21,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import {
   Dialog,
   DialogContent,
@@ -260,15 +261,16 @@ interface MapMetadataCardProps {
   label: string
   value: string
   icon: React.ElementType
+  compact?: boolean
 }
 
-function MapMetadataCard({ label, value, icon: Icon }: MapMetadataCardProps) {
+function MapMetadataCard({ label, value, icon: Icon, compact = false }: MapMetadataCardProps) {
   return (
     <Card className="bg-card border-border">
-      <CardContent className="p-4">
+      <CardContent className={compact ? "p-3" : "p-4"}>
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-lg bg-secondary">
-            <Icon className="h-4 w-4 text-primary" />
+            <Icon className={compact ? "h-3.5 w-3.5 text-primary" : "h-4 w-4 text-primary"} />
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{label}</p>
@@ -677,70 +679,117 @@ export default function MapDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Coming soon notice */}
-            <Card className="bg-blue-500/10 border-blue-500/30 mt-4">
-              <CardContent className="p-4">
-                <div className="flex items-start gap-3">
-                  <Info className="h-5 w-5 text-blue-400 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-blue-400">실시간 기능 준비 중</p>
-                    <p className="text-xs text-blue-400/80 mt-1">
-                      실시간 로봇 위치 추적, 경로 확인, 수동 조작 기능을 곧 추가할 예정입니다.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Coming soon notice removed per request */}
           </div>
 
           {/* Sidebar - metadata and detection points */}
           <div className="space-y-4">
-            {/* Map metadata */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium text-muted-foreground px-1">지도 정보</h3>
-              {currentMap && (
-                <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 w-fit">
-                  현재 지도
-                </Badge>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
-                <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} />
-                <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} />
-                <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
-                <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} />
-                <MapMetadataCard
-                  label="탐지 지점"
-                  value={detectionsLoading ? "-" : recentDetections.length ? `${recentDetections.length}개` : "-"}
-                  icon={Bug}
-                />
-              </div>
+            {/* Mobile: accordion */}
+            <div className="lg:hidden">
+              <Accordion type="multiple" defaultValue={["info"]} className="space-y-2">
+                <AccordionItem value="info">
+                  <AccordionTrigger>지도 정보</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="flex gap-3 overflow-x-auto pb-2">
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} compact />
+                      </div>
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} compact />
+                      </div>
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} compact />
+                      </div>
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} compact />
+                      </div>
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard
+                          label="탐지 지점"
+                          value={detectionsLoading ? "-" : recentDetections.length ? `${recentDetections.length}개` : "-"}
+                          icon={Bug}
+                          compact
+                        />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="detections">
+                  <AccordionTrigger>탐지 지점 목록</AccordionTrigger>
+                  <AccordionContent>
+                    <Card className="bg-card border-border">
+                      <CardContent className="p-0">
+                        {detectionsError && (
+                          <div className="p-4">
+                            <Alert variant="destructive">
+                              <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
+                              <AlertDescription>{detectionsError}</AlertDescription>
+                            </Alert>
+                          </div>
+                        )}
+                        <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
+                          {detectionsLoading ? (
+                            <div className="p-4 text-sm text-muted-foreground">불러오는 중...</div>
+                          ) : detectionPoints.length === 0 ? (
+                            <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
+                          ) : (
+                            detectionPoints.map((point) => <DetectionPointItem key={point.id} {...point} />)
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
             </div>
 
-            {/* Detection points list */}
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">탐지 지점 목록</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {detectionsError && (
-                  <div className="p-4">
-                    <Alert variant="destructive">
-                      <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
-                      <AlertDescription>{detectionsError}</AlertDescription>
-                    </Alert>
-                  </div>
+            {/* Desktop */}
+            <div className="hidden lg:block space-y-4">
+              <div className="space-y-3">
+                <h3 className="text-sm font-medium text-muted-foreground px-1">지도 정보</h3>
+                {currentMap && (
+                  <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 w-fit">
+                    현재 지도
+                  </Badge>
                 )}
-                <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
-                  {detectionsLoading ? (
-                    <div className="p-4 text-sm text-muted-foreground">불러오는 중...</div>
-                  ) : detectionPoints.length === 0 ? (
-                    <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
-                  ) : (
-                    detectionPoints.map((point) => <DetectionPointItem key={point.id} {...point} />)
-                  )}
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+                  <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} />
+                  <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} />
+                  <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
+                  <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} />
+                  <MapMetadataCard
+                    label="탐지 지점"
+                    value={detectionsLoading ? "-" : recentDetections.length ? `${recentDetections.length}개` : "-"}
+                    icon={Bug}
+                  />
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+
+              <Card className="bg-card border-border">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">탐지 지점 목록</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {detectionsError && (
+                    <div className="p-4">
+                      <Alert variant="destructive">
+                        <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
+                        <AlertDescription>{detectionsError}</AlertDescription>
+                      </Alert>
+                    </div>
+                  )}
+                  <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
+                    {detectionsLoading ? (
+                      <div className="p-4 text-sm text-muted-foreground">불러오는 중...</div>
+                    ) : detectionPoints.length === 0 ? (
+                      <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
+                    ) : (
+                      detectionPoints.map((point) => <DetectionPointItem key={point.id} {...point} />)
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </div>
       </div>

@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Button } from "@/components/ui/button"
 import { useCarStatus } from "@/hooks/useCarStatus"
@@ -40,6 +41,7 @@ interface LiveCameraViewProps {
   manualDisabled: boolean
   onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
   onDriveStop: () => void
+  activeDriveCommand: "forward" | "backward" | "left" | "right" | "stop" | null
   wsUrl: string
   detectionWsUrl: string
   roomId: string
@@ -57,6 +59,7 @@ function LiveCameraView({
   manualDisabled,
   onDriveStart,
   onDriveStop,
+  activeDriveCommand,
   wsUrl,
   detectionWsUrl,
   roomId,
@@ -625,7 +628,7 @@ function LiveCameraView({
       )}
 
       {/* Top left badges */}
-      <div className="absolute top-4 left-4 z-40 flex flex-wrap items-center gap-2">
+      <div className="absolute top-3 left-3 z-40 flex flex-wrap items-center gap-2 sm:top-4 sm:left-4">
         <Badge
           className={
             showVideo ? "bg-red-500/90 text-white border-transparent" : "bg-muted/90 text-muted-foreground border-transparent"
@@ -658,7 +661,7 @@ function LiveCameraView({
       </div>
 
       {/* Top right badges */}
-      <div className="absolute top-4 right-4 z-40 flex items-center gap-2">
+      <div className="absolute top-3 right-3 z-40 flex items-center gap-2 sm:top-4 sm:right-4">
         {showVideo && (
           <>
             <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1">
@@ -673,22 +676,22 @@ function LiveCameraView({
       </div>
 
       {/* Bottom bar */}
-      <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-5">
+      <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5">
         <div className="flex items-end justify-between">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <div className={`h-2.5 w-2.5 rounded-full ${isDetecting ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
-              <span className={`text-sm font-medium ${isDetecting ? "text-emerald-400" : "text-amber-400"}`}>
+              <span className={`text-[11px] font-medium sm:text-sm ${isDetecting ? "text-emerald-400" : "text-amber-400"}`}>
                 {isDetecting ? "탐지 중" : "대기 중"}
               </span>
             </div>
-            <p className="text-xs text-white/60">마지막 탐지: {lastDetectionLabel}</p>
+            <p className="text-[10px] text-white/60 sm:text-xs">마지막 탐지: {lastDetectionLabel}</p>
           </div>
           <div className="text-right space-y-0.5">
-            <p className="text-xs text-white/80 font-mono">
+            <p className="text-[10px] text-white/80 font-mono sm:text-xs">
               {currentTime.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
             </p>
-            <p className="text-[10px] text-white/50 font-mono">{currentTime.toLocaleDateString("ko-KR")}</p>
+            <p className="text-[9px] text-white/50 font-mono sm:text-[10px]">{currentTime.toLocaleDateString("ko-KR")}</p>
           </div>
         </div>
       </div>
@@ -706,7 +709,7 @@ function LiveCameraView({
       )}
 
       {isManual && (
-        <div className="absolute bottom-16 right-3 z-40 select-none">
+        <div className="absolute bottom-16 right-3 z-40 hidden select-none sm:block">
           {/* Control pad container */}
           <div className="relative">
             {/* Background glow effect */}
@@ -724,11 +727,36 @@ function LiveCameraView({
                 <button
                   type="button"
                   disabled={manualDisabled}
-                  onPointerDown={() => onDriveStart("forward")}
-                  onPointerUp={onDriveStop}
-                  onPointerLeave={onDriveStop}
-                  onPointerCancel={onDriveStop}
-                  className="group h-7 w-7 rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 active:from-blue-500/50 active:to-blue-500/30 active:border-blue-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center"
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.setPointerCapture?.(e.pointerId)
+                    onDriveStart("forward")
+                  }}
+                  onPointerUp={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  onTouchEnd={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onTouchCancel={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onPointerLeave={(e) => {
+                    onDriveStop()
+                    e.currentTarget.blur()
+                  }}
+                  onPointerCancel={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
+                    activeDriveCommand === "forward" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
+                  }`}
                 >
                   <ArrowUp className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
                 </button>
@@ -739,33 +767,108 @@ function LiveCameraView({
                 <button
                   type="button"
                   disabled={manualDisabled}
-                  onPointerDown={() => onDriveStart("left")}
-                  onPointerUp={onDriveStop}
-                  onPointerLeave={onDriveStop}
-                  onPointerCancel={onDriveStop}
-                  className="group h-7 w-7 rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 active:from-blue-500/50 active:to-blue-500/30 active:border-blue-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center"
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.setPointerCapture?.(e.pointerId)
+                    onDriveStart("left")
+                  }}
+                  onPointerUp={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  onTouchEnd={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onTouchCancel={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onPointerLeave={(e) => {
+                    onDriveStop()
+                    e.currentTarget.blur()
+                  }}
+                  onPointerCancel={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
+                    activeDriveCommand === "left" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
+                  }`}
                 >
                   <ArrowLeft className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
                 </button>
                 <button
                   type="button"
                   disabled={manualDisabled}
-                  onPointerDown={() => onDriveStart("backward")}
-                  onPointerUp={onDriveStop}
-                  onPointerLeave={onDriveStop}
-                  onPointerCancel={onDriveStop}
-                  className="group h-7 w-7 rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 active:from-blue-500/50 active:to-blue-500/30 active:border-blue-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center"
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.setPointerCapture?.(e.pointerId)
+                    onDriveStart("backward")
+                  }}
+                  onPointerUp={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  onTouchEnd={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onTouchCancel={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onPointerLeave={(e) => {
+                    onDriveStop()
+                    e.currentTarget.blur()
+                  }}
+                  onPointerCancel={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
+                    activeDriveCommand === "backward" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
+                  }`}
                 >
                   <ArrowDown className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
                 </button>
                 <button
                   type="button"
                   disabled={manualDisabled}
-                  onPointerDown={() => onDriveStart("right")}
-                  onPointerUp={onDriveStop}
-                  onPointerLeave={onDriveStop}
-                  onPointerCancel={onDriveStop}
-                  className="group h-7 w-7 rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 active:from-blue-500/50 active:to-blue-500/30 active:border-blue-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center"
+                  onPointerDown={(e) => {
+                    e.preventDefault()
+                    e.currentTarget.setPointerCapture?.(e.pointerId)
+                    onDriveStart("right")
+                  }}
+                  onPointerUp={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  onTouchEnd={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onTouchCancel={(e) => {
+                    e.currentTarget.blur()
+                    onDriveStop()
+                  }}
+                  onPointerLeave={(e) => {
+                    onDriveStop()
+                    e.currentTarget.blur()
+                  }}
+                  onPointerCancel={(e) => {
+                    onDriveStop()
+                    e.currentTarget.releasePointerCapture?.(e.pointerId)
+                    e.currentTarget.blur()
+                  }}
+                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
+                    activeDriveCommand === "right" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
+                  }`}
                 >
                   <ArrowRight className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
                 </button>
@@ -785,6 +888,8 @@ interface ControlPanelProps {
   onChangeMode: (mode: "AUTO" | "MANUAL" | "STOP") => void
   onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
   onDriveStop: () => void
+  manualDisabled: boolean
+  activeDriveCommand: "forward" | "backward" | "left" | "right" | "stop" | null
   onStartMission: () => void
   onStopMission: () => void
   missionDisabled: boolean
@@ -810,6 +915,8 @@ function ControlPanel({
   onChangeMode,
   onDriveStart,
   onDriveStop,
+  manualDisabled,
+  activeDriveCommand,
   onStartMission,
   onStopMission,
   missionDisabled,
@@ -832,7 +939,7 @@ function ControlPanel({
 
   return (
     <Card className="bg-card border-border">
-      <CardContent className="space-y-5">
+      <CardContent className="space-y-4 sm:space-y-5">
         <div className="space-y-3">
           <p className="text-xs text-muted-foreground uppercase tracking-wide">주행 모드</p>
           <div className="grid grid-cols-3 gap-2">
@@ -861,6 +968,159 @@ function ControlPanel({
           {modeError && <p className="text-xs text-red-400">{modeError}</p>}
         </div>
 
+      {driveMode === "MANUAL" && (
+        <div className="space-y-2 sm:hidden">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">수동 조작</p>
+          <div className="grid grid-cols-3 gap-2 place-items-center">
+            <div />
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={manualDisabled}
+              onPointerDown={(e) => {
+                e.preventDefault()
+                e.currentTarget.setPointerCapture?.(e.pointerId)
+                onDriveStart("forward")
+              }}
+              onPointerUp={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              onTouchEnd={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onTouchCancel={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onPointerLeave={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
+              onPointerCancel={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
+            >
+              <ArrowUp className="h-4 w-4" />
+            </Button>
+            <div />
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={manualDisabled}
+              onPointerDown={(e) => {
+                e.preventDefault()
+                e.currentTarget.setPointerCapture?.(e.pointerId)
+                onDriveStart("left")
+              }}
+              onPointerUp={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              onTouchEnd={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onTouchCancel={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onPointerLeave={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
+              onPointerCancel={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
+            >
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={manualDisabled}
+              onPointerDown={(e) => {
+                e.preventDefault()
+                e.currentTarget.setPointerCapture?.(e.pointerId)
+                onDriveStart("backward")
+              }}
+              onPointerUp={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              onTouchEnd={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onTouchCancel={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onPointerLeave={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
+              onPointerCancel={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
+            >
+              <ArrowDown className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={manualDisabled}
+              onPointerDown={(e) => {
+                e.preventDefault()
+                e.currentTarget.setPointerCapture?.(e.pointerId)
+                onDriveStart("right")
+              }}
+              onPointerUp={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              onTouchEnd={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onTouchCancel={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
+              }}
+              onPointerLeave={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
+              onPointerCancel={(e) => {
+                onDriveStop()
+                e.currentTarget.releasePointerCapture?.(e.pointerId)
+                e.currentTarget.blur()
+              }}
+              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </Button>
+          </div>
+            {manualDisabled && (
+              <p className="text-[11px] text-muted-foreground">네트워크 연결 시 수동 조작이 활성화됩니다.</p>
+            )}
+          </div>
+        )}
+
         <div className="h-px bg-border" />
 
         <div className="space-y-3">
@@ -869,8 +1129,8 @@ function ControlPanel({
             <textarea
               value={missionInput}
               onChange={(e) => onMissionInputChange(e.target.value)}
-              rows={4}
-              className="w-full min-h-[120px] rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              rows={3}
+              className="w-full min-h-[88px] sm:min-h-[120px] rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               placeholder={`좌표를 줄마다 입력\n예시:\n12.3, 45.6\n14 48`}
             />
             <div className="flex flex-wrap items-center gap-2">
@@ -1267,6 +1527,7 @@ export default function CameraPage() {
   const [showOverlay, setShowOverlay] = useState(true)
   const [cameraConnected, setCameraConnected] = useState(false)
   const [driveMode, setDriveMode] = useState<"AUTO" | "MANUAL" | "STOP">("STOP")
+  const [activeDriveCommand, setActiveDriveCommand] = useState<"forward" | "backward" | "left" | "right" | "stop" | null>(null)
   const [modeError, setModeError] = useState<string | null>(null)
   const [missionInput, setMissionInput] = useState("")
   const [missionError, setMissionError] = useState<string | null>(null)
@@ -1658,6 +1919,7 @@ export default function CameraPage() {
   const handleDriveStart = (command: "forward" | "backward" | "left" | "right" | "stop") => {
     if (driveMode !== "MANUAL") return
     driveCommandRef.current = command
+    setActiveDriveCommand(command)
     if (driveTimerRef.current != null) {
       window.clearInterval(driveTimerRef.current)
       driveTimerRef.current = null
@@ -1671,6 +1933,7 @@ export default function CameraPage() {
 
   const handleDriveStop = () => {
     driveCommandRef.current = null
+    setActiveDriveCommand(null)
     if (driveTimerRef.current != null) {
       window.clearInterval(driveTimerRef.current)
       driveTimerRef.current = null
@@ -1685,6 +1948,27 @@ export default function CameraPage() {
       }
     }
   }, [])
+
+  React.useEffect(() => {
+    const handleGlobalStop = () => {
+      if (driveCommandRef.current) {
+        handleDriveStop()
+      }
+    }
+    window.addEventListener("pointerup", handleGlobalStop)
+    window.addEventListener("pointercancel", handleGlobalStop)
+    window.addEventListener("blur", handleGlobalStop)
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") handleGlobalStop()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    return () => {
+      window.removeEventListener("pointerup", handleGlobalStop)
+      window.removeEventListener("pointercancel", handleGlobalStop)
+      window.removeEventListener("blur", handleGlobalStop)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
+  }, [handleDriveStop])
 
   // Keyboard arrow key support for manual control
   React.useEffect(() => {
@@ -1707,6 +1991,7 @@ export default function CameraPage() {
       }
 
       driveCommandRef.current = command
+      setActiveDriveCommand(command)
       sendDriveCommand(command).catch(() => { })
 
       driveTimerRef.current = window.setInterval(() => {
@@ -1717,6 +2002,7 @@ export default function CameraPage() {
 
     const stopCommand = () => {
       driveCommandRef.current = null
+      setActiveDriveCommand(null)
       if (driveTimerRef.current != null) {
         window.clearInterval(driveTimerRef.current)
         driveTimerRef.current = null
@@ -1766,8 +2052,85 @@ export default function CameraPage() {
     }
   }, [driveMode, networkOnline, selectedCarId, sendDriveCommand])
 
+  const carSelectCard = (
+    <Card className="bg-card border-border">
+      <CardContent className="space-y-1.5 py-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">차량 선택</p>
+          {selectedCarId && (
+            <Badge variant="secondary" className="h-5 px-2 text-[10px]">
+              {selectedCarId}
+            </Badge>
+          )}
+        </div>
+        <Select
+          value={selectedCarId ? String(selectedCarId) : ""}
+          onValueChange={(value) => setSelectedCarId(Number(value))}
+        >
+          <SelectTrigger className="bg-input border-border">
+            <SelectValue placeholder={carsLoading ? "차량 로딩 중..." : "차량 선택"} />
+          </SelectTrigger>
+          <SelectContent>
+            {cars.map((c) => (
+              <SelectItem key={c.carId} value={String(c.carId)}>
+                {c.nickname} · {c.carId}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="min-h-[14px] text-[11px] text-muted-foreground">
+          {carsLoading ? "차량 목록 불러오는 중..." : "제어할 차량을 선택하세요."}
+        </p>
+        <p className="min-h-[14px] text-[11px] text-red-400">{carsError ?? ""}</p>
+      </CardContent>
+    </Card>
+  )
+
+  const carDetailCard = (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 정보</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {carDetailLoading ? (
+          <p className="text-xs text-muted-foreground">불러오는 중...</p>
+        ) : carDetail ? (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">닉네임</span>
+              <span className="font-medium text-foreground">{carDetail.nickname}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">디바이스 ID</span>
+              <span className="text-xs text-foreground font-mono">{carDetail.deviceId || "-"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">클레임 코드</span>
+              <span className="text-xs text-foreground font-mono">{carDetail.claimCode || "-"}</span>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">차량을 선택해 주세요.</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+
+  const statusCard = <RobotStatusPanel status={carStatus.data} isLoading={carStatus.isLoading} />
+  const statsCard = <DetectionStatsPanel stats={recentDetections.stats} isLoading={recentDetections.isLoading} />
+  const eventLogCard = (
+    <EventLog
+      detections={recentDetections.recentDetections}
+      isLoading={recentDetections.isLoading}
+      onSelect={(id) => {
+        window.location.href = `/dashboard?detectionId=${id}`
+      }}
+      baseUrl={baseUrl}
+    />
+  )
+
   return (
-    <div className="p-4 lg:p-6">
+    <div className="p-3 sm:p-4 lg:p-6">
       <div className="max-w-[1920px] mx-auto h-full">
         <div className="mb-4">
           <div>
@@ -1779,7 +2142,7 @@ export default function CameraPage() {
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
           <div className="flex-1">
             <div className="w-full">
-              <div className="relative w-full aspect-video max-h-[60vh] lg:max-h-[70vh]">
+              <div className="relative w-full aspect-video max-h-[45vh] sm:max-h-[55vh] lg:max-h-[70vh]">
                 <LiveCameraView
                   isOnline={carStatus.data?.isOnline ?? false}
                   networkOnline={networkOnline}
@@ -1790,6 +2153,7 @@ export default function CameraPage() {
                   manualDisabled={!networkOnline || carStatus.isLoading}
                   onDriveStart={handleDriveStart}
                   onDriveStop={handleDriveStop}
+                  activeDriveCommand={activeDriveCommand}
                   wsUrl={signalingUrl || "ws://I14B201.p.ssafy.io/ws/webrtc"}
                   detectionWsUrl={detectionWsUrl}
                   roomId={roomId}
@@ -1817,6 +2181,8 @@ export default function CameraPage() {
                 onDriveStop={handleDriveStop}
                 onStartMission={handleStartMission}
                 onStopMission={handleStopMission}
+                manualDisabled={!networkOnline || carStatus.isLoading}
+                activeDriveCommand={activeDriveCommand}
                 missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
                 missionStopDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO"}
                 missionInput={missionInput}
@@ -1836,75 +2202,38 @@ export default function CameraPage() {
           </div>
 
           <div className="w-full lg:w-80 xl:w-96 space-y-3">
-            <Card className="bg-card border-border">
-              <CardContent className="space-y-1.5 py-3">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">차량 선택</p>
-                  {selectedCarId && (
-                    <Badge variant="secondary" className="h-5 px-2 text-[10px]">
-                      {selectedCarId}
-                    </Badge>
-                  )}
-                </div>
-                <Select
-                  value={selectedCarId ? String(selectedCarId) : ""}
-                  onValueChange={(value) => setSelectedCarId(Number(value))}
-                >
-                  <SelectTrigger className="bg-input border-border">
-                    <SelectValue placeholder={carsLoading ? "차량 로딩 중..." : "차량 선택"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {cars.map((c) => (
-                      <SelectItem key={c.carId} value={String(c.carId)}>
-                        {c.nickname} · {c.carId}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="min-h-[14px] text-[11px] text-muted-foreground">
-                  {carsLoading ? "차량 목록 불러오는 중..." : "제어할 차량을 선택하세요."}
-                </p>
-                <p className="min-h-[14px] text-[11px] text-red-400">{carsError ?? ""}</p>
-              </CardContent>
-            </Card>
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 정보</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                {carDetailLoading ? (
-                  <p className="text-xs text-muted-foreground">불러오는 중...</p>
-                ) : carDetail ? (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">닉네임</span>
-                      <span className="font-medium text-foreground">{carDetail.nickname}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">디바이스 ID</span>
-                      <span className="text-xs text-foreground font-mono">{carDetail.deviceId || "-"}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-muted-foreground">클레임 코드</span>
-                      <span className="text-xs text-foreground font-mono">{carDetail.claimCode || "-"}</span>
-                    </div>
-                  </>
-                ) : (
-                  <p className="text-xs text-muted-foreground">차량을 선택해 주세요.</p>
-                )}
-              </CardContent>
-            </Card>
-            <RobotStatusPanel status={carStatus.data} isLoading={carStatus.isLoading} />
-            <DetectionStatsPanel stats={recentDetections.stats} isLoading={recentDetections.isLoading} />
+            <div className="lg:hidden space-y-3">
+              <Accordion type="multiple" defaultValue={["status"]} className="space-y-2">
+                <AccordionItem value="car">
+                  <AccordionTrigger>차량 선택</AccordionTrigger>
+                  <AccordionContent>{carSelectCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="detail">
+                  <AccordionTrigger>차량 정보</AccordionTrigger>
+                  <AccordionContent>{carDetailCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="status">
+                  <AccordionTrigger>차량 상태</AccordionTrigger>
+                  <AccordionContent>{statusCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="stats">
+                  <AccordionTrigger>탐지 통계</AccordionTrigger>
+                  <AccordionContent>{statsCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="log">
+                  <AccordionTrigger>탐지 로그</AccordionTrigger>
+                  <AccordionContent>{eventLogCard}</AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
 
-            <EventLog
-              detections={recentDetections.recentDetections}
-              isLoading={recentDetections.isLoading}
-              onSelect={(id) => {
-                window.location.href = `/dashboard?detectionId=${id}`
-              }}
-              baseUrl={baseUrl}
-            />
+            <div className="hidden lg:block space-y-3">
+              {carSelectCard}
+              {carDetailCard}
+              {statusCard}
+              {statsCard}
+              {eventLogCard}
+            </div>
           </div>
         </div>
       </div>

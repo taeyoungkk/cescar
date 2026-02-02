@@ -2,9 +2,12 @@ package com.ssafy.backend.domain.history.application;
 
 import com.ssafy.backend.domain.history.dao.DetectionRepository;
 import com.ssafy.backend.domain.history.domain.Detection;
+import com.ssafy.backend.domain.history.domain.LogStatus;
 import com.ssafy.backend.domain.history.dto.DetectionDetailResponse;
 import com.ssafy.backend.domain.history.dto.DetectionListItemResponse;
 import com.ssafy.backend.global.storage.StorageService;
+import com.ssafy.backend.domain.car.domain.Car;
+import com.ssafy.backend.domain.map.domain.SlamMap;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -13,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.math.BigDecimal;
 
 @Service
 @Transactional(readOnly = true)
@@ -41,6 +45,55 @@ public class DetectionHistoryService {
 
         return detectionRepository.findByCarLogId(logId, pageable)
                 .map(DetectionListItemResponse::from);
+    }
+
+    /**
+     * MQTT 수신 탐지 데이터를 DB에 저장
+     * - active CarLog가 없으면 currentMap 기준으로 자동 생성
+     * - map이 없으면 저장 스킵
+     */
+    @Transactional
+    public void saveFromMqtt(Car car,
+            String label,
+            Float confidence,
+            Double x,
+            Double y,
+            String imageUrl,
+            String videoUrl) {
+        if (car == null) {
+            return;
+        }
+        if (label == null || confidence == null || x == null || y == null) {
+            return;
+        }
+
+        com.ssafy.backend.domain.history.domain.CarLog carLog = carLogRepository
+                .findFirstByCarIdAndStatusOrderByStartAtDesc(car.getId(), LogStatus.RUNNING)
+                .orElseGet(() -> {
+                    SlamMap currentMap = car.getCurrentMap();
+                    if (currentMap == null) {
+                        return null;
+                    }
+                    com.ssafy.backend.domain.history.domain.CarLog newLog = com.ssafy.backend.domain.history.domain.CarLog
+                            .create(car, currentMap);
+                    return carLogRepository.save(newLog);
+                });
+
+        if (carLog == null) {
+            return;
+        }
+
+        Detection detection = Detection.create(
+                carLog,
+                label,
+                confidence,
+                BigDecimal.valueOf(x),
+                BigDecimal.valueOf(y),
+                imageUrl,
+                videoUrl);
+
+        detectionRepository.save(detection);
+        carLog.increaseDetectionCount();
     }
 
     /**

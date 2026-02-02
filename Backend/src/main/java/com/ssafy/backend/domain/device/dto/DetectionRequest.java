@@ -12,4 +12,9 @@ public class DetectionRequest {
     private String status;
     private String robot_id;
     private String note;
+    // MQTT 탐지 좌표 및 리소스 경로
+    private Double x;
+    private Double y;
+    private String imageUrl;
+    private String videoUrl;
 }

@@ -11,6 +11,7 @@ import com.ssafy.backend.domain.detection.ws.DetectionWsBroadcaster;
 import com.ssafy.backend.domain.device.dto.CarStatusMqttRequest;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
+import com.ssafy.backend.domain.history.application.DetectionHistoryService;
 import com.ssafy.backend.domain.notification.application.FcmService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpEntity;
@@ -42,6 +43,7 @@ public class MqttInboundService {
     private final CarRepository carRepository;
     private final CarStatusRepository carStatusRepository;
     private final DetectionWsBroadcaster detectionWsBroadcaster;
+    private final DetectionHistoryService detectionHistoryService;
     private final TransactionTemplate transactionTemplate;
 
     // 로봇 ID별 최신 상태/탐지 캐시
@@ -123,6 +125,16 @@ public class MqttInboundService {
         String body = String.format("%s detected (%.1f%%)", detect.getObject_type(), detect.getConfidence());
 
         Car car = carRepository.findByDeviceId(robotId).orElse(null);
+        if (car != null) {
+            detectionHistoryService.saveFromMqtt(
+                    car,
+                    detect.getObject_type(),
+                    detect.getConfidence() != null ? detect.getConfidence().floatValue() : null,
+                    detect.getX(),
+                    detect.getY(),
+                    detect.getImageUrl(),
+                    detect.getVideoUrl());
+        }
         if (car == null || car.getOwner() == null) {
             // 소유자 없으면 알림 스킵
             System.out.println("No owner for deviceId=" + robotId + ", skip FCM");

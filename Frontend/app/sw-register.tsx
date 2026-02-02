@@ -8,36 +8,76 @@ import { ToastAction } from "@/components/ui/toast"
 export function SwRegister() {
   const router = useRouter()
   const hasPromptedRef = useRef(false)
+  const hasAutoClearedRef = useRef(false)
 
   useEffect(() => {
-    // prod에서만
     if (process.env.NODE_ENV !== "production") return
     if (!("serviceWorker" in navigator)) return
+
+    const clearCaches = async () => {
+      if (!("caches" in window)) return
+      const keys = await caches.keys()
+      const targets = [
+        "workbox-precache",
+        "next-static",
+        "static-resources",
+        "images",
+        "pages",
+        "start-url",
+      ]
+      await Promise.all(
+        keys
+          .filter((key) => targets.some((prefix) => key.startsWith(prefix)))
+          .map((key) => caches.delete(key))
+      )
+    }
+
+    const clearCachesAndUnregister = async () => {
+      if (hasAutoClearedRef.current) return
+      hasAutoClearedRef.current = true
+      await clearCaches()
+      const regs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(regs.map((reg) => reg.unregister()))
+    }
+
+    const handlePrecacheError = () => {
+      clearCachesAndUnregister()
+        .catch(() => {})
+        .finally(() => window.location.reload())
+    }
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason
+      const message = typeof reason === "string" ? reason : reason?.message
+      if (!message) return
+      if (message.includes("bad-precaching-response")) {
+        handlePrecacheError()
+      }
+    }
+
+    window.addEventListener("unhandledrejection", handleRejection)
 
     const handleUpdate = (reg: ServiceWorkerRegistration) => {
       if (hasPromptedRef.current) return
       hasPromptedRef.current = true
 
-      const reload = () => {
-        window.location.reload()
-      }
-
       const waiting = reg.waiting
       toast({
-        title: "새 버전이 준비되었습니다",
-        description: "업데이트를 적용하려면 새로고침하세요.",
+        title: "Update ready",
+        description: "A new version is available.",
         action: (
           <ToastAction
-            altText="새로고침"
+            altText="Reload"
             onClick={() => {
               if (waiting) {
                 waiting.postMessage({ type: "SKIP_WAITING" })
+                clearCachesAndUnregister().finally(() => window.location.reload())
               } else {
-                reload()
+                window.location.reload()
               }
             }}
           >
-            새로고침
+            Reload
           </ToastAction>
         ),
       })
@@ -46,15 +86,13 @@ export function SwRegister() {
       navigator.serviceWorker.addEventListener("controllerchange", () => {
         if (refreshed) return
         refreshed = true
-        reload()
+        clearCachesAndUnregister().finally(() => window.location.reload())
       })
     }
 
     navigator.serviceWorker
-      .register("/sw.js", { scope: "/" })
+      .register("/sw.js", { scope: "/", updateViaCache: "none" })
       .then((reg) => {
-        console.log("[SW] registered", reg)
-
         if (reg.waiting && navigator.serviceWorker.controller) {
           handleUpdate(reg)
         }
@@ -73,18 +111,13 @@ export function SwRegister() {
         console.error("[SW] register failed", err)
       })
 
-    // 네트워크가 끊겼을 때: 현재 라우트가 서버 의존이면 offline로 유도
-    // - 단, 이미 렌더된 화면은 유지되므로 강제 이동은 최소화
     const handleOffline = () => {
-      // 지금 화면이 "사이트에 연결할 수 없음"으로 떨어지기 전에,
-      // 사용자가 새로고침/네비게이션 시도했을 때 offline 페이지로 유도하는 용도
-      // 여기서는 바로 push하지 않고, 필요한 화면에서 버튼/배너로 유도하는게 더 좋음.
-      // 우선은 가장 단순하게: 오프라인 되면 offline 페이지로 이동(원하면 완화 가능)
       router.push("/offline")
     }
 
     window.addEventListener("offline", handleOffline)
     return () => {
+      window.removeEventListener("unhandledrejection", handleRejection)
       window.removeEventListener("offline", handleOffline)
     }
   }, [router])

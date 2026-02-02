@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import React, { useCallback, useMemo, useRef, useState } from "react"
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   Wifi,
   WifiOff,
@@ -1034,6 +1034,100 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
     return `${baseUrl}${path}`
   }
 
+  function SnapshotPreview({ snapshotUrl }: { snapshotUrl: string }) {
+    const [open, setOpen] = useState(false)
+    const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+    const [loading, setLoading] = useState(false)
+
+    useEffect(() => {
+      if (!open || previewSrc) return
+      const controller = new AbortController()
+      const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
+      let objectUrl: string | null = null
+
+      setLoading(true)
+      fetch(snapshotUrl, {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        signal: controller.signal,
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error("snapshot fetch failed")
+          const blob = await res.blob()
+          objectUrl = URL.createObjectURL(blob)
+          setPreviewSrc(objectUrl)
+        })
+        .catch(() => {
+          setPreviewSrc(null)
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false)
+        })
+
+      return () => {
+        controller.abort()
+        setLoading(false)
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+      }
+    }, [open, previewSrc, snapshotUrl])
+
+    const handleOpenFull = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (previewSrc) {
+        window.open(previewSrc, "_blank", "noopener,noreferrer")
+        return
+      }
+
+      const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
+      try {
+        setLoading(true)
+        const res = await fetch(snapshotUrl, {
+          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        })
+        if (!res.ok) throw new Error("snapshot fetch failed")
+        const blob = await res.blob()
+        const objectUrl = URL.createObjectURL(blob)
+        window.open(objectUrl, "_blank", "noopener,noreferrer")
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    return (
+      <HoverCard open={open} onOpenChange={setOpen} openDelay={200}>
+        <HoverCardTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={(e) => {
+              e.stopPropagation()
+              setOpen((prev) => !prev)
+            }}
+          >
+            <Camera className="h-4 w-4" />
+          </Button>
+        </HoverCardTrigger>
+        <HoverCardContent className="w-48 p-2">
+          <div className="relative aspect-video overflow-hidden rounded-md border border-border bg-secondary/40">
+            {previewSrc ? (
+              <img src={previewSrc} alt="snapshot preview" className="h-full w-full object-cover" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                {loading ? "불러오는 중..." : "미리보기 없음"}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 flex items-center justify-end">
+            <Button variant="outline" size="sm" onClick={handleOpenFull} disabled={loading}>
+              사진 보기
+            </Button>
+          </div>
+        </HoverCardContent>
+      </HoverCard>
+    )
+  }
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-3">
@@ -1060,8 +1154,7 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
               return (
                 <div
                 key={event.id}
-                className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors cursor-pointer"
-                onClick={() => onSelect(event.id)}
+                className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors"
               >
                 <div className="flex items-center gap-2.5">
                   <Clock className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1069,39 +1162,19 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
                 </div>
                 <div className="flex items-center gap-2">
                   {snapshotUrl && (
-                    <HoverCard openDelay={200}>
-                      <HoverCardTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={(e) => {
-                            e.stopPropagation()
-                          }}
-                        >
-                          <Camera className="h-4 w-4" />
-                        </Button>
-                      </HoverCardTrigger>
-                      <HoverCardContent className="w-48 p-2">
-                        <div className="relative aspect-video overflow-hidden rounded-md border border-border bg-secondary/40">
-                          <img src={snapshotUrl} alt="snapshot preview" className="h-full w-full object-cover" />
-                        </div>
-                        <div className="mt-2 flex items-center justify-end">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              window.open(snapshotUrl, "_blank")
-                            }}
-                          >
-                            사진 보기
-                          </Button>
-                        </div>
-                      </HoverCardContent>
-                    </HoverCard>
+                    <SnapshotPreview snapshotUrl={snapshotUrl} />
                   )}
-                  <span className="text-sm text-foreground">{typeLabels[event.type] || event.type}</span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-sm text-foreground"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onSelect(event.id)
+                    }}
+                  >
+                    {typeLabels[event.type] || event.type}
+                  </Button>
                 </div>
               </div>
               )

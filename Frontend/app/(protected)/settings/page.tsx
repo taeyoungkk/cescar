@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import React from "react"
 import { useRouter } from "next/navigation"
@@ -38,6 +38,7 @@ export default function SettingsPage() {
     confirmPassword: "",
   })
   const [savingPassword, setSavingPassword] = React.useState(false)
+  const [withdrawPassword, setWithdrawPassword] = React.useState("")
 
   React.useEffect(() => {
     if (user) {
@@ -72,7 +73,7 @@ export default function SettingsPage() {
 
   const onChangePassword = async () => {
     if (!passwords.currentPassword || !passwords.newPassword) {
-      toast({ title: "입력 필요", description: "현재 비밀번호와 새 비밀번호를 입력해 주세요." })
+      toast({ title: "입력 필요", description: "현재 비밀번호와 새 비밀번호를 입력해주세요." })
       return
     }
     if (passwords.newPassword !== passwords.confirmPassword) {
@@ -96,12 +97,19 @@ export default function SettingsPage() {
   }
 
   const onDeleteAccount = async () => {
+    if (!withdrawPassword.trim()) {
+      toast({ title: "입력 필요", description: "비밀번호를 입력해주세요." })
+      return
+    }
+
     try {
-      await authApi.deleteMe()
+      await authApi.deleteMe({ password: withdrawPassword })
       await logout()
       router.push("/")
     } catch (e: any) {
       toast({ title: "탈퇴 실패", description: e?.message ?? "회원 탈퇴에 실패했습니다." })
+    } finally {
+      setWithdrawPassword("")
     }
   }
 
@@ -202,6 +210,15 @@ export default function SettingsPage() {
                     탈퇴하면 계정과 연결된 차량 연동이 해제됩니다. 이 작업은 되돌릴 수 없습니다.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground">비밀번호 확인</p>
+                  <Input
+                    type="password"
+                    value={withdrawPassword}
+                    onChange={(e) => setWithdrawPassword(e.target.value)}
+                    className="bg-input border-border"
+                  />
+                </div>
                 <AlertDialogFooter>
                   <AlertDialogCancel>취소</AlertDialogCancel>
                   <AlertDialogAction onClick={onDeleteAccount}>탈퇴</AlertDialogAction>

@@ -128,6 +128,9 @@ export async function updatePassword(request: { currentPassword: string; newPass
   })
 }
 
-export async function deleteMe(): Promise<void> {
-  await apiFetch<any>("/api/members/me", { method: "DELETE" })
+export async function deleteMe(request: { password: string }): Promise<void> {
+  await apiFetch<any>("/api/members/me", {
+    method: "DELETE",
+    body: JSON.stringify(request),
+  })
 }

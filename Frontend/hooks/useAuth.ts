@@ -40,11 +40,6 @@ export function useAuth(): UseAuthReturn {
     checkAuth()
   }, [])
 
-  useEffect(() => {
-    if (!user) return
-    registerFcmToken({ requestPermission: false }).catch(() => {})
-  }, [user?.id])
-
   const login = useCallback(
     async (request: LoginRequest): Promise<boolean> => {
       setIsLoading(true)

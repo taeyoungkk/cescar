@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -49,6 +50,15 @@ public class SlamMapService {
         car.updateCurrentMap(savedMap);
 
         return toMapDetailResponse(savedMap);
+    }
+
+    @Transactional
+    public SlamMapResponse.MapGenerateResponse generateMap(Long carId, Long memberId,
+                                                           SlamMapRequest.GenerateRequest request) {
+        getOwnedCar(carId, memberId);
+
+        String requestId = UUID.randomUUID().toString();
+        return new SlamMapResponse.MapGenerateResponse(requestId, "queued");
     }
 
     public List<SlamMapResponse.MapListResponse> getMapList(Long carId, Long memberId) {

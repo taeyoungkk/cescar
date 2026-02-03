@@ -52,6 +52,14 @@ public class SlamMapResponse {
     }
 
     /**
+     * 지도 생성 응답
+     */
+    public record MapGenerateResponse(
+            String requestId,
+            String status) {
+    }
+
+    /**
      * 공통 성공 응답
      */
     public record SuccessResponse(

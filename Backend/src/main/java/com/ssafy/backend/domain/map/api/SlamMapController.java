@@ -44,6 +44,24 @@ public class SlamMapController {
     }
 
     /**
+     * 지도 생성 요청 API
+     */
+    @Operation(summary = "지도 생성 요청", description = "지도 생성 요청을 큐에 등록합니다.")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "요청 접수"),
+            @ApiResponse(responseCode = "403", description = "권한 없음"),
+            @ApiResponse(responseCode = "404", description = "차량 없음")
+    })
+    @PostMapping("/generate")
+    public ResponseEntity<SlamMapResponse.MapGenerateResponse> generateMap(
+            @Parameter(hidden = true) @AuthenticationPrincipal Long memberId,
+            @Parameter(description = "차량 ID", required = true) @PathVariable Long carId,
+            @Valid @RequestBody SlamMapRequest.GenerateRequest request) {
+        SlamMapResponse.MapGenerateResponse response = slamMapService.generateMap(carId, memberId, request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
      * 2️⃣ 지도 목록 조회 API
      * - 삭제되지 않은 지도 목록 최신순 제공
      */

@@ -106,7 +106,7 @@ async def lifespan(app: FastAPI):
     # Startup: YOLO 모델 로드
     print("[*] Loading YOLO model...")
     if yolo_service.load_model():
-        print("[*] YOLO model loaded successfully")
+        print(f"[*] YOLO model loaded successfully on {yolo_service.device}")
     else:
         print("[!] YOLO model loading failed - detection will not work")
     

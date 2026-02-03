@@ -15,7 +15,7 @@ services:
     image: emqx/emqx:5.4.1 # 최신 안정화 버전
     container_name: emqx_broker
     ports:
-      - "1883:1883"       # MQTT 프로토콜 포트
+      - "8085:1883"       # MQTT 프로토콜 포트
       - "8083:8083"       # WebSocket 포트
       - "8084:8084"       # WSS (Secure WebSocket) 포트
       - "8883:8883"       # MQTT over SSL 포트

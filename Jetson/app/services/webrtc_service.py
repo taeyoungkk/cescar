@@ -50,6 +50,10 @@ class WebRTCConfig:
     bitrate_kbps: int = 1200
     keyint: int = 30
     stun_server: str = "stun://stun.l.google.com:19302"
+    # TURN 서버 설정 (Metered.ca Open Relay - 무료 공개 TURN)
+    turn_server: str = "turn://openrelay.metered.ca:80"
+    turn_username: str = "openrelayproject"
+    turn_password: str = "openrelayproject"
     # 재연결 설정
     reconnect_enabled: bool = True
     reconnect_delay_sec: float = 3.0
@@ -677,6 +681,14 @@ class WebRTCService:
 
         # STUN 서버 설정
         webrtc.set_property("stun-server", cfg.stun_server)
+        
+        # TURN 서버 설정 (NAT/방화벽 통과를 위해 필요)
+        # turn://username:password@host:port 형식도 가능하지만
+        # GStreamer webrtcbin은 별도 property로 설정
+        turn_uri = f"turn://{cfg.turn_username}:{cfg.turn_password}@openrelay.metered.ca:80"
+        webrtc.set_property("turn-server", turn_uri)
+        logger.info(f"ICE servers configured: STUN={cfg.stun_server}, TURN=openrelay.metered.ca:80")
+        
         webrtc.set_property("bundle-policy", 3)  # max-bundle
 
         # 파이프라인에 요소 추가

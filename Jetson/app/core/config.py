@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     GCS_BUCKET_NAME: str = ""
     GOOGLE_CLOUD_PROJECT: str = ""
     GOOGLE_APPLICATION_CREDENTIALS: str = ""
+    ENABLE_CLOUD_UPLOAD: bool = False
     
     # YOLO Model Settings
     YOLO_MODEL_PATH: str = "models/one_class_nano.pt"

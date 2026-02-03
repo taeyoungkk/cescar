@@ -58,6 +58,11 @@ class StorageService:
         if destination_name is None:
             destination_name = os.path.basename(file_path)
 
+        # 업로드 설정 확인
+        if not settings.ENABLE_CLOUD_UPLOAD:
+            logger.info(f"🚧 [UPLOAD SKIPPED] ENABLE_CLOUD_UPLOAD=False in .env. File: {os.path.basename(file_path)}")
+            return "http://skipped-upload"  # 또는 None (프론트 처리에 따라 결정)
+
         # GCS 내 경로 설정 (예: robot_id/파일명)
         blob_path = f"{settings.ROBOT_ID}/{destination_name}"
 

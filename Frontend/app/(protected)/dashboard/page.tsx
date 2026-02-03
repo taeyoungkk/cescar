@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  TrendingUp,
   BarChart3,
   X,
   Camera,
@@ -98,14 +97,14 @@ function StatsSection({ stats, isLoading }: StatsSectionProps) {
     return (
       <>
         <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
-          {[...Array(4)].map((_, i) => (
+          {[...Array(3)].map((_, i) => (
             <Card key={i} className="bg-card border-border min-w-[140px]">
               <CardContent className="p-3 h-20 animate-pulse bg-secondary/20" />
             </Card>
           ))}
         </div>
-        <div className="hidden lg:grid grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
+        <div className="hidden lg:grid grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
             <Card key={i} className="bg-card border-border">
               <CardContent className="p-4 h-24 animate-pulse bg-secondary/20" />
             </Card>
@@ -125,27 +124,12 @@ function StatsSection({ stats, isLoading }: StatsSectionProps) {
           <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" compact />
         </div>
         <div className="min-w-[120px]">
-          <SummaryCard
-            title="오탐률"
-            value={`${stats.falseAlarmRate}%`}
-            icon={TrendingUp}
-            variant={stats.falseAlarmRate > 15 ? "warning" : "success"}
-            compact
-          />
-        </div>
-        <div className="min-w-[120px]">
           <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" compact />
         </div>
       </div>
-      <div className="hidden lg:grid grid-cols-4 gap-4">
+      <div className="hidden lg:grid grid-cols-3 gap-4">
         <SummaryCard title="오늘 탐지" value={stats.todayCount} icon={Bug} subtitle="건" />
         <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" />
-        <SummaryCard
-          title="오탐률"
-          value={`${stats.falseAlarmRate}%`}
-          icon={TrendingUp}
-          variant={stats.falseAlarmRate > 15 ? "warning" : "success"}
-        />
         <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" />
       </div>
     </>
@@ -983,6 +967,9 @@ function DashboardContent() {
               }}
               onPointerDown={(e) => e.currentTarget.blur()}
               onPointerUp={(e) => e.currentTarget.blur()}
+              onPointerCancel={(e) => e.currentTarget.blur()}
+              onMouseUp={(e) => e.currentTarget.blur()}
+              onTouchEnd={(e) => e.currentTarget.blur()}
               className="text-xs h-8 px-2 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
             >
               <X className="h-3 w-3 mr-1" />
@@ -1031,7 +1018,7 @@ function DashboardContent() {
                     onStartDateChange={(date) => setFilters({ ...filters, dateFrom: date })}
                     onEndDateChange={(date) => setFilters({ ...filters, dateTo: date })}
                   />
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <Select
                       value={mapFilter}
                       onValueChange={(value) => {
@@ -1040,7 +1027,7 @@ function DashboardContent() {
                       }}
                       disabled={useSearch || mapOptions.length === 0}
                     >
-                      <SelectTrigger className="bg-input border-border h-8 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
                         <MapIcon className="hidden sm:inline-block h-4 w-4 mr-2 text-muted-foreground" />
                         <SelectValue placeholder="지도" />
                       </SelectTrigger>
@@ -1058,7 +1045,7 @@ function DashboardContent() {
                       onValueChange={(value) => setLogSort(value as "desc" | "asc")}
                       disabled={useSearch || sortedLogs.length === 0}
                     >
-                      <SelectTrigger className="bg-input border-border h-8 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
                         <SelectValue placeholder="정렬" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1070,7 +1057,7 @@ function DashboardContent() {
                       value={filters.type || "all"}
                       onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
                     >
-                      <SelectTrigger className="bg-input border-border h-8 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
                         <Filter className="hidden sm:inline-block h-4 w-4 mr-2 text-muted-foreground" />
                         <SelectValue placeholder="유형" />
                       </SelectTrigger>
@@ -1088,7 +1075,7 @@ function DashboardContent() {
                       value={filters.status || "all"}
                       onValueChange={(value) => setFilters({ ...filters, status: value as DetectionStatus | "all" })}
                     >
-                      <SelectTrigger className="bg-input border-border h-8 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
                         <SelectValue placeholder="상태" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1137,6 +1124,9 @@ function DashboardContent() {
                       }}
                       onPointerDown={(e) => e.currentTarget.blur()}
                       onPointerUp={(e) => e.currentTarget.blur()}
+                      onPointerCancel={(e) => e.currentTarget.blur()}
+                      onMouseUp={(e) => e.currentTarget.blur()}
+                      onTouchEnd={(e) => e.currentTarget.blur()}
                       className="text-xs h-8 px-2 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
                     >
                       <X className="h-3 w-3 mr-1" />

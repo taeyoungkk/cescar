@@ -333,7 +333,16 @@ function LiveCameraView({
   const ICE_SERVERS: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    // TURN ?덉쑝硫??ш린??異붽?
+    {
+      urls: "turn:openrelay.metered.ca:80",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    },
+    {
+      urls: "turn:openrelay.metered.ca:443",
+      username: "openrelayproject",
+      credential: "openrelayproject"
+    }
   ]
 
   const send = (msg: any) => {
@@ -987,6 +996,10 @@ function ControlPanel({
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
               }}
+              onMouseUp={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
               onTouchEnd={(e) => {
                 e.currentTarget.blur()
                 onDriveStop()
@@ -1003,6 +1016,10 @@ function ControlPanel({
                 onDriveStop()
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
+              }}
+              onClick={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
               }}
               className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
             >
@@ -1023,6 +1040,10 @@ function ControlPanel({
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
               }}
+              onMouseUp={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
               onTouchEnd={(e) => {
                 e.currentTarget.blur()
                 onDriveStop()
@@ -1039,6 +1060,10 @@ function ControlPanel({
                 onDriveStop()
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
+              }}
+              onClick={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
               }}
               className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
             >
@@ -1058,6 +1083,10 @@ function ControlPanel({
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
               }}
+              onMouseUp={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
               onTouchEnd={(e) => {
                 e.currentTarget.blur()
                 onDriveStop()
@@ -1074,6 +1103,10 @@ function ControlPanel({
                 onDriveStop()
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
+              }}
+              onClick={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
               }}
               className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
             >
@@ -1093,6 +1126,10 @@ function ControlPanel({
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
               }}
+              onMouseUp={(e) => {
+                onDriveStop()
+                e.currentTarget.blur()
+              }}
               onTouchEnd={(e) => {
                 e.currentTarget.blur()
                 onDriveStop()
@@ -1109,6 +1146,10 @@ function ControlPanel({
                 onDriveStop()
                 e.currentTarget.releasePointerCapture?.(e.pointerId)
                 e.currentTarget.blur()
+              }}
+              onClick={(e) => {
+                e.currentTarget.blur()
+                onDriveStop()
               }}
               className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
             >

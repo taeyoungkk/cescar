@@ -19,6 +19,7 @@ export interface AuthResponse {
 
 export interface SignupRequest {
   name: string
+  nickname: string
   email: string
   password: string
 }

@@ -32,4 +32,11 @@ public class SlamMapRequest {
     public record SetCurrentRequest(
             @NotNull(message = "지도 ID는 필수입니다.") Long mapId) {
     }
+
+    /**
+     * 지도 생성 요청 (POST /api/cars/{carId}/maps/generate)
+     */
+    public record GenerateRequest(
+            String name) {
+    }
 }

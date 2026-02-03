@@ -9,13 +9,20 @@ import com.ssafy.backend.domain.map.dto.SlamMapResponse;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
 import com.ssafy.backend.global.storage.StorageService;
+import com.ssafy.backend.infrastructure.mqtt.MqttGateway;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -26,6 +33,8 @@ public class SlamMapService {
     private final CarRepository carRepository;
     private final SlamMapRepository slamMapRepository;
     private final StorageService storageService;
+    private final MqttGateway mqttGateway;
+    private final ObjectMapper objectMapper;
 
     @Value("${storage.signed-url-ttl}")
     private Duration signedUrlTtl;
@@ -49,6 +58,56 @@ public class SlamMapService {
         car.updateCurrentMap(savedMap);
 
         return toMapDetailResponse(savedMap);
+    }
+
+    @Transactional
+    public SlamMapResponse.MapGenerateResponse generateMap(Long carId, Long memberId,
+                                                           SlamMapRequest.GenerateRequest request) {
+        Car car = getOwnedCar(carId, memberId);
+
+        String requestId = UUID.randomUUID().toString();
+        String name = request.name();
+        if (name == null || name.isBlank()) {
+            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmm"));
+            name = "map_" + timestamp;
+        }
+
+        try {
+            Map<String, String> payload = new HashMap<>();
+            payload.put("requestId", requestId);
+            payload.put("name", name);
+
+            String jsonPayload = objectMapper.writeValueAsString(payload);
+            String topic = "robot/" + car.getDeviceId() + "/map_generate";
+            mqttGateway.sendToMqtt(jsonPayload, topic);
+        } catch (Exception e) {
+            throw new CustomException(ErrorCode.INTERNAL_SERVER_ERROR);
+        }
+
+        return new SlamMapResponse.MapGenerateResponse(requestId, "queued");
+    }
+
+    @Transactional
+    public boolean saveMapFromResult(String deviceId, com.ssafy.backend.domain.device.dto.MapResultRequest result) {
+        Car car = carRepository.findByDeviceId(deviceId).orElse(null);
+        if (car == null) {
+            return false;
+        }
+
+        SlamMap map = SlamMap.create(
+                car,
+                result.getName(),
+                result.getImageUrl(),
+                result.getWidth(),
+                result.getHeight(),
+                result.getResolution(),
+                result.getOriginX(),
+                result.getOriginY()
+        );
+
+        SlamMap savedMap = slamMapRepository.save(map);
+        car.updateCurrentMap(savedMap);
+        return true;
     }
 
     public List<SlamMapResponse.MapListResponse> getMapList(Long carId, Long memberId) {

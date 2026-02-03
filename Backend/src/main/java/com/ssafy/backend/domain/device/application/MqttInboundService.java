@@ -12,7 +12,9 @@ import com.ssafy.backend.domain.detection.ws.DetectionWsBroadcaster;
 import com.ssafy.backend.domain.device.dto.CarStatusMqttRequest;
 import com.ssafy.backend.domain.device.dto.DetectionRequest;
 import com.ssafy.backend.domain.device.dto.DeviceStatusRequest;
+import com.ssafy.backend.domain.device.dto.MapResultRequest;
 import com.ssafy.backend.domain.history.application.DetectionHistoryService;
+import com.ssafy.backend.domain.map.application.SlamMapService;
 import com.ssafy.backend.domain.notification.application.FcmService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpEntity;
@@ -30,6 +32,7 @@ import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
@@ -46,6 +49,7 @@ public class MqttInboundService {
     private final CarStatusWsBroadcaster carStatusWsBroadcaster;
     private final DetectionWsBroadcaster detectionWsBroadcaster;
     private final DetectionHistoryService detectionHistoryService;
+    private final SlamMapService slamMapService;
     private final TransactionTemplate transactionTemplate;
 
     // 로봇 ID별 최신 상태/탐지 캐시
@@ -53,6 +57,7 @@ public class MqttInboundService {
     private final Map<String, DetectionRequest> detectionCache = new ConcurrentHashMap<>();
     private final Map<String, CarStatusMqttRequest> carStatusCache = new ConcurrentHashMap<>();
     private final Map<String, CarStatusSnapshot> carStatusSnapshots = new ConcurrentHashMap<>();
+    private final Set<String> mapResultProcessed = ConcurrentHashMap.newKeySet();
 
     @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleDeviceStatus(Message<byte[]> message) {
@@ -92,6 +97,10 @@ public class MqttInboundService {
                 case "car_status":
                     CarStatusMqttRequest carStatusDto = objectMapper.readValue(payload, CarStatusMqttRequest.class);
                     handleCarStatus(robotId, carStatusDto, payload);
+                    break;
+                case "map_result":
+                    MapResultRequest mapResultDto = objectMapper.readValue(payload, MapResultRequest.class);
+                    handleMapResult(robotId, mapResultDto);
                     break;
                 default:
                     // 알 수 없는 command는 로그만 남김
@@ -222,6 +231,60 @@ public class MqttInboundService {
 
             carStatusSnapshots.put(robotId, new CarStatusSnapshot(x, y,
                     newMode != null ? newMode : (snapshot != null ? snapshot.mode : null), now));
+        }
+    }
+
+    private void handleMapResult(String robotId, MapResultRequest result) {
+        if (result == null) {
+            return;
+        }
+
+        String requestId = result.getRequestId();
+        boolean reserved = false;
+        if (requestId != null && !requestId.isBlank()) {
+            reserved = mapResultProcessed.add(requestId);
+            if (!reserved) {
+                System.out.println("[MQTT][map_result] duplicate requestId=" + requestId);
+                return;
+            }
+        }
+
+        try {
+            if (result.getStatus() == null || !"success".equalsIgnoreCase(result.getStatus())) {
+                System.out.println("[MQTT][map_result] failed requestId=" + requestId
+                        + " status=" + result.getStatus()
+                        + " code=" + result.getErrorCode()
+                        + " message=" + result.getErrorMessage());
+                if (reserved) {
+                    mapResultProcessed.remove(requestId);
+                }
+                return;
+            }
+
+            if (result.getName() == null || result.getName().isBlank()
+                    || result.getImageUrl() == null || result.getImageUrl().isBlank()
+                    || result.getWidth() == null || result.getHeight() == null
+                    || result.getResolution() == null
+                    || result.getOriginX() == null || result.getOriginY() == null) {
+                System.out.println("[MQTT][map_result] invalid payload requestId=" + requestId);
+                if (reserved) {
+                    mapResultProcessed.remove(requestId);
+                }
+                return;
+            }
+
+            boolean saved = slamMapService.saveMapFromResult(robotId, result);
+            if (!saved) {
+                System.out.println("[MQTT][map_result] car not found for deviceId=" + robotId);
+                if (reserved) {
+                    mapResultProcessed.remove(requestId);
+                }
+            }
+        } catch (Exception e) {
+            if (reserved) {
+                mapResultProcessed.remove(requestId);
+            }
+            System.err.println("[MQTT][map_result] 처리 실패: " + e.getMessage());
         }
     }
 

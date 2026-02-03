@@ -6,6 +6,7 @@ YOLO 모델을 로드하고 프레임에서 객체를 탐지하는 서비스
 
 import logging
 from typing import Optional
+import torch
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class YoloService:
         self.model = None
         self.confidence_threshold = settings.YOLO_CONFIDENCE_THRESHOLD
         self._is_loaded = False
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     def load_model(self) -> bool:
         """
@@ -29,11 +31,13 @@ class YoloService:
             
             model_path = settings.YOLO_MODEL_PATH
             logger.info(f"Loading YOLO model from: {model_path}")
+            logger.info(f"🖥️ Using device: {self.device} (CUDA available: {torch.cuda.is_available()})")
             
             self.model = YOLO(model_path)
+            self.model.to(self.device)
             self._is_loaded = True
             
-            logger.info("✅ YOLO model loaded successfully")
+            logger.info(f"✅ YOLO model loaded successfully on {self.device}")
             return True
             
         except ImportError:

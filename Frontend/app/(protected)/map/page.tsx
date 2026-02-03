@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import debounce from "lodash.debounce"
 import {
   ArrowLeft,
   Map,
@@ -259,7 +260,7 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
 
 interface MapMetadataCardProps {
   label: string
-  value: string
+  value: React.ReactNode
   icon: React.ElementType
   compact?: boolean
 }
@@ -274,7 +275,7 @@ function MapMetadataCard({ label, value, icon: Icon, compact = false }: MapMetad
           </div>
           <div>
             <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="text-sm font-medium text-foreground">{value}</p>
+            <div className="text-sm font-medium text-foreground">{value}</div>
           </div>
         </div>
       </CardContent>
@@ -339,6 +340,29 @@ function formatDateLabel(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString("ko-KR")
+}
+
+function formatDateParts(value?: string | null) {
+  if (!value) return { date: "-", time: "-" }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return { date: value, time: "-" }
+  const yyyy = date.getFullYear()
+  const mm = String(date.getMonth() + 1).padStart(2, "0")
+  const dd = String(date.getDate()).padStart(2, "0")
+  return {
+    date: `${yyyy}-${mm}-${dd}`,
+    time: date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true }),
+  }
+}
+
+function renderDateTime(value?: string | null) {
+  const parts = formatDateParts(value)
+  return (
+    <div className="space-y-0.5">
+      <p className="text-sm font-medium text-foreground">{parts.date}</p>
+      <p className="text-[11px] text-muted-foreground">{parts.time}</p>
+    </div>
+  )
 }
 function MapHistoryDialog({
   maps,
@@ -429,12 +453,41 @@ export default function MapDetailPage() {
   const { maps, currentMap, isLoading, refresh, selectMap, deleteMap, renameMap, error: mapsError } = useCarMaps(carId)
   const { recentDetections, isLoading: detectionsLoading, error: detectionsError } = useRecentDetections(carId, 20)
   const { toast } = useToast()
+  const debouncedRefresh = useMemo(() => debounce(() => refresh(), 500, { leading: true, trailing: false }), [refresh])
 
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState("")
   const [renaming, setRenaming] = useState(false)
 
   const mapStatus: MapStatus = currentMap ? "completed" : "no_map"
+
+  useEffect(() => {
+    return () => {
+      debouncedRefresh.cancel()
+    }
+  }, [debouncedRefresh])
+
+  if (!carId) {
+    return (
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="max-w-3xl mx-auto">
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base font-medium">등록된 차량이 없습니다</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                차량을 등록하면 지도와 탐지 기록을 확인할 수 있습니다.
+              </p>
+              <Link href="/home">
+                <Button size="sm">차량 등록하러 가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
 
   const handleSelectMap = useCallback(async (mapId: string) => {
     await selectMap(Number(mapId))
@@ -667,7 +720,7 @@ export default function MapDetailPage() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
-                    <Button variant="outline" size="sm" className="bg-transparent" onClick={refresh} disabled={isLoading}>
+                    <Button variant="outline" size="sm" className="bg-transparent" onClick={debouncedRefresh} disabled={isLoading}>
                       <RefreshCw className="h-4 w-4 sm:mr-1" />
                       <span className="hidden sm:inline">새로고침</span>
                     </Button>
@@ -695,7 +748,7 @@ export default function MapDetailPage() {
                         <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} compact />
                       </div>
                       <div className="min-w-[160px]">
-                        <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} compact />
+                        <MapMetadataCard label="생성 시각" value={renderDateTime(currentMap?.createdAt)} icon={Clock} compact />
                       </div>
                       <div className="min-w-[160px]">
                         <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} compact />
@@ -754,7 +807,7 @@ export default function MapDetailPage() {
                 )}
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
                   <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} />
-                  <MapMetadataCard label="생성 시각" value={formatDateLabel(currentMap?.createdAt)} icon={Clock} />
+                  <MapMetadataCard label="생성 시각" value={renderDateTime(currentMap?.createdAt)} icon={Clock} />
                   <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
                   <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} />
                   <MapMetadataCard

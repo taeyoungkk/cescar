@@ -1,7 +1,7 @@
-// hooks/useRecentDetections.ts
+﻿// hooks/useRecentDetections.ts
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import type { Detection, DetectionStats } from "@/core/types"
 import * as detectionApi from "@/core/api/detection"
 
@@ -18,6 +18,10 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [stats, setStats] = useState<DetectionStats | null>(null)
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine))
+  const requestIdRef = useRef(0)
+  const inFlightRef = useRef(false)
+  const queuedRef = useRef(false)
 
   const fallbackStats = useMemo<DetectionStats | null>(() => {
     const items = recentDetections
@@ -60,27 +64,66 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
       setIsLoading(false)
       return
     }
+    if (!online) {
+      setIsLoading(false)
+      setError("오프라인 상태입니다.")
+      return
+    }
+
+    if (inFlightRef.current) {
+      queuedRef.current = true
+      return
+    }
+
+    inFlightRef.current = true
+    const requestId = ++requestIdRef.current
 
     setIsLoading(true)
     try {
       const detectionsResponse = await detectionApi.getRecentDetections(carId, limit)
       const items = detectionsResponse.success && detectionsResponse.data ? detectionsResponse.data : []
+      if (requestIdRef.current !== requestId) return
       setRecentDetections(items)
 
       const latestTime = items[0]?.time ?? "-"
       const statsResponse = await detectionApi.getLatestLogStatistics(carId, latestTime)
+      if (requestIdRef.current !== requestId) return
       setStats(statsResponse.success ? statsResponse.data : null)
       setError(null)
     } catch {
-      setError("?먯? ?곗씠?곕? 遺덈윭?ㅻ뒗???ㅽ뙣?덉뒿?덈떎.")
+      if (requestIdRef.current !== requestId) return
+      setError("최근 감지 내역을 불러오지 못했습니다.")
     } finally {
-      setIsLoading(false)
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false)
+      }
+      inFlightRef.current = false
+      if (queuedRef.current) {
+        queuedRef.current = false
+        fetchData()
+      }
     }
-  }, [carId, limit])
+  }, [carId, limit, online])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleOnline = () => setOnline(true)
+    const handleOffline = () => setOnline(false)
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (online) fetchData()
+  }, [online, fetchData])
 
   return {
     recentDetections,
@@ -90,3 +133,4 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
     refresh: fetchData,
   }
 }
+

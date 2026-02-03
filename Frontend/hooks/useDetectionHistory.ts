@@ -1,7 +1,7 @@
-// hooks/useDetectionHistory.ts
+﻿// hooks/useDetectionHistory.ts
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import type { Detection, DetectionHistoryFilters, DetectionStats, DetectionStatus, DetectionType } from "@/core/types"
 import * as detectionApi from "@/core/api/detection"
 
@@ -50,6 +50,10 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [statsOverride, setStatsOverride] = useState<DetectionStats | null>(null)
+  const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine))
+  const requestIdRef = useRef(0)
+  const inFlightRef = useRef(false)
+  const queuedRef = useRef(false)
 
   const filteredDetections = useMemo(() => {
     const items = allDetections
@@ -98,7 +102,11 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
     const falseAlarmRate = items.length ? Math.round((falseAlarmCount / items.length) * 100) : 0
 
     const lastDetectionTime = items[0]?.timestamp
-      ? new Date(items[0].timestamp).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+      ? new Date(items[0].timestamp).toLocaleTimeString("ko-KR", {
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        })
       : "-"
 
     return { todayCount, weekCount, falseAlarmRate, lastDetectionTime }
@@ -117,6 +125,19 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
       setIsLoading(false)
       return
     }
+    if (!online) {
+      setIsLoading(false)
+      setError("오프라인 상태입니다.")
+      return
+    }
+
+    if (inFlightRef.current) {
+      queuedRef.current = true
+      return
+    }
+
+    inFlightRef.current = true
+    const requestId = ++requestIdRef.current
 
     setIsLoading(true)
     try {
@@ -126,30 +147,59 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
           endDate: filters.dateTo,
           label: mapLabel(filters.type),
         })
+        if (requestIdRef.current !== requestId) return
         setAllDetections(searchResponse.success && searchResponse.data ? searchResponse.data : [])
         setStatsOverride(null)
       } else if (logId) {
         const historyResponse = await detectionApi.getDetectionsByLog(logId, 50, carId ?? undefined)
+        if (requestIdRef.current !== requestId) return
         setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
         const latestTime = historyResponse.success && historyResponse.data ? historyResponse.data[0]?.time : undefined
         const statsResponse = await detectionApi.getLogStatistics(logId, latestTime)
+        if (requestIdRef.current !== requestId) return
         setStatsOverride(statsResponse.success ? statsResponse.data : null)
       } else {
         const historyResponse = await detectionApi.getDetectionHistory(carId)
+        if (requestIdRef.current !== requestId) return
         setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
         setStatsOverride(null)
       }
+      if (requestIdRef.current !== requestId) return
       setError(null)
     } catch {
+      if (requestIdRef.current !== requestId) return
       setError("감지 내역을 불러오지 못했습니다.")
     } finally {
-      setIsLoading(false)
+      if (requestIdRef.current === requestId) {
+        setIsLoading(false)
+      }
+      inFlightRef.current = false
+      if (queuedRef.current) {
+        queuedRef.current = false
+        fetchData()
+      }
     }
-  }, [carId, filters.dateFrom, filters.dateTo, filters.type, logId, useSearch])
+  }, [carId, filters.dateFrom, filters.dateTo, filters.type, logId, online, useSearch])
 
   useEffect(() => {
     fetchData()
   }, [fetchData])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleOnline = () => setOnline(true)
+    const handleOffline = () => setOnline(false)
+    window.addEventListener("online", handleOnline)
+    window.addEventListener("offline", handleOffline)
+    return () => {
+      window.removeEventListener("online", handleOnline)
+      window.removeEventListener("offline", handleOffline)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (online) fetchData()
+  }, [online, fetchData])
 
   useEffect(() => {
     if (!selectedDetection) return
@@ -196,7 +246,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
         if (selectedDetection?.id === id) setSelectedDetection({ ...selectedDetection, notes })
         return true
       } catch {
-        setError("메모 저장에 실패했습니다.")
+        setError("메모 업데이트에 실패했습니다.")
         return false
       }
     },
@@ -208,11 +258,11 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
       try {
         const response = await detectionApi.deleteDetection(id)
         if (!response.success) return false
-        setAllDetections((prev) => prev.filter((d) => d.id !== id))
-        if (selectedDetection?.id === id) setSelectedDetection(null)
+        setAllDetections((prev) => prev.filter((d) => String(d.id) !== String(id)))
+        if (selectedDetection?.id && String(selectedDetection.id) === String(id)) setSelectedDetection(null)
         return true
       } catch {
-        setError("감지 삭제에 실패했습니다.")
+        setError("감지 내역 삭제에 실패했습니다.")
         return false
       }
     },
@@ -239,3 +289,4 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
     refresh: fetchData,
   }
 }
+

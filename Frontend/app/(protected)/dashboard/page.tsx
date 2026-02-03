@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import React, { useState, useEffect, Suspense } from "react"
+import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import {
   Bug,
@@ -42,6 +43,7 @@ import {
 import { useDetectionHistory } from "@/hooks/useDetectionHistory"
 import { useCarLogs } from "@/hooks/useCarLogs"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
+import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import * as detectionApi from "@/core/api/detection"
 import type { Detection, DetectionStats, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
 import { Switch } from "@/components/ui/switch"
@@ -390,9 +392,9 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
           </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 space-y-3 sm:space-y-6">
-          <div className="flex justify-center">
-            <div className="relative w-full max-w-[320px] sm:max-w-none sm:w-full aspect-[4/3] sm:aspect-[16/9] bg-secondary/50 rounded-lg overflow-hidden">
+        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-6 sm:py-6 space-y-3 sm:space-y-6 flex flex-col items-center">
+          <div className="w-full max-w-[360px] sm:max-w-none">
+            <div className="relative w-full aspect-[4/3] sm:aspect-[16/9] bg-secondary/50 rounded-lg overflow-hidden">
               {snapshotSrc ? (
                 <img
                   src={snapshotSrc}
@@ -412,7 +414,7 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
             </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 p-2 sm:p-3">
+          <div className="w-full max-w-[360px] sm:max-w-none flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 p-2 sm:p-3">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">탐지 영상</p>
               <p className="hidden sm:block text-[11px] text-muted-foreground/70">탐지 전후 영상을 확인하세요.</p>
@@ -428,7 +430,7 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
             </Button>
           </div>
 
-          <div className="space-y-3">
+          <div className="w-full max-w-[360px] sm:max-w-none space-y-3">
             <h4 className="text-sm font-medium text-foreground">탐지 정보</h4>
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
@@ -442,7 +444,7 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
             </div>
           </div>
 
-          <div className="space-y-2">
+          <div className="w-full max-w-[360px] sm:max-w-none space-y-2">
             <label className="text-sm font-medium text-foreground">메모</label>
             <div className="min-h-[64px] rounded-md border border-border bg-secondary/20 p-3 text-xs sm:text-sm text-muted-foreground">
               {record.notes?.trim() ? record.notes : "메모가 없습니다."}
@@ -631,6 +633,7 @@ function DashboardContent() {
   const searchParams = useSearchParams()
   const deepLinkId = searchParams.get("detectionId")
   const { toast } = useToast()
+  const { isOnline: networkOnline } = useNetworkStatus()
   const { carId } = usePrimaryCarId()
   const { logs, isLoading: logsLoading } = useCarLogs(carId)
   const {
@@ -653,8 +656,100 @@ function DashboardContent() {
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Detection | null>(null)
   const lastOpenedRef = React.useRef<string | null>(null)
+  const detailRequestIdRef = React.useRef(0)
+  const detailInFlightRef = React.useRef(false)
+  const detailQueuedRef = React.useRef(false)
+  const detailQueuedIdRef = React.useRef<string | null>(null)
+  const deleteRequestIdRef = React.useRef(0)
+  const deleteInFlightRef = React.useRef(false)
+  const deleteQueuedRef = React.useRef(false)
+  const deleteQueuedIdRef = React.useRef<string | null>(null)
   const [mapFilter, setMapFilter] = useState<string>("all")
   const [logSort, setLogSort] = useState<"desc" | "asc">("desc")
+
+  const fetchDetectionDetail = React.useCallback(
+    async (id: string) => {
+      if (!networkOnline) {
+        toast({ title: "오프라인 상태", description: "연결 후 다시 시도해 주세요." })
+        return false
+      }
+      if (detailInFlightRef.current) {
+        detailQueuedRef.current = true
+        detailQueuedIdRef.current = id
+        return false
+      }
+
+      detailInFlightRef.current = true
+      const requestId = ++detailRequestIdRef.current
+
+      try {
+        const res = await detectionApi.getDetectionById(id)
+        if (detailRequestIdRef.current !== requestId) return false
+        if (!res?.data) {
+          toast({ title: "상세 불러오기 실패", description: "탐지 상세 정보를 불러오지 못했습니다." })
+          return false
+        }
+        selectDetection(res.data)
+        return true
+      } catch {
+        if (detailRequestIdRef.current !== requestId) return false
+        toast({ title: "상세 불러오기 실패", description: "탐지 상세 정보를 불러오지 못했습니다." })
+        return false
+      } finally {
+        if (detailRequestIdRef.current === requestId) {
+          detailInFlightRef.current = false
+        }
+        if (detailQueuedRef.current) {
+          detailQueuedRef.current = false
+          const nextId = detailQueuedIdRef.current
+          detailQueuedIdRef.current = null
+          if (nextId) {
+            fetchDetectionDetail(nextId)
+          }
+        }
+      }
+    },
+    [networkOnline, selectDetection, toast]
+  )
+
+  const runDeleteDetection = React.useCallback(
+    async (id: string): Promise<boolean | null> => {
+      if (!networkOnline) {
+        toast({ title: "오프라인 상태", description: "연결 후 다시 시도해 주세요." })
+        return false
+      }
+      if (deleteInFlightRef.current) {
+        deleteQueuedRef.current = true
+        deleteQueuedIdRef.current = id
+        return null
+      }
+
+      deleteInFlightRef.current = true
+      const requestId = ++deleteRequestIdRef.current
+
+      try {
+        const ok = await deleteDetection(id)
+        if (deleteRequestIdRef.current !== requestId) return false
+        return ok
+      } catch {
+        if (deleteRequestIdRef.current !== requestId) return false
+        return false
+      } finally {
+        if (deleteRequestIdRef.current === requestId) {
+          deleteInFlightRef.current = false
+        }
+        if (deleteQueuedRef.current) {
+          deleteQueuedRef.current = false
+          const nextId = deleteQueuedIdRef.current
+          deleteQueuedIdRef.current = null
+          if (nextId) {
+            runDeleteDetection(nextId)
+          }
+        }
+      }
+    },
+    [deleteDetection, networkOnline, toast]
+  )
 
   const formatLogLabel = (log: {
     id: number
@@ -808,17 +903,17 @@ function DashboardContent() {
       return
     }
 
-    detectionApi.getDetectionById(deepLinkId).then((res) => {
-      if (!res?.data) return
-      selectDetection(res.data)
+    fetchDetectionDetail(deepLinkId).then((ok) => {
+      if (!ok) return
       setIsDetailOpen(true)
       lastOpenedRef.current = deepLinkId
     })
-  }, [deepLinkId, detections, selectDetection])
+  }, [deepLinkId, detections, fetchDetectionDetail])
 
   return (
     <div className="p-3 sm:p-4 lg:p-6">
-      <div className="max-w-7xl mx-auto">
+      {carId ? (
+        <div className="max-w-7xl mx-auto">
         <div className="mb-4 sm:mb-6">
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">탐지 기록</h1>
           <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요.</p>
@@ -965,6 +1060,7 @@ function DashboardContent() {
                 window.history.replaceState(null, "", window.location.pathname)
                 toast({ title: "필터 초기화", description: "필터와 저장값을 초기화했습니다." })
               }}
+              onMouseDown={(e) => e.preventDefault()}
               onPointerDown={(e) => e.currentTarget.blur()}
               onPointerUp={(e) => e.currentTarget.blur()}
               onPointerCancel={(e) => e.currentTarget.blur()}
@@ -1018,7 +1114,7 @@ function DashboardContent() {
                     onStartDateChange={(date) => setFilters({ ...filters, dateFrom: date })}
                     onEndDateChange={(date) => setFilters({ ...filters, dateTo: date })}
                   />
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                     <Select
                       value={mapFilter}
                       onValueChange={(value) => {
@@ -1027,7 +1123,7 @@ function DashboardContent() {
                       }}
                       disabled={useSearch || mapOptions.length === 0}
                     >
-                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px] min-w-[120px] shrink-0">
                         <MapIcon className="hidden sm:inline-block h-4 w-4 mr-2 text-muted-foreground" />
                         <SelectValue placeholder="지도" />
                       </SelectTrigger>
@@ -1045,7 +1141,7 @@ function DashboardContent() {
                       onValueChange={(value) => setLogSort(value as "desc" | "asc")}
                       disabled={useSearch || sortedLogs.length === 0}
                     >
-                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px] min-w-[120px] shrink-0">
                         <SelectValue placeholder="정렬" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1057,7 +1153,7 @@ function DashboardContent() {
                       value={filters.type || "all"}
                       onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
                     >
-                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px] min-w-[120px] shrink-0">
                         <Filter className="hidden sm:inline-block h-4 w-4 mr-2 text-muted-foreground" />
                         <SelectValue placeholder="유형" />
                       </SelectTrigger>
@@ -1075,7 +1171,7 @@ function DashboardContent() {
                       value={filters.status || "all"}
                       onValueChange={(value) => setFilters({ ...filters, status: value as DetectionStatus | "all" })}
                     >
-                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px] min-w-[120px] shrink-0">
                         <SelectValue placeholder="상태" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1122,6 +1218,7 @@ function DashboardContent() {
                         window.history.replaceState(null, "", window.location.pathname)
                         toast({ title: "필터 초기화", description: "필터와 저장값을 초기화했습니다." })
                       }}
+                      onMouseDown={(e) => e.preventDefault()}
                       onPointerDown={(e) => e.currentTarget.blur()}
                       onPointerUp={(e) => e.currentTarget.blur()}
                       onPointerCancel={(e) => e.currentTarget.blur()}
@@ -1162,12 +1259,7 @@ function DashboardContent() {
               onViewDetail={async (d) => {
                 selectDetection(d)
                 setIsDetailOpen(true)
-                const res = await detectionApi.getDetectionById(d.id)
-                if (res?.data) {
-                  selectDetection(res.data)
-                } else {
-                  toast({ title: "상세 불러오기 실패", description: "탐지 상세 정보를 불러오지 못했습니다." })
-                }
+                await fetchDetectionDetail(String(d.id))
               }}
               isLoading={isLoading}
             />
@@ -1194,11 +1286,12 @@ function DashboardContent() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setDeleteTarget(null)}>취소</AlertDialogCancel>
-              <AlertDialogAction
+                  <AlertDialogAction
                 className="bg-red-500 hover:bg-red-500/90"
                 onClick={async () => {
                   if (!deleteTarget) return
-                  const ok = await deleteDetection(deleteTarget.id)
+                  const ok = await runDeleteDetection(deleteTarget.id)
+                  if (ok === null) return
                   if (ok) {
                     setIsDetailOpen(false)
                     toast({ title: "삭제 완료", description: "탐지 내역을 삭제했습니다." })
@@ -1214,6 +1307,23 @@ function DashboardContent() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
+      ) : (
+        <div className="max-w-3xl mx-auto">
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base font-medium">등록된 차량이 없습니다</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                차량을 등록하면 탐지 기록과 통계를 확인할 수 있습니다.
+              </p>
+              <Link href="/home">
+                <Button size="sm">차량 등록하러 가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

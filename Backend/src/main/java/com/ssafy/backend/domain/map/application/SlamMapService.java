@@ -87,6 +87,29 @@ public class SlamMapService {
         return new SlamMapResponse.MapGenerateResponse(requestId, "queued");
     }
 
+    @Transactional
+    public boolean saveMapFromResult(String deviceId, com.ssafy.backend.domain.device.dto.MapResultRequest result) {
+        Car car = carRepository.findByDeviceId(deviceId).orElse(null);
+        if (car == null) {
+            return false;
+        }
+
+        SlamMap map = SlamMap.create(
+                car,
+                result.getName(),
+                result.getImageUrl(),
+                result.getWidth(),
+                result.getHeight(),
+                result.getResolution(),
+                result.getOriginX(),
+                result.getOriginY()
+        );
+
+        SlamMap savedMap = slamMapRepository.save(map);
+        car.updateCurrentMap(savedMap);
+        return true;
+    }
+
     public List<SlamMapResponse.MapListResponse> getMapList(Long carId, Long memberId) {
         getOwnedCar(carId, memberId);
 

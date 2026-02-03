@@ -103,7 +103,11 @@ public class SecurityConfig {
                 "http://localhost:*",
                 "https://*.vercel.app",
                 "https://I14B201.p.ssafy.io",
-                "http://I14B201.p.ssafy.io"));
+                "http://I14B201.p.ssafy.io",
+                "https://i14b201.p.ssafy.io",
+                "http://i14b201.p.ssafy.io",
+                "https://*.ssafy.io",
+                "http://*.ssafy.io"));
 
         // 허용할 HTTP 메서드 (OPTIONS 필수)
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));

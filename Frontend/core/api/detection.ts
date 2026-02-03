@@ -20,6 +20,7 @@ function mapLabelToType(label: any): DetectionType {
   if (v === "mosquito") return "mosquito"
   if (v === "spider") return "spider"
   if (v === "person") return "person"
+  if (v === "car") return "car"
   return "unknown"
 }
 

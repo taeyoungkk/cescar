@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 
 import React, { useState, useEffect } from "react"
 import Link from "next/link"
@@ -60,7 +60,7 @@ function SignupForm({
           <span className="text-xl font-bold text-foreground">Cescar</span>
         </div>
         <CardTitle className="text-xl">회원가입</CardTitle>
-        <CardDescription>새 계정을 만들어주세요</CardDescription>
+        <CardDescription>계정을 만들어주세요</CardDescription>
       </CardHeader>
 
       <CardContent>
@@ -82,11 +82,11 @@ function SignupForm({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="nickname">??????</Label>
+            <Label htmlFor="nickname">닉네임</Label>
             <Input
               id="nickname"
               type="text"
-              placeholder="????????? ?????????"
+              placeholder="닉네임을 입력해주세요"
               value={nickname}
               onChange={(e) => onNicknameChange(e.target.value)}
               required
@@ -213,7 +213,7 @@ function SuccessView() {
 export default function SignupPage() {
   const router = useRouter()
   const { signup, isLoading, error, clearError } = useAuth()
-  
+
   const [name, setName] = useState("")
   const [nickname, setNickname] = useState("")
   const [email, setEmail] = useState("")
@@ -239,7 +239,7 @@ export default function SignupPage() {
     }
 
     if (!nickname.trim()) {
-      errors.nickname = "????????? ?????????."
+      errors.nickname = "닉네임을 입력해주세요."
     }
 
     if (!email.trim()) {

@@ -55,10 +55,6 @@ public class CarService {
         CarStatus status = carStatusRepository.findById(car.getId())
                 .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
 
-        if (!status.isOnline()) {
-            throw new CustomException(ErrorCode.CAR_OFFLINE);
-        }
-
         Member member = memberRepository.findById(memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MEMBER_NOT_FOUND));
 

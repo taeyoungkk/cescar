@@ -73,8 +73,8 @@ function mapToUiDetection(raw: DetectionListItemResponse, opts?: { robotId?: str
     id: String(raw.id),
     robotId: opts?.robotId ?? "unknown",
     type: mapLabelToType(raw.label),
-    confidence: raw.confidence, // UI?먯꽌 0~1 / 0~100 紐⑤몢 泥섎━
-    status: "pending", // ?쒕쾭 誘몄??????④퀎)
+    confidence: raw.confidence, // UI?? 0~1 / 0~100 ?? ??
+    status: "pending", // ?? ???(??)
     timestamp: raw.createdAt,
     date,
     time,
@@ -142,7 +142,7 @@ function normalizeLog(raw: any): CarLogResponse {
   }
 }
 
-// ?쒕쾭 ?듦퀎 ?붾뱶?ъ씤???앷린湲????붾?
+// ?? ?? ????? ???(??)
 export async function getDetectionStats(): Promise<ApiResponse<DetectionStats>> {
   return ok({ todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "" })
 }
@@ -281,7 +281,7 @@ export async function getDetectionHistory(
       items = items.filter((d) => new Date(d.timestamp) <= to)
     }
 
-    // status???쒕쾭 誘몄??먯씠???꾪꽣留곹븯吏 ?딆쓬
+// ?? ?? ????? ???(??)
     return ok(items)
   } catch (e: any) {
     return fail(e?.message ?? "감지 기록 조회 실패")
@@ -297,7 +297,7 @@ export async function getDetectionById(id: string): Promise<ApiResponse<Detectio
   }
 }
 
-// ?쒕쾭 誘몄?????濡쒖뺄 ?낅뜲?댄듃??
+// ?? ?? ????? ???(??)
 export async function updateDetectionStatus(id: string, status: DetectionStatus): Promise<ApiResponse<Detection>> {
   return ok({ id, status } as any)
 }

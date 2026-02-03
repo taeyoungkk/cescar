@@ -392,12 +392,14 @@ function MapVisualization({ status, progress = 0 }: { status: MapStatus; progres
 
 function MapMetadataPanel({
   status,
-  generatedAt,
+  generatedAtDate,
+  generatedAtTime,
   areaSize,
   robotId,
 }: {
   status: MapStatus
-  generatedAt?: string
+  generatedAtDate?: string
+  generatedAtTime?: string
   areaSize?: string
   robotId?: string
 }) {
@@ -407,7 +409,10 @@ function MapMetadataPanel({
     <div className="grid grid-cols-3 gap-2 mt-3 sm:grid-cols-3 sm:gap-3 sm:mt-4">
       <div className="bg-secondary/50 rounded-lg p-2 sm:p-3">
         <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">생성 시각</p>
-        <p className="text-xs sm:text-sm font-medium text-foreground">{generatedAt || "-"}</p>
+        <div className="space-y-0.5">
+          <p className="text-xs sm:text-sm font-medium text-foreground">{generatedAtDate || "-"}</p>
+          <p className="text-[11px] text-muted-foreground">{generatedAtTime || "-"}</p>
+        </div>
       </div>
       <div className="bg-secondary/50 rounded-lg p-2 sm:p-3">
         <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">맵 영역</p>
@@ -499,7 +504,8 @@ function MapGenerationSection({
   mapStatus,
   progress = 0,
   isOnline,
-  generatedAt,
+  generatedAtDate,
+  generatedAtTime,
   areaSize,
   robotId,
   mapActions,
@@ -523,7 +529,8 @@ function MapGenerationSection({
   mapStatus: MapStatus
   progress?: number
   isOnline: boolean
-  generatedAt?: string
+  generatedAtDate?: string
+  generatedAtTime?: string
   areaSize?: string
   robotId?: string
   mapActions?: React.ReactNode
@@ -613,7 +620,13 @@ function MapGenerationSection({
 
       <CardContent className="space-y-3 sm:space-y-4">
         <MapVisualization status={mapStatus} progress={progress} />
-        <MapMetadataPanel status={mapStatus} generatedAt={generatedAt} areaSize={areaSize} robotId={robotId} />
+        <MapMetadataPanel
+          status={mapStatus}
+          generatedAtDate={generatedAtDate}
+          generatedAtTime={generatedAtTime}
+          areaSize={areaSize}
+          robotId={robotId}
+        />
 
         <div className="flex gap-2 sm:gap-3">
           {mapStatus === "generating" ? (
@@ -873,6 +886,9 @@ export default function HomePage() {
   const { isOnline: networkOnline } = useNetworkStatus()
   const carMaps = useCarMaps(carId)
   const currentMap = carMaps.currentMap
+  const refreshCarsRequestIdRef = React.useRef(0)
+  const refreshCarsInFlightRef = React.useRef(false)
+  const refreshCarsQueuedRef = React.useRef(false)
 
   useEffect(() => {
     const checkStandalone = () => {
@@ -899,22 +915,48 @@ export default function HomePage() {
   }, [])
 
   const refreshCars = React.useCallback(async () => {
+    if (!networkOnline) {
+      setCarLoading(false)
+      setCarError("오프라인 상태입니다.")
+      return
+    }
+
+    if (refreshCarsInFlightRef.current) {
+      refreshCarsQueuedRef.current = true
+      return
+    }
+
+    refreshCarsInFlightRef.current = true
+    const requestId = ++refreshCarsRequestIdRef.current
     setCarLoading(true)
     try {
       const list = await carApi.getMyCars()
+      if (refreshCarsRequestIdRef.current !== requestId) return
       setCarList(list)
       setCarError(null)
     } catch (e: any) {
+      if (refreshCarsRequestIdRef.current !== requestId) return
       setCarError(e?.message ?? "차량 목록을 불러오지 못했습니다.")
       setCarList([])
     } finally {
-      setCarLoading(false)
+      if (refreshCarsRequestIdRef.current === requestId) {
+        setCarLoading(false)
+      }
+      refreshCarsInFlightRef.current = false
+      if (refreshCarsQueuedRef.current) {
+        refreshCarsQueuedRef.current = false
+        refreshCars()
+      }
     }
-  }, [])
+  }, [networkOnline])
 
   useEffect(() => {
     refreshCars()
   }, [refreshCars])
+
+  useEffect(() => {
+    if (networkOnline) refreshCars()
+  }, [networkOnline, refreshCars])
 
   const primaryCar = carList.find((car) => car.carId === carId) ?? carList[0] ?? null
 
@@ -1027,12 +1069,27 @@ export default function HomePage() {
 
   const robotOnline = status?.isOnline ?? false
   const mapReady = Boolean(currentMap)
-  const areaSize = currentMap && currentMap.width && currentMap.height && currentMap.resolution
-    ? `${(currentMap.width * currentMap.resolution).toFixed(1)}m x ${(currentMap.height * currentMap.resolution).toFixed(1)}m`
-    : "-"
-  const generatedAt = currentMap?.createdAt
-    ? new Date(currentMap.createdAt).toLocaleString("ko-KR")
-    : "-"
+  const areaSize =
+    currentMap && currentMap.width && currentMap.height && currentMap.resolution
+      ? `${(currentMap.width * currentMap.resolution).toFixed(1)}m x ${(currentMap.height * currentMap.resolution).toFixed(1)}m`
+      : "-"
+  const formatDateLine = (value?: string | null) => {
+    if (!value) return "-"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    const yyyy = date.getFullYear()
+    const mm = String(date.getMonth() + 1).padStart(2, "0")
+    const dd = String(date.getDate()).padStart(2, "0")
+    return `${yyyy}-${mm}-${dd}`
+  }
+  const formatTimeLine = (value?: string | null) => {
+    if (!value) return "-"
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return "-"
+    return date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true })
+  }
+  const generatedAtDate = formatDateLine(currentMap?.createdAt ?? null)
+  const generatedAtTime = formatTimeLine(currentMap?.createdAt ?? null)
   const mapHistoryItems: StoredMap[] = carMaps.maps.map((m) => ({
     id: String(m.id),
     generatedAt: new Date(m.createdAt).toLocaleString("ko-KR"),
@@ -1464,7 +1521,8 @@ export default function HomePage() {
                 mapStatus={currentMap ? "completed" : "no_map"}
                 progress={0}
                 isOnline={robotOnline}
-                generatedAt={generatedAt}
+                generatedAtDate={generatedAtDate}
+                generatedAtTime={generatedAtTime}
                 areaSize={areaSize}
                 robotId={carId ? String(carId) : undefined}
                 mapActions={createMapAction}

@@ -8,10 +8,6 @@ import {
   Clock,
   Circle,
   Square,
-  ArrowUp,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -27,6 +23,9 @@ import * as mapApi from "@/core/api/map"
 import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 
+const DRIVE_MAX_V = 0.45
+const DRIVE_MAX_W = 0.9
+
 // ============================================
 // Presentational Components (UI Only)
 // ============================================
@@ -39,9 +38,9 @@ interface LiveCameraViewProps {
   lastDetectionLabel: string
   isManual: boolean
   manualDisabled: boolean
-  onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
+  driveVector: { v: number; w: number }
+  onDriveVector: (v: number, w: number) => void
   onDriveStop: () => void
-  activeDriveCommand: "forward" | "backward" | "left" | "right" | "stop" | null
   wsUrl: string
   detectionWsUrl: string
   roomId: string
@@ -57,9 +56,9 @@ function LiveCameraView({
   lastDetectionLabel,
   isManual,
   manualDisabled,
-  onDriveStart,
+  driveVector,
+  onDriveVector,
   onDriveStop,
-  activeDriveCommand,
   wsUrl,
   detectionWsUrl,
   roomId,
@@ -94,7 +93,7 @@ function LiveCameraView({
     const pc = pcRef.current
     const ws = wsRef.current
 
-    // ?몃뱾???쒓굅
+    // 핸들러 제거
     if (ws) {
       ws.onopen = null
       ws.onmessage = null
@@ -117,7 +116,7 @@ function LiveCameraView({
     setHasStream(false)
     if (videoRef.current) videoRef.current.srcObject = null
 
-    // ?ㅼ쓬 connect瑜??꾪빐 蹂듦뎄
+    // 다음 connect를 위해 복구
     // setTimeout(() => { closingRef.current = false }, 0)
   }, [networkOnline])
 
@@ -372,7 +371,7 @@ function LiveCameraView({
 
     pc.onicecandidate = (ev) => {
       if (!ev.candidate) return
-      // Jetson??湲곕??섎뒗 candidate ?щ㎎?쇰줈 蹂대깂
+      // Jetson이 기대하는 candidate 스펙으로 전송
       send({
         type: "candidate",
         roomId,
@@ -427,7 +426,7 @@ function LiveCameraView({
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
 
-    // Jetson??湲곕??섎뒗 answer ?щ㎎ (data.sdp瑜?戮묒븘?)
+    // Jetson이 기대하는 answer 스펙으로 전송 (data.sdp 포함)
     send({
       type: "answer",
       roomId,
@@ -462,7 +461,7 @@ function LiveCameraView({
     if (!wsUrl || !roomId) return
     setConnectionState("connecting")
 
-    // ?댁쟾 pc媛 ?⑥븘?덉쑝硫??リ퀬 ?덈줈 ?쒖옉
+    // 이전 pc가 살아있으면 종료하고 새로 시작
     if (pcRef.current) {
       try { pcRef.current.close() } catch { }
       pcRef.current = null
@@ -485,10 +484,10 @@ function LiveCameraView({
     ws.onmessage = async (ev) => {
       const msg = JSON.parse(ev.data)
 
-      // Spring??由대젅?대쭔 ?섎땲源?msg.data媛 ?덈뱺 ?녿뱺 諛⑹뼱
+      // Spring 릴레이만 쓰는 경우 msg.data가 없을 수 있어 방어
       if (msg.type === "offer") await handleOffer(msg.data ?? msg)
       if (msg.type === "candidate") await handleCandidate(msg.data ?? msg)
-      // answer??viewer媛 諛쏅뒗 履쎌씠硫?蹂댄넻 ????offer 二쇰룄 Jetson?대씪??
+      // answer는 viewer가 받는 쪽이라, 보통 offer 주도는 Jetson
     }
 
     ws.onerror = () => {
@@ -719,170 +718,17 @@ function LiveCameraView({
 
       {isManual && (
         <div className="absolute bottom-16 right-3 z-40 hidden select-none sm:block">
-          {/* Control pad container */}
-          <div className="relative">
-            {/* Background glow effect */}
-            <div className="absolute inset-0 rounded-lg bg-gradient-to-br from-blue-500/10 via-purple-500/5 to-transparent blur-md" />
-
-            {/* Main control pad - 2 row keyboard-style layout */}
-            <div className="relative rounded-lg border border-white/15 bg-black/60 backdrop-blur-md p-1.5 shadow-lg">
-              {/* Keyboard hint */}
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap">
-                <span className="text-[8px] text-white/25 font-medium">⌨️</span>
-              </div>
-
-              {/* Row 1: Up arrow centered */}
-              <div className="flex justify-center mb-1">
-                <button
-                  type="button"
-                  disabled={manualDisabled}
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    e.currentTarget.setPointerCapture?.(e.pointerId)
-                    onDriveStart("forward")
-                  }}
-                  onPointerUp={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  onTouchEnd={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onTouchCancel={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onPointerLeave={(e) => {
-                    onDriveStop()
-                    e.currentTarget.blur()
-                  }}
-                  onPointerCancel={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
-                    activeDriveCommand === "forward" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
-                  }`}
-                >
-                  <ArrowUp className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
-                </button>
-              </div>
-
-              {/* Row 2: Left, Down, Right */}
-              <div className="flex gap-1">
-                <button
-                  type="button"
-                  disabled={manualDisabled}
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    e.currentTarget.setPointerCapture?.(e.pointerId)
-                    onDriveStart("left")
-                  }}
-                  onPointerUp={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  onTouchEnd={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onTouchCancel={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onPointerLeave={(e) => {
-                    onDriveStop()
-                    e.currentTarget.blur()
-                  }}
-                  onPointerCancel={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
-                    activeDriveCommand === "left" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
-                  }`}
-                >
-                  <ArrowLeft className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
-                </button>
-                <button
-                  type="button"
-                  disabled={manualDisabled}
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    e.currentTarget.setPointerCapture?.(e.pointerId)
-                    onDriveStart("backward")
-                  }}
-                  onPointerUp={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  onTouchEnd={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onTouchCancel={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onPointerLeave={(e) => {
-                    onDriveStop()
-                    e.currentTarget.blur()
-                  }}
-                  onPointerCancel={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
-                    activeDriveCommand === "backward" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
-                  }`}
-                >
-                  <ArrowDown className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
-                </button>
-                <button
-                  type="button"
-                  disabled={manualDisabled}
-                  onPointerDown={(e) => {
-                    e.preventDefault()
-                    e.currentTarget.setPointerCapture?.(e.pointerId)
-                    onDriveStart("right")
-                  }}
-                  onPointerUp={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  onTouchEnd={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onTouchCancel={(e) => {
-                    e.currentTarget.blur()
-                    onDriveStop()
-                  }}
-                  onPointerLeave={(e) => {
-                    onDriveStop()
-                    e.currentTarget.blur()
-                  }}
-                  onPointerCancel={(e) => {
-                    onDriveStop()
-                    e.currentTarget.releasePointerCapture?.(e.pointerId)
-                    e.currentTarget.blur()
-                  }}
-                  className={`group h-7 w-7 touch-none rounded bg-gradient-to-b from-white/15 to-white/5 border border-white/20 hover:from-white/25 hover:to-white/10 disabled:opacity-40 disabled:cursor-not-allowed transition-all duration-75 flex items-center justify-center focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none ${
-                    activeDriveCommand === "right" ? "ring-2 ring-emerald-400/80 bg-emerald-500/20 border-emerald-400/60" : ""
-                  }`}
-                >
-                  <ArrowRight className="h-3.5 w-3.5 text-white/70 group-hover:text-white group-active:text-blue-200" />
-                </button>
-              </div>
+          <div className="relative rounded-full border border-white/15 bg-black/60 backdrop-blur-md p-2 shadow-lg">
+            <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap">
+              <span className="text-[8px] text-white/25 font-medium">KBD</span>
             </div>
+            <JoystickPad
+              disabled={manualDisabled}
+              vector={driveVector}
+              onMove={(v, w) => onDriveVector(v * DRIVE_MAX_V, w * DRIVE_MAX_W)}
+              onStop={onDriveStop}
+              size={96}
+            />
           </div>
         </div>
       )}
@@ -895,10 +741,10 @@ interface ControlPanelProps {
   networkOnline: boolean
   driveMode: "AUTO" | "MANUAL" | "STOP"
   onChangeMode: (mode: "AUTO" | "MANUAL" | "STOP") => void
-  onDriveStart: (command: "forward" | "backward" | "left" | "right" | "stop") => void
+  onDriveVector: (v: number, w: number) => void
   onDriveStop: () => void
   manualDisabled: boolean
-  activeDriveCommand: "forward" | "backward" | "left" | "right" | "stop" | null
+  driveVector: { v: number; w: number }
   onStartMission: () => void
   onStopMission: () => void
   missionDisabled: boolean
@@ -909,6 +755,7 @@ interface ControlPanelProps {
   missionError: string | null
   missionPoints: { x: number; y: number }[]
   invalidLines: string[]
+  onDismissMissionError: () => void
   onAddMissionPoints: () => void
   onRemoveMissionPoint: (index: number) => void
   onAddFromDetections: () => void
@@ -917,15 +764,134 @@ interface ControlPanelProps {
   modeError: string | null
 }
 
+function JoystickPad({
+  disabled,
+  onMove,
+  onStop,
+  vector,
+  size = 96,
+}: {
+  disabled: boolean
+  onMove: (v: number, w: number) => void
+  onStop: () => void
+  vector?: { v: number; w: number }
+  size?: number
+}) {
+  const baseRef = React.useRef<HTMLDivElement | null>(null)
+  const knobRef = React.useRef<HTMLDivElement | null>(null)
+  const activeRef = React.useRef(false)
+
+  const resetKnob = () => {
+    if (knobRef.current) {
+      knobRef.current.style.transform = "translate(0px, 0px)"
+    }
+  }
+
+  const updateFromEvent = (clientX: number, clientY: number) => {
+    const base = baseRef.current
+    const knob = knobRef.current
+    if (!base || !knob) return
+    const rect = base.getBoundingClientRect()
+    const cx = rect.left + rect.width / 2
+    const cy = rect.top + rect.height / 2
+    const dx = clientX - cx
+    const dy = clientY - cy
+    const maxR = rect.width / 2 - 8
+    const dist = Math.hypot(dx, dy)
+    const clamped = dist > maxR ? maxR / dist : 1
+    const x = dx * clamped
+    const y = dy * clamped
+    knob.style.transform = `translate(${x}px, ${y}px)`
+
+    const nx = x / maxR
+    const ny = y / maxR
+    const deadZone = 0.08
+    const applyDeadZone = (value: number) => {
+      const abs = Math.abs(value)
+      if (abs <= deadZone) return 0
+      const scaled = (abs - deadZone) / (1 - deadZone)
+      return Math.sign(value) * scaled
+    }
+
+    let v = applyDeadZone(-ny)
+    const w = applyDeadZone(-nx)
+
+    if (w !== 0) {
+      const fade = 1 - Math.min(1, Math.abs(ny) / 0.25)
+      const creep = 0.22 * Math.min(1, Math.abs(w))
+      if (v < creep) v = creep * fade + v * (1 - fade)
+    }
+    onMove(v, w)
+  }
+
+  React.useEffect(() => {
+    if (activeRef.current) return
+    const base = baseRef.current
+    const knob = knobRef.current
+    if (!base || !knob) return
+
+    const rect = base.getBoundingClientRect()
+    const maxR = rect.width / 2 - 8
+    if (!maxR) return
+
+    const clamp = (value: number) => Math.min(1, Math.max(-1, value))
+    const v = clamp(vector?.v ?? 0)
+    const w = clamp(vector?.w ?? 0)
+    const x = -w * maxR
+    const y = -v * maxR
+    knob.style.transform = `translate(${x}px, ${y}px)`
+  }, [vector?.v, vector?.w])
+
+  return (
+    <div
+      ref={baseRef}
+      className={`relative rounded-full border border-white/20 bg-black/50 backdrop-blur-md ${
+        disabled ? "opacity-50" : "opacity-100"
+      }`}
+      style={{ width: size, height: size, touchAction: "none" }}
+      onPointerDown={(e) => {
+        if (disabled) return
+        e.preventDefault()
+        activeRef.current = true
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        updateFromEvent(e.clientX, e.clientY)
+      }}
+      onPointerMove={(e) => {
+        if (!activeRef.current) return
+        updateFromEvent(e.clientX, e.clientY)
+      }}
+      onPointerUp={(e) => {
+        if (!activeRef.current) return
+        activeRef.current = false
+        e.currentTarget.releasePointerCapture?.(e.pointerId)
+        resetKnob()
+        onStop()
+      }}
+      onPointerCancel={() => {
+        if (!activeRef.current) return
+        activeRef.current = false
+        resetKnob()
+        onStop()
+      }}
+    >
+      <div className="absolute inset-2 rounded-full border border-white/10" />
+      <div
+        ref={knobRef}
+        className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/20 border border-white/30 shadow-sm"
+      />
+    </div>
+  )
+}
+
 function ControlPanel({
   isLoading,
   networkOnline,
   driveMode,
   onChangeMode,
-  onDriveStart,
+  onDriveVector,
   onDriveStop,
   manualDisabled,
-  activeDriveCommand,
+  driveVector,
   onStartMission,
   onStopMission,
   missionDisabled,
@@ -936,6 +902,7 @@ function ControlPanel({
   missionError,
   missionPoints,
   invalidLines,
+  onDismissMissionError,
   onAddMissionPoints,
   onRemoveMissionPoint,
   onAddFromDetections,
@@ -944,7 +911,19 @@ function ControlPanel({
   modeError,
 }: ControlPanelProps) {
   const [dragIndex, setDragIndex] = React.useState<number | null>(null)
+  const [showInvalidLines, setShowInvalidLines] = React.useState(true)
+  const [showAllInvalidLines, setShowAllInvalidLines] = React.useState(false)
   const reachedLimit = missionPointCount >= maxMissionPoints
+  const invalidLineCount = invalidLines.length
+  const limitedInvalidLines = showAllInvalidLines ? invalidLines : invalidLines.slice(0, 3)
+  const truncateLine = (line: string) => (line.length > 28 ? `${line.slice(0, 28)}…` : line)
+
+  React.useEffect(() => {
+    if (invalidLineCount > 0) {
+      setShowInvalidLines(true)
+      setShowAllInvalidLines(false)
+    }
+  }, [invalidLineCount])
 
   return (
     <Card className="bg-card border-border">
@@ -977,185 +956,18 @@ function ControlPanel({
           {modeError && <p className="text-xs text-red-400">{modeError}</p>}
         </div>
 
-      {driveMode === "MANUAL" && (
-        <div className="space-y-2 sm:hidden">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">수동 조작</p>
-          <div className="grid grid-cols-3 gap-2 place-items-center">
-            <div />
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={manualDisabled}
-              onPointerDown={(e) => {
-                e.preventDefault()
-                e.currentTarget.setPointerCapture?.(e.pointerId)
-                onDriveStart("forward")
-              }}
-              onPointerUp={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onMouseUp={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onTouchEnd={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onTouchCancel={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onPointerLeave={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onPointerCancel={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onClick={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
-            <div />
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={manualDisabled}
-              onPointerDown={(e) => {
-                e.preventDefault()
-                e.currentTarget.setPointerCapture?.(e.pointerId)
-                onDriveStart("left")
-              }}
-              onPointerUp={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onMouseUp={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onTouchEnd={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onTouchCancel={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onPointerLeave={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onPointerCancel={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onClick={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
-            >
-              <ArrowLeft className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={manualDisabled}
-              onPointerDown={(e) => {
-                e.preventDefault()
-                e.currentTarget.setPointerCapture?.(e.pointerId)
-                onDriveStart("backward")
-              }}
-              onPointerUp={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onMouseUp={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onTouchEnd={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onTouchCancel={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onPointerLeave={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onPointerCancel={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onClick={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
-            >
-              <ArrowDown className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="outline"
-              size="icon"
-              disabled={manualDisabled}
-              onPointerDown={(e) => {
-                e.preventDefault()
-                e.currentTarget.setPointerCapture?.(e.pointerId)
-                onDriveStart("right")
-              }}
-              onPointerUp={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onMouseUp={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onTouchEnd={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onTouchCancel={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              onPointerLeave={(e) => {
-                onDriveStop()
-                e.currentTarget.blur()
-              }}
-              onPointerCancel={(e) => {
-                onDriveStop()
-                e.currentTarget.releasePointerCapture?.(e.pointerId)
-                e.currentTarget.blur()
-              }}
-              onClick={(e) => {
-                e.currentTarget.blur()
-                onDriveStop()
-              }}
-              className="h-10 w-10 touch-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
-            >
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          </div>
+        {driveMode === "MANUAL" && (
+          <div className="space-y-2 sm:hidden">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">수동 조작</p>
+            <div className="flex justify-center">
+              <JoystickPad
+                disabled={manualDisabled}
+                vector={driveVector}
+                onMove={(v, w) => onDriveVector(v * DRIVE_MAX_V, w * DRIVE_MAX_W)}
+                onStop={onDriveStop}
+                size={120}
+              />
+            </div>
             {manualDisabled && (
               <p className="text-[11px] text-muted-foreground">네트워크 연결 시 수동 조작이 활성화됩니다.</p>
             )}
@@ -1188,26 +1000,57 @@ function ControlPanel({
               </span>
               <span>x,y 순서로 입력</span>
             </div>
-            {invalidLines.length > 0 && (
-              <div className="space-y-1">
-                <p className="text-[11px] text-red-400">잘못된 줄</p>
+            {invalidLineCount > 0 && showInvalidLines && (
+              <div className="space-y-2 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] text-red-300">좌표 형식을 확인해 주세요.</p>
+                  <button
+                    type="button"
+                    className="text-[11px] text-red-200 hover:text-red-100"
+                    onClick={() => {
+                      setShowInvalidLines(false)
+                      setShowAllInvalidLines(false)
+                      onDismissMissionError()
+                    }}
+                  >
+                    닫기
+                  </button>
+                </div>
                 <div className="space-y-1">
-                  {invalidLines.map((line, idx) => (
-                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-300">
-                      {line}
+                  {limitedInvalidLines.map((line, idx) => (
+                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-200">
+                      {truncateLine(line)}
                     </div>
                   ))}
                 </div>
+                {invalidLineCount > 3 && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-red-200 hover:text-red-100"
+                    onClick={() => setShowAllInvalidLines((prev) => !prev)}
+                  >
+                    {showAllInvalidLines ? "간단히 보기" : `더보기 (+${invalidLineCount - 3})`}
+                  </button>
+                )}
               </div>
             )}
-            {missionError && <p className="text-[11px] text-red-400">{missionError}</p>}
+            {missionError && !showInvalidLines && (
+              <button
+                type="button"
+                className="text-[11px] text-red-300 underline-offset-2 hover:underline"
+                onClick={() => setShowInvalidLines(true)}
+              >
+                좌표 오류 다시 보기
+              </button>
+            )}
           </div>
           {missionPoints.length > 0 && (
-            <div className="flex flex-wrap gap-2">
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-2">
               {missionPoints.map((point, index) => (
                 <div
                   key={`${point.x}-${point.y}-${index}`}
-                  className="flex items-center gap-1 rounded-full bg-secondary px-2 py-1 text-[11px] text-foreground"
+                  className="flex items-center gap-1 rounded-full bg-secondary border border-transparent px-2 py-1 text-[11px] text-foreground"
                   draggable
                   onDragStart={() => setDragIndex(index)}
                   onDragOver={(event) => event.preventDefault()}
@@ -1229,6 +1072,7 @@ function ControlPanel({
                   </button>
                 </div>
               ))}
+              </div>
             </div>
           )}
           <div className="grid grid-cols-2 gap-2">
@@ -1568,7 +1412,6 @@ export default function CameraPage() {
   const [showOverlay, setShowOverlay] = useState(true)
   const [cameraConnected, setCameraConnected] = useState(false)
   const [driveMode, setDriveMode] = useState<"AUTO" | "MANUAL" | "STOP">("STOP")
-  const [activeDriveCommand, setActiveDriveCommand] = useState<"forward" | "backward" | "left" | "right" | "stop" | null>(null)
   const [modeError, setModeError] = useState<string | null>(null)
   const [missionInput, setMissionInput] = useState("")
   const [missionError, setMissionError] = useState<string | null>(null)
@@ -1577,7 +1420,10 @@ export default function CameraPage() {
   const lastDriveToastRef = useRef<number>(0)
 
   const driveTimerRef = useRef<number | null>(null)
-  const driveCommandRef = useRef<"forward" | "backward" | "left" | "right" | "stop" | null>(null)
+  const driveCommandRef = useRef<{ v: number; w: number } | null>(null)
+  const driveTargetRef = useRef<{ v: number; w: number } | null>(null)
+  const driveCurrentRef = useRef<{ v: number; w: number }>({ v: 0, w: 0 })
+  const [driveVector, setDriveVector] = useState<{ v: number; w: number }>({ v: 0, w: 0 })
 
   React.useEffect(() => {
     let mounted = true
@@ -1699,6 +1545,7 @@ export default function CameraPage() {
     }
     window.localStorage.setItem(key, JSON.stringify(missionPoints))
   }, [missionPoints, selectedCarId])
+
 
   const lastDetectionLabel = useMemo(() => {
     const latest = recentDetections.recentDetections[0]
@@ -1838,6 +1685,11 @@ export default function CameraPage() {
     setMissionInput("")
   }, [appendMissionPoints, parsedMissionInput])
 
+  const handleDismissMissionError = useCallback(() => {
+    setMissionError(null)
+    setInvalidMissionLines([])
+  }, [])
+
   const handleAddFromDetections = useCallback(() => {
     const points = recentDetections.recentDetections
       .filter((d) => d.x != null && d.y != null)
@@ -1935,17 +1787,8 @@ export default function CameraPage() {
     }
   }
 
-  const sendDriveCommand = useCallback(async (command: "forward" | "backward" | "left" | "right" | "stop") => {
+  const sendDriveVector = useCallback(async (v: number, w: number) => {
     if (!selectedCarId || !networkOnline || driveMode !== "MANUAL") return
-    const map: Record<typeof command, { v: number; w: number }> = {
-      forward: { v: 0.3, w: 0 },
-      backward: { v: -0.3, w: 0 },
-      left: { v: 0, w: 0.6 },
-      right: { v: 0, w: -0.6 },
-      stop: { v: 0, w: 0 },
-    }
-
-    const { v, w } = map[command]
     try {
       await carApi.controlCar(selectedCarId, v, w)
     } catch {
@@ -1957,30 +1800,66 @@ export default function CameraPage() {
     }
   }, [selectedCarId, networkOnline, driveMode, toast])
 
-  const handleDriveStart = (command: "forward" | "backward" | "left" | "right" | "stop") => {
-    if (driveMode !== "MANUAL") return
-    driveCommandRef.current = command
-    setActiveDriveCommand(command)
-    if (driveTimerRef.current != null) {
-      window.clearInterval(driveTimerRef.current)
-      driveTimerRef.current = null
-    }
-    sendDriveCommand(command).catch(() => { })
-    driveTimerRef.current = window.setInterval(() => {
-      if (!driveCommandRef.current) return
-      sendDriveCommand(driveCommandRef.current).catch(() => { })
-    }, 200)
-  }
+  const stepDriveCommand = React.useCallback(() => {
+    const target = driveTargetRef.current
+    if (!target) return
+    const current = driveCurrentRef.current
 
-  const handleDriveStop = () => {
+    const stepAxis = (cur: number, tgt: number, maxStep: number) => {
+      if (cur === tgt) return cur
+      const delta = tgt - cur
+      const step = Math.abs(delta) <= maxStep ? delta : Math.sign(delta) * maxStep
+      return cur + step
+    }
+
+    const accelV = DRIVE_MAX_V * 0.12
+    const accelW = DRIVE_MAX_W * 0.12
+    const decelV = DRIVE_MAX_V * 0.3
+    const decelW = DRIVE_MAX_W * 0.3
+
+    const nextV = stepAxis(
+      current.v,
+      target.v,
+      Math.abs(target.v) < Math.abs(current.v) ? decelV : accelV
+    )
+    const nextW = stepAxis(
+      current.w,
+      target.w,
+      Math.abs(target.w) < Math.abs(current.w) ? decelW : accelW
+    )
+
+    driveCurrentRef.current = { v: nextV, w: nextW }
+    driveCommandRef.current = { v: nextV, w: nextW }
+    sendDriveVector(nextV, nextW).catch(() => { })
+  }, [sendDriveVector])
+
+  const handleDriveVector = React.useCallback((v: number, w: number) => {
+    if (driveMode !== "MANUAL") return
+    const clamp = (value: number) => Math.min(1, Math.max(-1, value))
+    setDriveVector({
+      v: clamp(DRIVE_MAX_V ? v / DRIVE_MAX_V : 0),
+      w: clamp(DRIVE_MAX_W ? w / DRIVE_MAX_W : 0),
+    })
+    driveTargetRef.current = { v, w }
+    if (driveTimerRef.current == null) {
+      driveTimerRef.current = window.setInterval(() => {
+        stepDriveCommand()
+      }, 120)
+    }
+    stepDriveCommand()
+  }, [driveMode, stepDriveCommand])
+
+  const handleDriveStop = React.useCallback(() => {
     driveCommandRef.current = null
-    setActiveDriveCommand(null)
+    driveTargetRef.current = null
+    driveCurrentRef.current = { v: 0, w: 0 }
     if (driveTimerRef.current != null) {
       window.clearInterval(driveTimerRef.current)
       driveTimerRef.current = null
     }
-    sendDriveCommand("stop").catch(() => { })
-  }
+    setDriveVector({ v: 0, w: 0 })
+    sendDriveVector(0, 0).catch(() => { })
+  }, [sendDriveVector])
 
   React.useEffect(() => {
     return () => {
@@ -1991,6 +1870,12 @@ export default function CameraPage() {
   }, [])
 
   React.useEffect(() => {
+    if (driveMode !== "MANUAL") {
+      setDriveVector({ v: 0, w: 0 })
+    }
+  }, [driveMode])
+
+  React.useEffect(() => {
     const handleGlobalStop = () => {
       if (driveCommandRef.current) {
         handleDriveStop()
@@ -1998,6 +1883,8 @@ export default function CameraPage() {
     }
     window.addEventListener("pointerup", handleGlobalStop)
     window.addEventListener("pointercancel", handleGlobalStop)
+    window.addEventListener("touchend", handleGlobalStop)
+    window.addEventListener("touchcancel", handleGlobalStop)
     window.addEventListener("blur", handleGlobalStop)
     const handleVisibility = () => {
       if (document.visibilityState !== "visible") handleGlobalStop()
@@ -2006,6 +1893,8 @@ export default function CameraPage() {
     return () => {
       window.removeEventListener("pointerup", handleGlobalStop)
       window.removeEventListener("pointercancel", handleGlobalStop)
+      window.removeEventListener("touchend", handleGlobalStop)
+      window.removeEventListener("touchcancel", handleGlobalStop)
       window.removeEventListener("blur", handleGlobalStop)
       document.removeEventListener("visibilitychange", handleVisibility)
     }
@@ -2015,73 +1904,53 @@ export default function CameraPage() {
   React.useEffect(() => {
     if (driveMode !== "MANUAL" || !networkOnline || !selectedCarId) return
 
-    const keyToCommand: Record<string, "forward" | "backward" | "left" | "right"> = {
-      ArrowUp: "forward",
-      ArrowDown: "backward",
-      ArrowLeft: "left",
-      ArrowRight: "right",
-    }
-
     const pressedKeys = new Set<string>()
+    const isDirectionKey = (code: string) =>
+      code === "ArrowUp" || code === "ArrowDown" || code === "ArrowLeft" || code === "ArrowRight"
 
-    const startCommand = (command: "forward" | "backward" | "left" | "right") => {
-      // Clear any existing timer (from mouse or previous keyboard)
-      if (driveTimerRef.current != null) {
-        window.clearInterval(driveTimerRef.current)
-        driveTimerRef.current = null
+    const computeVector = () => {
+      const up = pressedKeys.has("ArrowUp")
+      const down = pressedKeys.has("ArrowDown")
+      const left = pressedKeys.has("ArrowLeft")
+      const right = pressedKeys.has("ArrowRight")
+
+      let v = 0
+      let w = 0
+      if (up && !down) v = DRIVE_MAX_V
+      else if (down && !up) v = -DRIVE_MAX_V
+
+      if (left && !right) w = DRIVE_MAX_W
+      else if (right && !left) w = -DRIVE_MAX_W
+
+      if (v === 0 && w !== 0) {
+        // Turn-in-place feels unnatural; add gentle forward creep
+        v = DRIVE_MAX_V * 0.25
       }
 
-      driveCommandRef.current = command
-      setActiveDriveCommand(command)
-      sendDriveCommand(command).catch(() => { })
-
-      driveTimerRef.current = window.setInterval(() => {
-        if (!driveCommandRef.current) return
-        sendDriveCommand(driveCommandRef.current).catch(() => { })
-      }, 200)
-    }
-
-    const stopCommand = () => {
-      driveCommandRef.current = null
-      setActiveDriveCommand(null)
-      if (driveTimerRef.current != null) {
-        window.clearInterval(driveTimerRef.current)
-        driveTimerRef.current = null
+      if (v !== 0 && w !== 0) {
+        // Diagonal: soften forward speed, emphasize turning for smoother arc
+        v *= 0.85
+        w = Math.sign(w) * Math.min(DRIVE_MAX_W, Math.abs(w) * 1.2)
       }
-      sendDriveCommand("stop").catch(() => { })
+
+      if (v === 0 && w === 0) {
+        handleDriveStop()
+      } else {
+        handleDriveVector(v, w)
+      }
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if typing in an input/textarea
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-
-      const command = keyToCommand[e.code]
-      console.log("[Keyboard] keydown:", e.code, "command:", command, "driveMode:", driveMode)
-      if (!command) return
-
-      e.preventDefault()
-
-      // Avoid repeated keydown events from holding the key
+      if (!isDirectionKey(e.code)) return
       if (pressedKeys.has(e.code)) return
       pressedKeys.add(e.code)
-
-      console.log("[Keyboard] startCommand:", command)
-      startCommand(command)
+      computeVector()
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
-
-      const command = keyToCommand[e.code]
-      if (!command) return
-
+      if (!isDirectionKey(e.code)) return
       pressedKeys.delete(e.code)
-
-      // Only stop if no direction keys are still pressed
-      const stillPressed = Array.from(pressedKeys).some(key => keyToCommand[key])
-      if (!stillPressed) {
-        stopCommand()
-      }
+      computeVector()
     }
 
     window.addEventListener("keydown", handleKeyDown)
@@ -2091,7 +1960,7 @@ export default function CameraPage() {
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
     }
-  }, [driveMode, networkOnline, selectedCarId, sendDriveCommand])
+  }, [driveMode, networkOnline, selectedCarId, handleDriveStop, handleDriveVector])
 
   const carSelectCard = (
     <Card className="bg-card border-border">
@@ -2192,9 +2061,9 @@ export default function CameraPage() {
                   lastDetectionLabel={lastDetectionLabel}
                   isManual={driveMode === "MANUAL"}
                   manualDisabled={!networkOnline || carStatus.isLoading}
-                  onDriveStart={handleDriveStart}
+                  driveVector={driveVector}
+                  onDriveVector={handleDriveVector}
                   onDriveStop={handleDriveStop}
-                  activeDriveCommand={activeDriveCommand}
                   wsUrl={signalingUrl || "ws://I14B201.p.ssafy.io/ws/webrtc"}
                   detectionWsUrl={detectionWsUrl}
                   roomId={roomId}
@@ -2218,12 +2087,12 @@ export default function CameraPage() {
                 networkOnline={networkOnline}
                 driveMode={driveMode}
                 onChangeMode={handleChangeMode}
-                onDriveStart={handleDriveStart}
+                onDriveVector={handleDriveVector}
                 onDriveStop={handleDriveStop}
                 onStartMission={handleStartMission}
                 onStopMission={handleStopMission}
                 manualDisabled={!networkOnline || carStatus.isLoading}
-                activeDriveCommand={activeDriveCommand}
+                driveVector={driveVector}
                 missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
                 missionStopDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO"}
                 missionInput={missionInput}
@@ -2232,6 +2101,7 @@ export default function CameraPage() {
                 missionError={missionError}
                 missionPoints={missionPoints}
                 invalidLines={invalidMissionLines}
+                onDismissMissionError={handleDismissMissionError}
                 onAddMissionPoints={handleAddMissionPoints}
                 onRemoveMissionPoint={handleRemoveMissionPoint}
                 onAddFromDetections={handleAddFromDetections}

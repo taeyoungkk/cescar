@@ -10,7 +10,7 @@ v24.13.0 로 깔았음
 
 ## 3. 실행
 ### 프론트는 Vercel, 백은 EC2인 경우 (웹, 모바일 모두 가능)
-`cd Frontend` 후
+<!-- `cd Frontend` 후
 
 `npm i -g vercel` (vercel 설치)
 `vercel login`
@@ -19,9 +19,11 @@ v24.13.0 로 깔았음
 (마지막 `Would you like to pull environment variables now?` 질문에만 n 하면 되는 것으로 알고 있음)
 
 `vercel --prod`
-실행 후 나오는 Production url로 모바일 크롬에서 접속
+실행 후 나오는 Production url로 모바일 크롬에서 접속 -->
 
- “홈 화면에 추가”로 PWA 설치 <br>
+`https://cescar.vercel.app` 로 접속
+
+모바일 크롬 화면에서 좌측 상단 점 3개 눌러서 “홈 화면에 추가”로 PWA 설치 <br>
 → 그러면 모바일에서도 앱처럼 열리고, FCM 알림도 받을 수 있음.
 
 ### 프론트, 백 둘 다 로컬일 경우 (웹만 가능)

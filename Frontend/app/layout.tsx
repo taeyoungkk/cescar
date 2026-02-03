@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { AnalyticsClient } from "./analytics-client"
 import { SwRegister } from "./sw-register"
 import { OfflineBanner } from "@/components/offline-banner"
+import { OfflineToast } from "@/components/offline-toast"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
@@ -48,6 +49,7 @@ export default function RootLayout({
       <body className="font-sans antialiased" suppressHydrationWarning>
         <SwRegister />
         <OfflineBanner />
+        <OfflineToast />
         {children}
         <Toaster />
         {isProd ? <AnalyticsClient /> : null}

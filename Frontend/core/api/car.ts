@@ -3,7 +3,7 @@ import { apiFetch } from "./http"
 import type { CarDetail, CarStatus, CarSummary, CarMode } from "../types"
 
 function normalizeCarStatus(raw: any): CarStatus {
-  // 1) ?됲깂?뺤쓣 ?곗꽑 ?좊ː
+  // 1) 키/포맷 불일치를 우선 정리
   const x = raw?.x ?? raw?.pose?.x ?? null
   const y = raw?.y ?? raw?.pose?.y ?? null
   const heading = Number(raw?.heading ?? raw?.pose?.heading ?? 0)
@@ -49,7 +49,7 @@ export async function getCarDetail(carId: number): Promise<CarDetail> {
 export async function getCarStatus(carId: number): Promise<CarStatus> {
   const raw = await apiFetch<any>(`/api/cars/${carId}/status`)
   const normalized = normalizeCarStatus(raw)
-  console.log("[getCarStatus]", raw, "=>", normalized) // ?꾩떆
+  console.log("[getCarStatus]", raw, "=>", normalized) // 임시
   return normalized
 }
 

@@ -1,5 +1,5 @@
 import React from "react"
-import type { Metadata } from "next"
+import type { Metadata, Viewport } from "next"
 import { Geist, Geist_Mono } from "next/font/google"
 import { AnalyticsClient } from "./analytics-client"
 import { SwRegister } from "./sw-register"
@@ -31,6 +31,11 @@ export const metadata: Metadata = {
     ],
     apple: "/icons/icon-192.png",
   },
+}
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
 }
 
 export default function RootLayout({

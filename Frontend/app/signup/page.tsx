@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/useAuth"
 
 interface SignupFormProps {
   name: string
+  nickname: string
   email: string
   password: string
   confirmPassword: string
@@ -25,6 +26,7 @@ interface SignupFormProps {
   error: string | null
   validationErrors: Record<string, string>
   onNameChange: (value: string) => void
+  onNicknameChange: (value: string) => void
   onEmailChange: (value: string) => void
   onPasswordChange: (value: string) => void
   onConfirmPasswordChange: (value: string) => void
@@ -34,6 +36,7 @@ interface SignupFormProps {
 
 function SignupForm({
   name,
+  nickname,
   email,
   password,
   confirmPassword,
@@ -42,6 +45,7 @@ function SignupForm({
   error,
   validationErrors,
   onNameChange,
+  onNicknameChange,
   onEmailChange,
   onPasswordChange,
   onConfirmPasswordChange,
@@ -74,6 +78,22 @@ function SignupForm({
             />
             {validationErrors.name && (
               <p className="text-xs text-destructive">{validationErrors.name}</p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="nickname">??????</Label>
+            <Input
+              id="nickname"
+              type="text"
+              placeholder="????????? ?????????"
+              value={nickname}
+              onChange={(e) => onNicknameChange(e.target.value)}
+              required
+              className="bg-input border-border"
+            />
+            {validationErrors.nickname && (
+              <p className="text-xs text-destructive">{validationErrors.nickname}</p>
             )}
           </div>
 
@@ -195,6 +215,7 @@ export default function SignupPage() {
   const { signup, isLoading, error, clearError } = useAuth()
   
   const [name, setName] = useState("")
+  const [nickname, setNickname] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -208,13 +229,17 @@ export default function SignupPage() {
       clearError()
     }
     setValidationErrors({})
-  }, [name, email, password, confirmPassword])
+  }, [name, nickname, email, password, confirmPassword])
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {}
 
     if (!name.trim()) {
       errors.name = "이름을 입력해주세요."
+    }
+
+    if (!nickname.trim()) {
+      errors.nickname = "????????? ?????????."
     }
 
     if (!email.trim()) {
@@ -238,7 +263,7 @@ export default function SignupPage() {
 
     if (!validateForm()) return
 
-    const success = await signup({ name, email, password })
+    const success = await signup({ name, nickname, email, password })
     if (success) {
       setIsSuccess(true)
       setTimeout(() => {
@@ -254,6 +279,7 @@ export default function SignupPage() {
       ) : (
         <SignupForm
           name={name}
+          nickname={nickname}
           email={email}
           password={password}
           confirmPassword={confirmPassword}
@@ -262,6 +288,7 @@ export default function SignupPage() {
           error={error}
           validationErrors={validationErrors}
           onNameChange={setName}
+          onNicknameChange={setNickname}
           onEmailChange={setEmail}
           onPasswordChange={setPassword}
           onConfirmPasswordChange={setConfirmPassword}

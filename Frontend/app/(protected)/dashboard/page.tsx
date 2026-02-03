@@ -13,7 +13,6 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  TrendingUp,
   BarChart3,
   X,
   Camera,
@@ -29,6 +28,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription, SheetFooter } from "@/components/ui/sheet"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,9 +58,10 @@ interface SummaryCardProps {
   icon: React.ElementType
   subtitle?: string
   variant?: "default" | "success" | "warning" | "danger"
+  compact?: boolean
 }
 
-function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default" }: SummaryCardProps) {
+function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default", compact = false }: SummaryCardProps) {
   const variantStyles = {
     default: "text-foreground",
     success: "text-emerald-400",
@@ -70,15 +71,15 @@ function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default" }
 
   return (
     <Card className="bg-card border-border">
-      <CardContent className="p-4">
+      <CardContent className={compact ? "p-3" : "p-4"}>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">{title}</p>
-            <p className={`text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
-            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+            <p className={`text-base sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
+            {!compact && subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
-          <div className={`p-3 rounded-lg bg-secondary ${variantStyles[variant]}`}>
-            <Icon className="h-5 w-5" />
+          <div className={`p-2.5 rounded-lg bg-secondary ${variantStyles[variant]}`}>
+            <Icon className={compact ? "h-3.5 w-3.5" : "h-5 w-5"} />
           </div>
         </div>
       </CardContent>
@@ -94,28 +95,44 @@ interface StatsSectionProps {
 function StatsSection({ stats, isLoading }: StatsSectionProps) {
   if (isLoading || !stats) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i} className="bg-card border-border">
-            <CardContent className="p-4 h-24 animate-pulse bg-secondary/20" />
-          </Card>
-        ))}
-      </div>
+      <>
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+          {[...Array(3)].map((_, i) => (
+            <Card key={i} className="bg-card border-border min-w-[140px]">
+              <CardContent className="p-3 h-20 animate-pulse bg-secondary/20" />
+            </Card>
+          ))}
+        </div>
+        <div className="hidden lg:grid grid-cols-3 gap-4">
+          {[...Array(3)].map((_, i) => (
+            <Card key={i} className="bg-card border-border">
+              <CardContent className="p-4 h-24 animate-pulse bg-secondary/20" />
+            </Card>
+          ))}
+        </div>
+      </>
     )
   }
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <SummaryCard title="오늘 탐지" value={stats.todayCount} icon={Bug} subtitle="건" />
-      <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" />
-      <SummaryCard
-        title="오탐률"
-        value={`${stats.falseAlarmRate}%`}
-        icon={TrendingUp}
-        variant={stats.falseAlarmRate > 15 ? "warning" : "success"}
-      />
-      <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" />
-    </div>
+    <>
+      <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+        <div className="min-w-[120px]">
+          <SummaryCard title="오늘 탐지" value={stats.todayCount} icon={Bug} subtitle="건" compact />
+        </div>
+        <div className="min-w-[120px]">
+          <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" compact />
+        </div>
+        <div className="min-w-[120px]">
+          <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" compact />
+        </div>
+      </div>
+      <div className="hidden lg:grid grid-cols-3 gap-4">
+        <SummaryCard title="오늘 탐지" value={stats.todayCount} icon={Bug} subtitle="건" />
+        <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" />
+        <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" />
+      </div>
+    </>
   )
 }
 
@@ -349,54 +366,56 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
       }}
     >
       <SheetContent side="right" className="w-full sm:max-w-lg bg-card border-border overflow-y-auto">
-        <SheetHeader className="border-b border-border px-5 pt-4 pb-4 pr-12">
+        <SheetHeader className="border-b border-border px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4 pr-10 sm:pr-12">
           <div className="flex items-center justify-between gap-3 pr-2">
             <div>
-              <SheetTitle className="text-foreground">탐지 상세 정보</SheetTitle>
-              <SheetDescription className="text-muted-foreground">탐지 ID: {record.id}</SheetDescription>
+              <SheetTitle className="text-foreground text-sm sm:text-lg">탐지 상세 정보</SheetTitle>
+              <SheetDescription className="text-muted-foreground text-[11px] sm:text-sm">탐지 ID: {record.id}</SheetDescription>
             </div>
             <div className="shrink-0">
               <StatusBadge status={record.status} />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 pt-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 sm:pt-3">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 시간</p>
-              <p className="text-sm font-medium text-foreground">
+              <p className="text-[11px] sm:text-sm font-medium text-foreground">
                 {record.date} {record.time}
               </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">차량 ID</p>
-              <p className="text-sm font-medium text-foreground">{record.robotId}</p>
+              <p className="text-[11px] sm:text-sm font-medium text-foreground">{record.robotId}</p>
             </div>
           </div>
         </SheetHeader>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
-          <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
-            {snapshotSrc ? (
-              <img
-                src={snapshotSrc}
-                alt="snapshot"
-                className="absolute inset-0 w-full h-full object-cover"
-              />
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className="text-center space-y-2">
-                  <Camera className="h-10 w-10 text-muted-foreground/50 mx-auto" />
-                  <p className="text-sm text-muted-foreground">
-                    {snapshotLoading ? "스냅샷 불러오는 중..." : "탐지 순간 스냅샷"}
-                  </p>
+        <div className="flex-1 overflow-y-auto px-3 sm:px-5 py-3 sm:py-4 space-y-3 sm:space-y-6">
+          <div className="flex justify-center">
+            <div className="relative w-full max-w-[320px] sm:max-w-none sm:w-full aspect-[4/3] sm:aspect-[16/9] bg-secondary/50 rounded-lg overflow-hidden">
+              {snapshotSrc ? (
+                <img
+                  src={snapshotSrc}
+                  alt="snapshot"
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center space-y-2">
+                    <Camera className="h-10 w-10 text-muted-foreground/50 mx-auto" />
+                    <p className="text-sm text-muted-foreground">
+                      {snapshotLoading ? "스냅샷 불러오는 중..." : "탐지 순간 스냅샷"}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 p-3">
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/20 p-2 sm:p-3">
             <div className="space-y-1">
-              <p className="text-xs text-muted-foreground">탐지 영상 확인</p>
-              <p className="text-xs text-muted-foreground/70">탐지 전후 영상을 확인하세요.</p>
+              <p className="text-xs text-muted-foreground">탐지 영상</p>
+              <p className="hidden sm:block text-[11px] text-muted-foreground/70">탐지 전후 영상을 확인하세요.</p>
             </div>
             <Button
               variant="outline"
@@ -409,12 +428,12 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
             </Button>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             <h4 className="text-sm font-medium text-foreground">탐지 정보</h4>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 유형</p>
-                <p className="text-sm font-medium text-foreground">{typeLabels[record.type] || record.type}</p>
+                <p className="text-xs sm:text-sm font-medium text-foreground">{typeLabels[record.type] || record.type}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs text-muted-foreground uppercase tracking-wide">확신도</p>
@@ -425,13 +444,13 @@ function DetailPanel({ record, open, onClose, onDelete }: DetailPanelProps) {
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-foreground">메모</label>
-            <div className="min-h-[80px] rounded-md border border-border bg-secondary/20 p-3 text-sm text-muted-foreground">
+            <div className="min-h-[64px] rounded-md border border-border bg-secondary/20 p-3 text-xs sm:text-sm text-muted-foreground">
               {record.notes?.trim() ? record.notes : "메모가 없습니다."}
             </div>
           </div>
         </div>
 
-        <SheetFooter className="border-t border-border px-5 pb-5 pt-4 gap-2">
+        <SheetFooter className="border-t border-border px-4 sm:px-5 pb-4 sm:pb-5 pt-3 sm:pt-4 gap-2">
           {onDelete && (
             <Button
               variant="destructive"
@@ -798,14 +817,14 @@ function DashboardContent() {
   }, [deepLinkId, detections, selectDetection])
 
   return (
-    <div className="p-4 lg:p-6">
+    <div className="p-3 sm:p-4 lg:p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-foreground">탐지 기록</h1>
+        <div className="mb-4 sm:mb-6">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">탐지 기록</h1>
           <p className="text-sm text-muted-foreground mt-1">탐지 기록 및 통계를 확인하세요.</p>
         </div>
 
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="mb-4 hidden lg:flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="w-full sm:w-auto sm:min-w-[280px] sm:flex-none">
             <Select
               value={logId ? String(logId) : ""}
@@ -863,23 +882,23 @@ function DashboardContent() {
               ))}
             </SelectContent>
           </Select>
-            <Select
-              value={logSort}
-              onValueChange={(value) => setLogSort(value as "desc" | "asc")}
-              disabled={useSearch || sortedLogs.length === 0}
-            >
-              <SelectTrigger className="w-full sm:w-[140px] bg-input border-border">
-                <SelectValue placeholder="정렬" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="desc">최신 로그</SelectItem>
-                <SelectItem value="asc">오래된 로그</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select
-              value={filters.type || "all"}
-              onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
-            >
+          <Select
+            value={logSort}
+            onValueChange={(value) => setLogSort(value as "desc" | "asc")}
+            disabled={useSearch || sortedLogs.length === 0}
+          >
+            <SelectTrigger className="w-full sm:w-[140px] bg-input border-border">
+              <SelectValue placeholder="정렬" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="desc">최신 로그</SelectItem>
+              <SelectItem value="asc">오래된 로그</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={filters.type || "all"}
+            onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
+          >
             <SelectTrigger className="w-full sm:w-[140px] bg-input border-border">
               <Filter className="h-4 w-4 mr-2 text-muted-foreground" />
               <SelectValue placeholder="유형" />
@@ -919,41 +938,211 @@ function DashboardContent() {
             />
             <span className="text-sm text-muted-foreground">통합 검색</span>
           </div>
-          {useSearch && (
-            <Badge variant="secondary" className="text-xs">
-              통합 검색 결과
-            </Badge>
-          )}
-          {!useSearch && mapFilter !== "all" && (
-            <Badge variant="secondary" className="text-xs">
-              지도: {mapFilter}
-            </Badge>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              if (typeof window !== "undefined") {
-                window.localStorage.removeItem("dashboard.filters")
-              }
-              setMapFilter("all")
-              setLogSort("desc")
-              clearFilters()
-              window.history.replaceState(null, "", window.location.pathname)
-              toast({ title: "필터 초기화", description: "필터와 저장값을 초기화했습니다." })
-            }}
-            className="text-xs h-8 px-2"
-          >
-            <X className="h-3 w-3 mr-1" />
-            필터 초기화
-          </Button>
-          <span className="text-sm text-muted-foreground">총 {detections.length}건</span>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {useSearch && (
+                <Badge variant="secondary" className="text-xs">
+                  통합 검색 결과
+                </Badge>
+              )}
+              {!useSearch && mapFilter !== "all" && (
+                <Badge variant="secondary" className="text-xs">
+                  지도: {mapFilter}
+                </Badge>
+              )}
+              <span className="text-xs text-muted-foreground whitespace-nowrap">총 {detections.length}건</span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.localStorage.removeItem("dashboard.filters")
+                }
+                setMapFilter("all")
+                setLogSort("desc")
+                clearFilters()
+                window.history.replaceState(null, "", window.location.pathname)
+                toast({ title: "필터 초기화", description: "필터와 저장값을 초기화했습니다." })
+              }}
+              onPointerDown={(e) => e.currentTarget.blur()}
+              onPointerUp={(e) => e.currentTarget.blur()}
+              onPointerCancel={(e) => e.currentTarget.blur()}
+              onMouseUp={(e) => e.currentTarget.blur()}
+              onTouchEnd={(e) => e.currentTarget.blur()}
+              className="text-xs h-8 px-2 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
+            >
+              <X className="h-3 w-3 mr-1" />
+              필터 초기화
+            </Button>
+          </div>
+        </div>
+
+        <div className="mb-4 lg:hidden">
+          <Accordion type="multiple" defaultValue={["filters"]}>
+            <AccordionItem value="filters">
+              <AccordionTrigger>필터 보기</AccordionTrigger>
+              <AccordionContent>
+                <div className="grid grid-cols-1 gap-3">
+                  <Select
+                    value={logId ? String(logId) : ""}
+                    onValueChange={(value) => {
+                      setUseSearch(false)
+                      setLogId(Number(value))
+                    }}
+                    disabled={useSearch || logsLoading || sortedLogs.length === 0}
+                  >
+                    <SelectTrigger className="bg-input border-border">
+                      <SelectValue placeholder={logsLoading ? "운행 로그 불러오는 중..." : "운행 로그 선택"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sortedLogs.map((log) => (
+                        <SelectItem key={log.id} value={String(log.id)}>
+                          {formatLogLabel(log)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="relative w-full">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="ID로 검색..."
+                      value={filters.searchId || ""}
+                      onChange={(e) => setFilters({ ...filters, searchId: e.target.value })}
+                      className="pl-9 bg-input border-border"
+                    />
+                  </div>
+                  <DateRangePicker
+                    startDate={filters.dateFrom || ""}
+                    endDate={filters.dateTo || ""}
+                    onStartDateChange={(date) => setFilters({ ...filters, dateFrom: date })}
+                    onEndDateChange={(date) => setFilters({ ...filters, dateTo: date })}
+                  />
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <Select
+                      value={mapFilter}
+                      onValueChange={(value) => {
+                        setMapFilter(value)
+                        setUseSearch(false)
+                      }}
+                      disabled={useSearch || mapOptions.length === 0}
+                    >
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                        <MapIcon className="hidden sm:inline-block h-4 w-4 mr-2 text-muted-foreground" />
+                        <SelectValue placeholder="지도" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">모든 지도</SelectItem>
+                        {mapOptions.map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={logSort}
+                      onValueChange={(value) => setLogSort(value as "desc" | "asc")}
+                      disabled={useSearch || sortedLogs.length === 0}
+                    >
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                        <SelectValue placeholder="정렬" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="desc">최신 로그</SelectItem>
+                        <SelectItem value="asc">오래된 로그</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={filters.type || "all"}
+                      onValueChange={(value) => setFilters({ ...filters, type: value as DetectionType | "all" })}
+                    >
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                        <Filter className="hidden sm:inline-block h-4 w-4 mr-2 text-muted-foreground" />
+                        <SelectValue placeholder="유형" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">모든 유형</SelectItem>
+                        <SelectItem value="cockroach">바퀴벌레</SelectItem>
+                        <SelectItem value="ant">개미</SelectItem>
+                        <SelectItem value="fly">파리</SelectItem>
+                        <SelectItem value="mosquito">모기</SelectItem>
+                        <SelectItem value="spider">거미</SelectItem>
+                        <SelectItem value="unknown">미확인</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select
+                      value={filters.status || "all"}
+                      onValueChange={(value) => setFilters({ ...filters, status: value as DetectionStatus | "all" })}
+                    >
+                      <SelectTrigger className="bg-input border-border h-9 px-2 text-[11px]">
+                        <SelectValue placeholder="상태" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">모든 상태</SelectItem>
+                        <SelectItem value="detected">탐지됨</SelectItem>
+                        <SelectItem value="confirmed">확인됨</SelectItem>
+                        <SelectItem value="false_alarm">오탐</SelectItem>
+                        <SelectItem value="resolved">해결됨</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={useSearch}
+                      onCheckedChange={(checked) => {
+                        setUseSearch(checked)
+                        if (checked) setLogId(null)
+                      }}
+                    />
+                    <span className="text-sm text-muted-foreground">통합 검색</span>
+                    {useSearch && (
+                      <Badge variant="secondary" className="text-xs">
+                        통합 검색 결과
+                      </Badge>
+                    )}
+                  </div>
+                  {!useSearch && mapFilter !== "all" && (
+                    <Badge variant="secondary" className="text-xs w-fit">
+                      지도: {mapFilter}
+                    </Badge>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">총 {detections.length}건</span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        if (typeof window !== "undefined") {
+                          window.localStorage.removeItem("dashboard.filters")
+                        }
+                        setMapFilter("all")
+                        setLogSort("desc")
+                        clearFilters()
+                        window.history.replaceState(null, "", window.location.pathname)
+                        toast({ title: "필터 초기화", description: "필터와 저장값을 초기화했습니다." })
+                      }}
+                      onPointerDown={(e) => e.currentTarget.blur()}
+                      onPointerUp={(e) => e.currentTarget.blur()}
+                      onPointerCancel={(e) => e.currentTarget.blur()}
+                      onMouseUp={(e) => e.currentTarget.blur()}
+                      onTouchEnd={(e) => e.currentTarget.blur()}
+                      className="text-xs h-8 px-2 focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none"
+                    >
+                      <X className="h-3 w-3 mr-1" />
+                      필터 초기화
+                    </Button>
+                  </div>
+                </div>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
         {isLoading && (
           <div className="mb-4 h-2 w-full rounded-full bg-secondary/30 animate-pulse" />
         )}
 
-        <div className="mb-6">
+        <div className="mb-4 sm:mb-6">
           <StatsSection stats={stats} isLoading={isLoading} />
         </div>
 

@@ -52,6 +52,40 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
     return null
   }
 
+  const waitForActive = () =>
+    new Promise<void>((resolve, reject) => {
+      if (registration.active) {
+        resolve()
+        return
+      }
+      const worker = registration.installing ?? registration.waiting
+      if (!worker) {
+        reject(new Error("Service worker is not installing."))
+        return
+      }
+      const timeout = window.setTimeout(() => {
+        reject(new Error("Service worker activation timeout."))
+      }, 10000)
+      worker.addEventListener("statechange", () => {
+        if (registration.active) {
+          window.clearTimeout(timeout)
+          resolve()
+          return
+        }
+        if (worker.state === "redundant") {
+          window.clearTimeout(timeout)
+          reject(new Error("Service worker became redundant."))
+        }
+      })
+    })
+
+  try {
+    await waitForActive()
+  } catch (error) {
+    console.error("[FCM] Service worker not active.", error)
+    return null
+  }
+
   let token: string
   try {
     token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration })

@@ -32,6 +32,7 @@ import { Progress } from "@/components/ui/progress"
 import { Input } from "@/components/ui/input"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { useToast } from "@/components/ui/use-toast"
 import {
   AlertDialog,
@@ -67,12 +68,14 @@ function StatusCard({
   icon: Icon,
   subtitle,
   variant = "default",
+  compact = false,
 }: {
   title: string
   value: string | number
   icon: React.ElementType
   subtitle?: string
   variant?: "default" | "success" | "warning" | "danger"
+  compact?: boolean
 }) {
   const variantStyles = {
     default: "text-foreground",
@@ -83,15 +86,15 @@ function StatusCard({
 
   return (
     <Card className="bg-card border-border">
-      <CardContent className="p-4">
+      <CardContent className={compact ? "p-3" : "p-3 sm:p-4"}>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">{title}</p>
-            <p className={`text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
-            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+            <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">{title}</p>
+            <p className={`text-lg sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
+            {!compact && subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
-          <div className={`p-3 rounded-lg bg-secondary ${variantStyles[variant]}`}>
-            <Icon className="h-5 w-5" />
+          <div className={`p-2.5 sm:p-3 rounded-lg bg-secondary ${variantStyles[variant]}`}>
+            <Icon className={compact ? "h-4 w-4" : "h-4 w-4 sm:h-5 sm:w-5"} />
           </div>
         </div>
       </CardContent>
@@ -110,10 +113,10 @@ function RobotStatusSection({
 }) {
   if (isLoading || !status) {
     return (
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {[...Array(4)].map((_, i) => (
           <Card key={i} className="bg-card border-border">
-            <CardContent className="p-4 h-24 animate-pulse bg-secondary/20" />
+            <CardContent className="p-3 sm:p-4 h-20 sm:h-24 animate-pulse bg-secondary/20" />
           </Card>
         ))}
       </div>
@@ -128,36 +131,68 @@ function RobotStatusSection({
   })
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <StatusCard
-        title="연결 상태"
-        value={status.isOnline ? "온라인" : "오프라인"}
-        icon={status.isOnline ? Wifi : WifiOff}
-        variant={status.isOnline ? "success" : "danger"}
-        subtitle={status.isOnline ? "정상 연결" : "연결 끊김"}
-      />
-      <StatusCard
-        title="마지막 수신"
-        value={lastSeenLabel}
-        icon={Clock}
-        variant="default"
-        subtitle="마지막 수신 시각"
-      />
-      <StatusCard
-        title="현재 모드"
-        value={modeLabels[status.mode]}
-        icon={Activity}
-        variant={status.mode === "AUTO" ? "success" : status.mode === "MANUAL" ? "warning" : "default"}
-        subtitle={status.mode === "AUTO" ? "자율 주행" : status.mode === "MANUAL" ? "수동 조작" : "정지 상태"}
-      />
-      <StatusCard
-        title="오늘 탐지"
-        value={stats?.todayCount ?? 0}
-        icon={Bug}
-        variant="default"
-        subtitle={`이번 주 ${stats?.weekCount ?? 0}건`}
-      />
-    </div>
+    <>
+      <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+        <div className="min-w-[140px]">
+          <StatusCard
+            title="연결 상태"
+            value={status.isOnline ? "온라인" : "오프라인"}
+            icon={status.isOnline ? Wifi : WifiOff}
+            variant={status.isOnline ? "success" : "danger"}
+            compact
+          />
+        </div>
+        <div className="min-w-[140px]">
+          <StatusCard
+            title="현재 모드"
+            value={modeLabels[status.mode]}
+            icon={Activity}
+            variant={status.mode === "AUTO" ? "success" : status.mode === "MANUAL" ? "warning" : "default"}
+            compact
+          />
+        </div>
+        <div className="min-w-[140px]">
+          <StatusCard
+            title="오늘 탐지"
+            value={stats?.todayCount ?? 0}
+            icon={Bug}
+            variant="default"
+            compact
+          />
+        </div>
+      </div>
+
+      <div className="hidden lg:grid grid-cols-4 gap-4">
+        <StatusCard
+          title="연결 상태"
+          value={status.isOnline ? "온라인" : "오프라인"}
+          icon={status.isOnline ? Wifi : WifiOff}
+          variant={status.isOnline ? "success" : "danger"}
+          subtitle={status.isOnline ? "정상 연결" : "연결 끊김"}
+        />
+        <StatusCard
+          title="마지막 수신"
+          value={lastSeenLabel}
+          icon={Clock}
+          variant="default"
+          subtitle="마지막 수신 시각"
+        />
+        <StatusCard
+          title="현재 모드"
+          value={modeLabels[status.mode]}
+          icon={Activity}
+          variant={status.mode === "AUTO" ? "success" : status.mode === "MANUAL" ? "warning" : "default"}
+          subtitle={status.mode === "AUTO" ? "자율 주행" : status.mode === "MANUAL" ? "수동 조작" : "정지 상태"}
+        />
+        <StatusCard
+          title="오늘 탐지"
+          value={stats?.todayCount ?? 0}
+          icon={Bug}
+          variant="default"
+          subtitle={`이번 주 ${stats?.weekCount ?? 0}건`}
+        />
+      </div>
+    </>
   )
 }
 
@@ -178,7 +213,7 @@ type StoredMap = {
 
 function MapVisualization({ status, progress = 0 }: { status: MapStatus; progress?: number }) {
   return (
-    <div className="relative w-full aspect-[4/3] bg-zinc-900 rounded-lg overflow-hidden border border-border">
+    <div className="relative w-full aspect-[16/9] max-h-[200px] sm:max-h-none sm:aspect-[4/3] bg-zinc-900 rounded-lg overflow-hidden border border-border">
       {/* Grid background */}
       <div
         className="absolute inset-0 opacity-20"
@@ -369,18 +404,18 @@ function MapMetadataPanel({
   if (status === "no_map") return null
 
   return (
-    <div className="grid grid-cols-3 gap-3 mt-4">
-      <div className="bg-secondary/50 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground mb-1">생성 시각</p>
-        <p className="text-sm font-medium text-foreground">{generatedAt || "-"}</p>
+    <div className="grid grid-cols-3 gap-2 mt-3 sm:grid-cols-3 sm:gap-3 sm:mt-4">
+      <div className="bg-secondary/50 rounded-lg p-2 sm:p-3">
+        <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">생성 시각</p>
+        <p className="text-xs sm:text-sm font-medium text-foreground">{generatedAt || "-"}</p>
       </div>
-      <div className="bg-secondary/50 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground mb-1">맵 영역</p>
-        <p className="text-sm font-medium text-foreground">{areaSize || "-"}</p>
+      <div className="bg-secondary/50 rounded-lg p-2 sm:p-3">
+        <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">맵 영역</p>
+        <p className="text-xs sm:text-sm font-medium text-foreground">{areaSize || "-"}</p>
       </div>
-      <div className="bg-secondary/50 rounded-lg p-3">
-        <p className="text-xs text-muted-foreground mb-1">차량 ID</p>
-        <p className="text-sm font-medium text-foreground font-mono">{robotId || "-"}</p>
+      <div className="bg-secondary/50 rounded-lg p-2 sm:p-3">
+        <p className="text-[11px] sm:text-xs text-muted-foreground mb-1">차량 ID</p>
+        <p className="text-xs sm:text-sm font-medium text-foreground font-mono">{robotId || "-"}</p>
       </div>
     </div>
   )
@@ -576,19 +611,24 @@ function MapGenerationSection({
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3 sm:space-y-4">
         <MapVisualization status={mapStatus} progress={progress} />
         <MapMetadataPanel status={mapStatus} generatedAt={generatedAt} areaSize={areaSize} robotId={robotId} />
 
-        <div className="flex gap-3">
+        <div className="flex gap-2 sm:gap-3">
           {mapStatus === "generating" ? (
-            <Button variant="destructive" className="flex-1" onClick={onStopGeneration} disabled={isDisabled || !onStopGeneration}>
+            <Button
+              variant="destructive"
+              className="flex-1 h-9 text-xs sm:h-10 sm:text-sm"
+              onClick={onStopGeneration}
+              disabled={isDisabled || !onStopGeneration}
+            >
               <Square className="mr-2 h-4 w-4" />
               생성 중지
             </Button>
           ) : (
             <Button
-              className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground"
+              className="flex-1 h-9 text-xs sm:h-10 sm:text-sm bg-primary hover:bg-primary/90 text-primary-foreground"
               onClick={onStartGeneration}
               disabled={isDisabled || !canGenerate}
             >
@@ -607,7 +647,7 @@ function MapGenerationSection({
           )}
 
           {mapStatus === "completed" && (
-            <Button asChild variant="outline" className="flex-1 bg-transparent">
+            <Button asChild variant="outline" className="flex-1 h-9 text-xs sm:h-10 sm:text-sm bg-transparent">
               <Link href="/map">
                 <MapIcon className="mr-2 h-4 w-4" />
                 지도 상세 보기
@@ -1378,10 +1418,10 @@ export default function HomePage() {
   // 탐지 시작/중지 API 연동 시 여기에 상태 연동 로직 추가
 
   return (
-    <div className="p-4 lg:p-6">
+    <div className="p-3 sm:p-4 lg:p-6">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold text-foreground">홈</h1>
+        <div className="mb-4 sm:mb-6">
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">홈</h1>
           <p className="text-sm text-muted-foreground mt-1">
             로봇 상태 및 감지 현황을 확인하세요
           </p>
@@ -1407,194 +1447,232 @@ export default function HomePage() {
           </Alert>
         )}
 
-        <div className="mb-6">
+        <div className="mb-4 sm:mb-6">
           <RobotStatusSection status={status} stats={stats} isLoading={statusLoading} />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            {carMaps.error && (
-              <Alert variant="destructive">
-                <AlertTitle>지도 불러오기 실패</AlertTitle>
-                <AlertDescription>{carMaps.error}</AlertDescription>
-              </Alert>
-            )}
-            <MapGenerationSection
-              mapStatus={currentMap ? "completed" : "no_map"}
-              progress={0}
-              isOnline={robotOnline}
-              generatedAt={generatedAt}
-              areaSize={areaSize}
-              robotId={carId ? String(carId) : undefined}
-              mapActions={createMapAction}
-              maps={mapHistoryItems}
-              onStartGeneration={undefined}
-              onStopGeneration={undefined}
-              onSelectMap={(id) => carMaps.selectMap(Number(id))}
-              onDeleteMap={(id) => carMaps.deleteMap(Number(id))}
-              generationEnabled={false}
-              generationDisabledReason="지도 생성은 로봇에서 수행됩니다. 현재는 조회만 가능합니다."
-              detectionEnabled={false}
-              detectionDisabledReason="탐지 시작/중지 API 연동이 필요합니다."
-              isDetecting={isDetecting}
-              detectionLoading={detectionLoading}
-              onStartDetect={onStart}
-              onStopDetect={onStop}
-              networkOnline={networkOnline}
-              robotOnline={robotOnline}
-              mapReady={mapReady}
-            />
-          </div>
-          <div className="space-y-6">
-            <Card className="bg-card border-border">
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">차량 관리</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {carLoading ? (
-                  <div className="text-sm text-muted-foreground">불러오는 중...</div>
-                ) : (
-                  <>
-                    {primaryCar ? (
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <p className="text-xs text-muted-foreground">현재 차량</p>
-                          <Badge variant="secondary">{primaryCar.carId}</Badge>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs text-muted-foreground">차량 선택</p>
-                          <Select
-                            value={primaryCar ? String(primaryCar.carId) : ""}
-                            onValueChange={(value) => {
-                              const nextId = Number(value)
-                              if (Number.isFinite(nextId)) {
-                                setCarId(nextId)
-                              }
-                            }}
-                          >
-                            <SelectTrigger className="bg-input border-border">
-                              <SelectValue placeholder="차량 선택" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {carList.map((car) => (
-                                <SelectItem key={car.carId} value={String(car.carId)}>
-                                  {car.nickname} · {car.carId}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <p className="text-xs text-muted-foreground">닉네임</p>
-                          <div className="flex gap-2">
-                            <Input
-                              value={nicknameDraft}
-                              onChange={(e) => setNicknameDraft(e.target.value)}
-                              placeholder="차량 닉네임"
-                              className="bg-input border-border"
-                            />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleSaveNickname}
-                              disabled={isSavingNickname || nicknameDraft.trim() === primaryCar.nickname}
-                            >
-                              저장
-                            </Button>
+        {(() => {
+          const mapSection = (
+            <div className="space-y-4">
+              {carMaps.error && (
+                <Alert variant="destructive">
+                  <AlertTitle>지도 불러오기 실패</AlertTitle>
+                  <AlertDescription>{carMaps.error}</AlertDescription>
+                </Alert>
+              )}
+              <MapGenerationSection
+                mapStatus={currentMap ? "completed" : "no_map"}
+                progress={0}
+                isOnline={robotOnline}
+                generatedAt={generatedAt}
+                areaSize={areaSize}
+                robotId={carId ? String(carId) : undefined}
+                mapActions={createMapAction}
+                maps={mapHistoryItems}
+                onStartGeneration={undefined}
+                onStopGeneration={undefined}
+                onSelectMap={(id) => carMaps.selectMap(Number(id))}
+                onDeleteMap={(id) => carMaps.deleteMap(Number(id))}
+                generationEnabled={false}
+                generationDisabledReason="지도 생성은 로봇에서 수행됩니다. 현재는 조회만 가능합니다."
+                detectionEnabled={false}
+                detectionDisabledReason="탐지 시작/중지 API 연동이 필요합니다."
+                isDetecting={isDetecting}
+                detectionLoading={detectionLoading}
+                onStartDetect={onStart}
+                onStopDetect={onStop}
+                networkOnline={networkOnline}
+                robotOnline={robotOnline}
+                mapReady={mapReady}
+              />
+            </div>
+          )
+
+          const carManagementSection = (
+            <>
+              <Card className="bg-card border-border">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">차량 관리</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {carLoading ? (
+                    <div className="text-sm text-muted-foreground">불러오는 중...</div>
+                  ) : (
+                    <>
+                      {primaryCar ? (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs text-muted-foreground">현재 차량</p>
+                            <Badge variant="secondary">{primaryCar.carId}</Badge>
                           </div>
+                          <div className="space-y-2">
+                            <p className="text-xs text-muted-foreground">차량 선택</p>
+                            <Select
+                              value={primaryCar ? String(primaryCar.carId) : ""}
+                              onValueChange={(value) => {
+                                const nextId = Number(value)
+                                if (Number.isFinite(nextId)) {
+                                  setCarId(nextId)
+                                }
+                              }}
+                            >
+                              <SelectTrigger className="bg-input border-border">
+                                <SelectValue placeholder="차량 선택" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {carList.map((car) => (
+                                  <SelectItem key={car.carId} value={String(car.carId)}>
+                                    {car.nickname} · {car.carId}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-xs text-muted-foreground">닉네임</p>
+                            <div className="flex gap-2">
+                              <Input
+                                value={nicknameDraft}
+                                onChange={(e) => setNicknameDraft(e.target.value)}
+                                placeholder="차량 닉네임"
+                                className="bg-input border-border"
+                              />
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleSaveNickname}
+                                disabled={isSavingNickname || nicknameDraft.trim() === primaryCar.nickname}
+                              >
+                                저장
+                              </Button>
+                            </div>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => setUnclaimConfirmOpen(true)}
+                            disabled={isUnclaiming}
+                          >
+                            차량 연결 해제
+                          </Button>
                         </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">등록된 차량이 없습니다.</p>
+                      )}
+
+                      <div className="h-px bg-border" />
+
+                      <div className="space-y-3">
+                        <p className="text-xs text-muted-foreground">차량 등록</p>
+                        <Input
+                          value={claimCode}
+                          onChange={(e) => setClaimCode(e.target.value)}
+                          placeholder="클레임 코드"
+                          className="bg-input border-border"
+                        />
+                        <Input
+                          value={claimNickname}
+                          onChange={(e) => setClaimNickname(e.target.value)}
+                          placeholder="닉네임 (선택)"
+                          className="bg-input border-border"
+                        />
                         <Button
-                          variant="outline"
-                          size="sm"
                           className="w-full"
-                          onClick={() => setUnclaimConfirmOpen(true)}
-                          disabled={isUnclaiming}
+                          onClick={() => {
+                            if (!claimCode.trim()) {
+                              setCarError("클레임 코드를 입력해 주세요.")
+                              toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+                              return
+                            }
+                            setClaimConfirmOpen(true)
+                          }}
+                          disabled={isClaiming}
                         >
-                          차량 연결 해제
+                          차량 등록
                         </Button>
                       </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">등록된 차량이 없습니다.</p>
-                    )}
+                    </>
+                  )}
 
-                    <div className="h-px bg-border" />
+                  {carError && <p className="text-xs text-red-400">{carError}</p>}
+                </CardContent>
+              </Card>
 
-                    <div className="space-y-3">
-                      <p className="text-xs text-muted-foreground">차량 등록</p>
-                      <Input
-                        value={claimCode}
-                        onChange={(e) => setClaimCode(e.target.value)}
-                        placeholder="클레임 코드"
-                        className="bg-input border-border"
-                      />
-                      <Input
-                        value={claimNickname}
-                        onChange={(e) => setClaimNickname(e.target.value)}
-                        placeholder="닉네임 (선택)"
-                        className="bg-input border-border"
-                      />
-                      <Button
-                        className="w-full"
-                        onClick={() => {
-                          if (!claimCode.trim()) {
-                            setCarError("클레임 코드를 입력해 주세요.")
-                            toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
-                            return
-                          }
-                          setClaimConfirmOpen(true)
-                        }}
-                        disabled={isClaiming}
-                      >
-                        차량 등록
-                      </Button>
-                    </div>
-                  </>
-                )}
+              <AlertDialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>차량을 등록할까요?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      클레임 코드 {claimCode ? `“${claimCode}”` : ""}로 차량을 등록합니다.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>취소</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleClaim}>등록</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
 
-                {carError && <p className="text-xs text-red-400">{carError}</p>}
-              </CardContent>
-            </Card>
+              <AlertDialog open={unclaimConfirmOpen} onOpenChange={setUnclaimConfirmOpen}>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>차량 연결을 해제할까요?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {primaryCar
+                        ? `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제됩니다.`
+                        : "차량 연결을 해제합니다."}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>취소</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleUnclaim}>해제</AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </>
+          )
 
-            <AlertDialog open={claimConfirmOpen} onOpenChange={setClaimConfirmOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>차량을 등록할까요?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    클레임 코드 {claimCode ? `“${claimCode}”` : ""}로 차량을 등록합니다.
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>취소</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleClaim}>등록</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-
-            <AlertDialog open={unclaimConfirmOpen} onOpenChange={setUnclaimConfirmOpen}>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>차량 연결을 해제할까요?</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {primaryCar
-                      ? `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제됩니다.`
-                      : "차량 연결을 해제합니다."}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>취소</AlertDialogCancel>
-                  <AlertDialogAction onClick={handleUnclaim}>해제</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-
+          const alertsSection = (
             <SystemAlertsSection
               alerts={alerts}
               isLoading={alertsLoading}
               onRead={realAlerts.markAsRead}
               onReadAll={realAlerts.markAllAsRead}
             />
-          </div>
-        </div>
+          )
+
+          return (
+            <>
+              <div className="lg:hidden space-y-4">
+                <Accordion type="multiple" defaultValue={["map"]} className="space-y-2">
+                  <AccordionItem value="map">
+                    <AccordionTrigger>지도 생성 및 내비게이션</AccordionTrigger>
+                    <AccordionContent>{mapSection}</AccordionContent>
+                  </AccordionItem>
+                  <AccordionItem value="car">
+                    <AccordionTrigger>차량 관리</AccordionTrigger>
+                    <AccordionContent>{carManagementSection}</AccordionContent>
+                  </AccordionItem>
+                  <AccordionItem value="alerts">
+                    <AccordionTrigger>시스템 알림</AccordionTrigger>
+                    <AccordionContent>{alertsSection}</AccordionContent>
+                  </AccordionItem>
+                </Accordion>
+              </div>
+
+              <div className="hidden lg:grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="lg:col-span-2 space-y-4">
+                  {mapSection}
+                </div>
+                <div className="space-y-6">
+                  {carManagementSection}
+                  {alertsSection}
+                </div>
+              </div>
+            </>
+          )
+        })()}
 
         <div className="mt-6">
         </div>

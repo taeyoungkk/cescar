@@ -46,7 +46,7 @@ public class DetectionHistoryService {
                 .orElseThrow(() -> new com.ssafy.backend.global.exception.CustomException(
                         com.ssafy.backend.global.exception.ErrorCode.CAR_STATUS_NOT_FOUND));
 
-        if (carLog.getCar().getOwner() == null || !carLog.getCar().getOwner().getId().equals(memberId)) {
+        if (carLog.getOwnerId() == null || !carLog.getOwnerId().equals(memberId)) {
             throw new com.ssafy.backend.global.exception.CustomException(
                     com.ssafy.backend.global.exception.ErrorCode.UNAUTHORIZED_CAR_ACCESS);
         }
@@ -74,16 +74,20 @@ public class DetectionHistoryService {
         if (label == null || confidence == null) {
             return;
         }
+        if (car.getOwner() == null) {
+            return;
+        }
 
+        Long ownerId = car.getOwner().getId();
         com.ssafy.backend.domain.history.domain.CarLog carLog = carLogRepository
-                .findFirstByCarIdAndStatusOrderByStartAtDesc(car.getId(), LogStatus.RUNNING)
+                .findFirstByCarIdAndOwnerIdAndStatusOrderByStartAtDesc(car.getId(), ownerId, LogStatus.RUNNING)
                 .orElseGet(() -> {
                     SlamMap currentMap = car.getCurrentMap();
                     if (currentMap == null) {
                         return null;
                     }
                     com.ssafy.backend.domain.history.domain.CarLog newLog = com.ssafy.backend.domain.history.domain.CarLog
-                            .create(car, currentMap);
+                            .create(car, currentMap, ownerId);
                     return carLogRepository.save(newLog);
                 });
 
@@ -192,8 +196,8 @@ public class DetectionHistoryService {
         Detection detection = detectionRepository.findById(detectionId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 감지 내역을 찾을 수 없습니다. (ID: " + detectionId + ")"));
 
-        if (detection.getCarLog().getCar().getOwner() == null ||
-                !detection.getCarLog().getCar().getOwner().getId().equals(memberId)) {
+        if (detection.getCarLog().getOwnerId() == null ||
+                !detection.getCarLog().getOwnerId().equals(memberId)) {
             throw new com.ssafy.backend.global.exception.CustomException(
                     com.ssafy.backend.global.exception.ErrorCode.UNAUTHORIZED_CAR_ACCESS);
         }
@@ -209,7 +213,7 @@ public class DetectionHistoryService {
                 .orElseThrow(() -> new com.ssafy.backend.global.exception.CustomException(
                         com.ssafy.backend.global.exception.ErrorCode.CAR_STATUS_NOT_FOUND));
 
-        if (carLog.getCar().getOwner() == null || !carLog.getCar().getOwner().getId().equals(memberId)) {
+        if (carLog.getOwnerId() == null || !carLog.getOwnerId().equals(memberId)) {
             throw new com.ssafy.backend.global.exception.CustomException(
                     com.ssafy.backend.global.exception.ErrorCode.UNAUTHORIZED_CAR_ACCESS);
         }

@@ -21,7 +21,10 @@ public class SlamMap {
     @JoinColumn(name = "car_id", nullable = false)
     private Car car;
 
-    @Column(nullable = false, length = 50)
+    
+    @Column(name = "owner_id")
+    private Long ownerId;
+@Column(nullable = false, length = 50)
     private String name;
 
     @Column(name = "image_url")
@@ -49,8 +52,7 @@ public class SlamMap {
     private LocalDateTime deletedAt;
 
     @Builder
-    private SlamMap(Car car, String name, String imageUrl, int width, int height, float resolution, float originX,
-            float originY) {
+    private SlamMap(Car car, String name, String imageUrl, int width, int height, float resolution, float originX, float originY, Long ownerId) {
         this.car = car;
         this.name = name;
         this.imageUrl = imageUrl;
@@ -59,11 +61,12 @@ public class SlamMap {
         this.resolution = resolution;
         this.originX = originX;
         this.originY = originY;
+        this.ownerId = ownerId;
     }
 
     // 팩토리 메서드
     public static SlamMap create(Car car, String name, String imageUrl, int width, int height, float resolution,
-            float originX, float originY) {
+            float originX, float originY, Long ownerId) {
         return SlamMap.builder()
                 .car(car)
                 .name(name)
@@ -73,10 +76,10 @@ public class SlamMap {
                 .resolution(resolution)
                 .originX(originX)
                 .originY(originY)
+                .ownerId(ownerId)
                 .build();
     }
-
-    // 정보 수정 메서드(이름 변경)
+// 정보 수정 메서드(이름 변경)
     public void updateInfo(String name, String imageUrl) {
         if (name != null && !name.isBlank()) {
             this.name = name;

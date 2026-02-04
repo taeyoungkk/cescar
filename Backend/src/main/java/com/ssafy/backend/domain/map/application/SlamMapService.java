@@ -42,6 +42,7 @@ public class SlamMapService {
     @Transactional
     public SlamMapResponse.MapDetailResponse createMap(Long carId, Long memberId, SlamMapRequest.CreateRequest request) {
         Car car = getOwnedCar(carId, memberId);
+        Long ownerId = car.getOwner().getId();
 
         SlamMap map = SlamMap.create(
                 car,
@@ -51,7 +52,8 @@ public class SlamMapService {
                 request.height(),
                 request.resolution(),
                 request.originX(),
-                request.originY()
+                request.originY(),
+                ownerId
         );
 
         SlamMap savedMap = slamMapRepository.save(map);
@@ -93,6 +95,10 @@ public class SlamMapService {
         if (car == null) {
             return false;
         }
+        if (car.getOwner() == null) {
+            return false;
+        }
+        Long ownerId = car.getOwner().getId();
 
         SlamMap map = SlamMap.create(
                 car,
@@ -102,7 +108,8 @@ public class SlamMapService {
                 result.getHeight(),
                 result.getResolution(),
                 result.getOriginX(),
-                result.getOriginY()
+                result.getOriginY(),
+                ownerId
         );
 
         SlamMap savedMap = slamMapRepository.save(map);
@@ -113,7 +120,7 @@ public class SlamMapService {
     public List<SlamMapResponse.MapListResponse> getMapList(Long carId, Long memberId) {
         getOwnedCar(carId, memberId);
 
-        return slamMapRepository.findAllByCarIdAndDeletedAtIsNullOrderByCreatedAtDesc(carId)
+        return slamMapRepository.findAllByCarIdAndOwnerIdAndDeletedAtIsNullOrderByCreatedAtDesc(carId, memberId)
                 .stream()
                 .map(this::toMapListResponse)
                 .collect(Collectors.toList());
@@ -123,7 +130,8 @@ public class SlamMapService {
         Car car = getOwnedCar(carId, memberId);
 
         SlamMap map = car.getCurrentMap();
-        if (map == null || map.getDeletedAt() != null) {
+        if (map == null || map.getDeletedAt() != null || map.getOwnerId() == null
+                || !map.getOwnerId().equals(memberId)) {
             throw new CustomException(ErrorCode.MAP_NOT_FOUND);
         }
 
@@ -133,7 +141,7 @@ public class SlamMapService {
     public SlamMapResponse.MapDetailResponse getMapDetail(Long carId, Long memberId, Long mapId) {
         getOwnedCar(carId, memberId);
 
-        SlamMap map = slamMapRepository.findByIdAndCarIdAndDeletedAtIsNull(mapId, carId)
+        SlamMap map = slamMapRepository.findByIdAndCarIdAndOwnerIdAndDeletedAtIsNull(mapId, carId, memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
 
         return toMapDetailResponse(map);
@@ -144,7 +152,7 @@ public class SlamMapService {
                                                        SlamMapRequest.UpdateRequest request) {
         getOwnedCar(carId, memberId);
 
-        SlamMap map = slamMapRepository.findByIdAndCarIdAndDeletedAtIsNull(mapId, carId)
+        SlamMap map = slamMapRepository.findByIdAndCarIdAndOwnerIdAndDeletedAtIsNull(mapId, carId, memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
 
         map.updateInfo(request.name(), null);
@@ -156,13 +164,14 @@ public class SlamMapService {
     public SlamMapResponse.SuccessResponse deleteMap(Long carId, Long memberId, Long mapId) {
         Car car = getOwnedCar(carId, memberId);
 
-        SlamMap map = slamMapRepository.findByIdAndCarIdAndDeletedAtIsNull(mapId, carId)
+        SlamMap map = slamMapRepository.findByIdAndCarIdAndOwnerIdAndDeletedAtIsNull(mapId, carId, memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
 
         map.softDelete();
 
         if (car.getCurrentMap() != null && car.getCurrentMap().getId().equals(map.getId())) {
-            SlamMap latest = slamMapRepository.findFirstByCarIdAndDeletedAtIsNullOrderByCreatedAtDesc(carId)
+            SlamMap latest = slamMapRepository.findFirstByCarIdAndOwnerIdAndDeletedAtIsNullOrderByCreatedAtDesc(carId,
+                            memberId)
                     .orElse(null);
             car.updateCurrentMap(latest);
         }
@@ -174,7 +183,7 @@ public class SlamMapService {
     public SlamMapResponse.MapDetailResponse setCurrentMap(Long carId, Long memberId, SlamMapRequest.SetCurrentRequest request) {
         Car car = getOwnedCar(carId, memberId);
 
-        SlamMap map = slamMapRepository.findByIdAndCarIdAndDeletedAtIsNull(request.mapId(), carId)
+        SlamMap map = slamMapRepository.findByIdAndCarIdAndOwnerIdAndDeletedAtIsNull(request.mapId(), carId, memberId)
                 .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
 
         car.updateCurrentMap(map);

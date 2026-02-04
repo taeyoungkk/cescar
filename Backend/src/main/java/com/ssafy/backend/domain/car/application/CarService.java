@@ -7,6 +7,10 @@ import com.ssafy.backend.domain.car.domain.CarMode;
 import com.ssafy.backend.domain.car.domain.CarStatus;
 import com.ssafy.backend.domain.car.dto.CarRequest;
 import com.ssafy.backend.domain.car.dto.CarResponse;
+import com.ssafy.backend.domain.history.dao.CarLogRepository;
+import com.ssafy.backend.domain.history.domain.CarLog;
+import com.ssafy.backend.domain.history.domain.LogStatus;
+import com.ssafy.backend.domain.map.domain.SlamMap;
 import com.ssafy.backend.domain.member.domain.Member;
 import com.ssafy.backend.domain.member.dao.MemberRepository;
 import com.ssafy.backend.global.exception.CustomException;
@@ -34,6 +38,7 @@ public class CarService {
     private final CarRepository carRepository;
     private final CarStatusRepository carStatusRepository;
     private final MemberRepository memberRepository;
+    private final CarLogRepository carLogRepository;
     private final MqttGateway mqttGateway;
     private final ObjectMapper objectMapper;
 
@@ -131,6 +136,10 @@ public class CarService {
                 .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
 
         status.changeMode(request.mode());
+
+        if (request.mode() == CarMode.STOP) {
+            finishCarLogIfRunning(car, LogStatus.COMPLETED);
+        }
 
         try {
             // MQTT 알림 전송: robot/{deviceId}/mode
@@ -240,6 +249,8 @@ public class CarService {
             throw new CustomException(ErrorCode.INVALID_CAR_MODE);
         }
 
+        startCarLogIfAbsent(car);
+
         try {
             // v: linear velocity, w: angular velocity
             Map<String, Double> payload = new HashMap<>();
@@ -281,6 +292,8 @@ public class CarService {
             throw new CustomException(ErrorCode.INVALID_CAR_MODE);
         }
 
+        startCarLogIfAbsent(car);
+
         try {
             // 미션 데이터를 JSON 문자열로 변환
             String missionJson = objectMapper.writeValueAsString(request);
@@ -294,5 +307,41 @@ public class CarService {
         }
 
         return CarResponse.SuccessResponse.of("Mission has been assigned successfully");
+    }
+
+    private void startCarLogIfAbsent(Car car) {
+        if (car == null) {
+            return;
+        }
+        if (car.getOwner() == null) {
+            return;
+        }
+        Long ownerId = car.getOwner().getId();
+        boolean hasRunning = carLogRepository
+                .findFirstByCarIdAndOwnerIdAndStatusOrderByStartAtDesc(car.getId(), ownerId, LogStatus.RUNNING)
+                .isPresent();
+        if (hasRunning) {
+            return;
+        }
+        SlamMap currentMap = car.getCurrentMap();
+        if (currentMap == null) {
+            return;
+        }
+        carLogRepository.save(CarLog.create(car, currentMap, ownerId));
+    }
+
+    private void finishCarLogIfRunning(Car car, LogStatus status) {
+        if (car == null) {
+            return;
+        }
+        if (car.getOwner() == null) {
+            return;
+        }
+        Long ownerId = car.getOwner().getId();
+        carLogRepository.findFirstByCarIdAndOwnerIdAndStatusOrderByStartAtDesc(car.getId(), ownerId, LogStatus.RUNNING)
+                .ifPresent(log -> {
+                    log.finish(status);
+                    carLogRepository.save(log);
+                });
     }
 }

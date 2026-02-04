@@ -57,6 +57,7 @@ public class Car {
                 .build();
     }
 
+
     // 소유자 등록 메서드
     public void registerOwner(Member member) {
         if (this.owner != null) {
@@ -65,18 +66,22 @@ public class Car {
         this.owner = member;
     }
 
+
     // 소유자 등록 해제 메서드
     public void releaseOwner(Member member) {
         if (member == null || this.owner == null || !Objects.equals(this.owner.getId(), member.getId())) {
             throw new IllegalStateException("현재 오너만 해제할 수 있습니다.");
         }
         this.owner = null;
+        this.currentMap = null;
     }
+
 
     // 닉네임 변경 메서드
     public void updateNickname(String nickname) {
         this.nickname = nickname;
     }
+
 
     // 현재 지도 변경 메서드
     public void updateCurrentMap(SlamMap map) {
@@ -88,6 +93,7 @@ public class Car {
 
     // 양방향 매핑 추가
     // orphanRemoval: 리스트에서 제거하면 DB에서도 삭제됨
+
     @JsonIgnore
     @OneToMany(mappedBy = "car", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<SlamMap> maps = new ArrayList<>();

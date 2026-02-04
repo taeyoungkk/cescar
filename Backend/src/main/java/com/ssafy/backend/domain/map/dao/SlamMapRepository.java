@@ -8,9 +8,9 @@ import java.util.Optional;
 
 public interface SlamMapRepository extends JpaRepository<SlamMap, Long> {
 
-    List<SlamMap> findAllByCarIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long carId);
+    List<SlamMap> findAllByCarIdAndOwnerIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long carId, Long ownerId);
 
-    Optional<SlamMap> findFirstByCarIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long carId);
+    Optional<SlamMap> findFirstByCarIdAndOwnerIdAndDeletedAtIsNullOrderByCreatedAtDesc(Long carId, Long ownerId);
 
-    Optional<SlamMap> findByIdAndCarIdAndDeletedAtIsNull(Long id, Long carId);
+    Optional<SlamMap> findByIdAndCarIdAndOwnerIdAndDeletedAtIsNull(Long id, Long carId, Long ownerId);
 }

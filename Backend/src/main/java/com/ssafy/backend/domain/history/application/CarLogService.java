@@ -23,13 +23,7 @@ public class CarLogService {
         com.ssafy.backend.domain.car.domain.Car car = carRepository.findById(carId)
                 .orElseThrow(() -> new com.ssafy.backend.global.exception.CustomException(
                         com.ssafy.backend.global.exception.ErrorCode.CAR_NOT_FOUND));
-
-        if (car.getOwner() == null || !car.getOwner().getId().equals(memberId)) {
-            throw new com.ssafy.backend.global.exception.CustomException(
-                    com.ssafy.backend.global.exception.ErrorCode.UNAUTHORIZED_CAR_ACCESS);
-        }
-
-        return carLogRepository.findByCarId(carId, pageable)
+        return carLogRepository.findByCarIdAndOwnerId(carId, memberId, pageable)
                 .map(CarLogListItemResponse::from);
     }
 }

@@ -74,7 +74,7 @@ function StatusCard({
   compact = false,
 }: {
   title: string
-  value: string | number
+  value: string | number | React.ReactNode
   icon: React.ElementType
   subtitle?: string
   variant?: "default" | "success" | "warning" | "danger"
@@ -86,6 +86,7 @@ function StatusCard({
     warning: "text-amber-400",
     danger: "text-red-400",
   }
+  const isSimpleValue = typeof value === "string" || typeof value === "number"
 
   return (
     <Card className="bg-card border-border">
@@ -93,7 +94,11 @@ function StatusCard({
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-[10px] sm:text-xs text-muted-foreground uppercase tracking-wide">{title}</p>
-            <p className={`text-lg sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
+            {isSimpleValue ? (
+              <p className={`text-lg sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
+            ) : (
+              <div>{value}</div>
+            )}
             {!compact && subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
           <div className={`p-2.5 sm:p-3 rounded-lg bg-secondary ${variantStyles[variant]}`}>
@@ -139,17 +144,37 @@ function RobotStatusSection({
 
   const modeLabels: Record<CarMode, string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
   
-  const lastSeenLabel = new Date(status.updatedAt).toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-  })
+  const formatKstDateTime = (date: Date) => {
+    const parts = new Intl.DateTimeFormat("ko-KR", {
+      timeZone: "Asia/Seoul",
+      year: "2-digit",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(date)
+    const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? ""
+    return {
+      date: `${get("year")}.${get("month")}.${get("day")}`,
+      time: `${get("hour")}:${get("minute")}`,
+    }
+  }
+
+  const lastSeenParts = formatKstDateTime(new Date(status.updatedAt))
+  const lastSeenLabel = (
+    <div className="flex flex-col leading-tight">
+      <span className="text-xs text-muted-foreground font-normal">{lastSeenParts.date}</span>
+      <span className="text-lg sm:text-2xl font-semibold text-foreground">{lastSeenParts.time}</span>
+    </div>
+  )
 
   return (
     <>
       <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
         <div className="min-w-[140px]">
           <StatusCard
-            title="연결 상태"
+            title="로봇 연결 상태"
             value={status.isOnline ? "온라인" : "오프라인"}
             icon={status.isOnline ? Wifi : WifiOff}
             variant={status.isOnline ? "success" : "danger"}
@@ -178,18 +203,18 @@ function RobotStatusSection({
 
       <div className="hidden lg:grid grid-cols-4 gap-4">
         <StatusCard
-          title="연결 상태"
+          title="로봇 연결 상태"
           value={status.isOnline ? "온라인" : "오프라인"}
           icon={status.isOnline ? Wifi : WifiOff}
           variant={status.isOnline ? "success" : "danger"}
           subtitle={status.isOnline ? "정상 연결" : "연결 끊김"}
         />
         <StatusCard
-          title="마지막 수신"
+          title="로봇 마지막 수신"
           value={lastSeenLabel}
           icon={Clock}
           variant="default"
-          subtitle="마지막 수신 시각"
+          subtitle="로봇 상태 마지막 수신 시각"
         />
         <StatusCard
           title="현재 모드"
@@ -894,7 +919,7 @@ export default function HomePage() {
   const { carId, setCarId, refresh: refreshPrimaryCar, error: primaryCarError } = usePrimaryCarId()
   const carStatus = useCarStatus(carId ?? 0, { enabled: !!carId, intervalMs: 1000 })
 
-  const realDetections = useRecentDetections(carId, 5)
+  const realDetections = useRecentDetections(carId, 50)
   const realAlerts = useAlerts()
   const { setExternalAlerts } = realAlerts
   const { isOnline: networkOnline } = useNetworkStatus()
@@ -1029,7 +1054,29 @@ export default function HomePage() {
   statusLoading = carStatus.isLoading
 
   recentDetections = realDetections.recentDetections
-  stats = realDetections.stats
+  const today = new Date()
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const startOfWeek = new Date(startOfToday)
+  const day = startOfWeek.getDay()
+  const diffToMonday = day === 0 ? -6 : 1 - day
+  startOfWeek.setDate(startOfWeek.getDate() + diffToMonday)
+  const todayCount = recentDetections.filter((d) => {
+    if (!d.timestamp) return false
+    const t = new Date(d.timestamp)
+    return t >= startOfToday
+  }).length
+  const weekCount = recentDetections.filter((d) => {
+    if (!d.timestamp) return false
+    const t = new Date(d.timestamp)
+    return t >= startOfWeek
+  }).length
+  const last = recentDetections[0]
+  stats = {
+    todayCount,
+    weekCount,
+    falseAlarmRate: 0,
+    lastDetectionTime: last?.time ?? "-",
+  }
   alerts = realAlerts.alerts
 
   detectionsLoading = realDetections.isLoading
@@ -1642,13 +1689,19 @@ export default function HomePage() {
                         <p className="text-xs text-muted-foreground">차량 등록</p>
                         <Input
                           value={claimCode}
-                          onChange={(e) => setClaimCode(e.target.value)}
+                          onChange={(e) => {
+                            setClaimCode(e.target.value)
+                            if (carError) setCarError(null)
+                          }}
                           placeholder="클레임 코드"
                           className="bg-input border-border"
                         />
                         <Input
                           value={claimNickname}
-                          onChange={(e) => setClaimNickname(e.target.value)}
+                          onChange={(e) => {
+                            setClaimNickname(e.target.value)
+                            if (carError) setCarError(null)
+                          }}
                           placeholder="닉네임 (선택)"
                           className="bg-input border-border"
                         />

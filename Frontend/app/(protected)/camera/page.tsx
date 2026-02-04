@@ -25,16 +25,25 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
 import { ErrorAlert } from "@/components/ui/error-message"
 
-const DRIVE_MAX_V = 0.9
-const DRIVE_MAX_W = 2.0
-const TURN_MIN_FORWARD = 0.35
-const TURN_BOOST = 0.35
+const DRIVE_MAX_V = 2.4
+const DRIVE_MAX_W = 5.0
+const TURN_MIN_FORWARD = 0.6
+const TURN_BOOST = 0.6
 
 function applyDriveCurve(v: number, w: number) {
+  let vAdj = v
+  let wAdj = w
+  if (vAdj === 0 && wAdj !== 0) {
+    vAdj = 0.4
+  }
+  if (vAdj !== 0 && wAdj !== 0) {
+    vAdj = Math.sign(vAdj) * Math.max(Math.abs(vAdj) * 0.75, 0.5)
+    wAdj = Math.sign(wAdj) * Math.min(1, Math.abs(wAdj) * 1.6)
+  }
   const turn = Math.min(1, Math.abs(w))
-  const forwardSign = v < -0.001 ? -1 : 1
-  const vNorm = Math.max(Math.abs(v), TURN_MIN_FORWARD * turn) * forwardSign
-  const wNorm = Math.max(-1, Math.min(1, w * (1 + TURN_BOOST * (1 - Math.abs(v)))))
+  const forwardSign = vAdj < -0.001 ? -1 : 1
+  const vNorm = Math.max(Math.abs(vAdj), TURN_MIN_FORWARD * turn) * forwardSign
+  const wNorm = Math.max(-1, Math.min(1, wAdj * (1 + TURN_BOOST * (1 - Math.abs(vAdj)))))
   return { v: vNorm * DRIVE_MAX_V, w: wNorm * DRIVE_MAX_W }
 }
 
@@ -796,6 +805,7 @@ function JoystickPad({
   const knobRef = React.useRef<HTMLDivElement | null>(null)
   const activeRef = React.useRef(false)
   const pointerIdRef = React.useRef<number | null>(null)
+  const pointerTypeRef = React.useRef<string | null>(null)
 
   const resetKnob = () => {
     if (knobRef.current) {
@@ -829,14 +839,9 @@ function JoystickPad({
       return Math.sign(value) * scaled
     }
 
-    let v = applyDeadZone(-ny)
-    const w = applyDeadZone(-nx)
-
-    if (w !== 0) {
-      const fade = 1 - Math.min(1, Math.abs(ny) / 0.25)
-      const creep = 0.18 * Math.min(1, Math.abs(w))
-      if (v < creep) v = creep * fade + v * (1 - fade)
-    }
+    const v = applyDeadZone(-ny)
+    const invertTouchX = pointerTypeRef.current === "touch"
+    const w = applyDeadZone(invertTouchX ? nx : -nx)
     onMove(v, w)
   }
 
@@ -894,6 +899,7 @@ function JoystickPad({
         e.preventDefault()
         activeRef.current = true
         pointerIdRef.current = e.pointerId
+        pointerTypeRef.current = e.pointerType
         e.currentTarget.setPointerCapture?.(e.pointerId)
         updateFromEvent(e.clientX, e.clientY)
       }}
@@ -1465,6 +1471,11 @@ export default function CameraPage() {
   const [missionError, setMissionError] = useState<string | null>(null)
   const [missionPoints, setMissionPoints] = useState<{ x: number; y: number }[]>([])
   const [invalidMissionLines, setInvalidMissionLines] = useState<string[]>([])
+  const handleMissionInputChange = React.useCallback((value: string) => {
+    setMissionInput(value)
+    if (missionError) setMissionError(null)
+    if (invalidMissionLines.length) setInvalidMissionLines([])
+  }, [missionError, invalidMissionLines.length])
   const lastDriveToastRef = useRef<number>(0)
 
   const driveTimerRef = useRef<number | null>(null)
@@ -1975,17 +1986,6 @@ export default function CameraPage() {
       if (left && !right) w = 1
       else if (right && !left) w = -1
 
-      if (v === 0 && w !== 0) {
-        // Side input should still creep forward
-        v = 0.4
-      }
-
-      if (v !== 0 && w !== 0) {
-        // Diagonal: preserve forward bias while turning
-        v = Math.sign(v) * Math.max(Math.abs(v) * 0.75, 0.5)
-        w = Math.sign(w) * Math.min(1, Math.abs(w) * 1.6)
-      }
-
       if (v === 0 && w === 0) {
         handleDriveStop()
       } else {
@@ -2160,7 +2160,7 @@ export default function CameraPage() {
                 missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
                 missionStopDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO"}
                 missionInput={missionInput}
-                onMissionInputChange={setMissionInput}
+                onMissionInputChange={handleMissionInputChange}
                 missionPointCount={missionPoints.length}
                 missionError={missionError}
                 missionPoints={missionPoints}

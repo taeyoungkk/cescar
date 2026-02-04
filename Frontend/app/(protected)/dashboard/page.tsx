@@ -46,7 +46,7 @@ import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import * as detectionApi from "@/core/api/detection"
 import * as carApi from "@/core/api/car"
-import type { Detection, DetectionStats, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
+import type { Detection, DetectionStatus, DetectionType, DetectionHistoryFilters } from "@/core/types"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
@@ -59,7 +59,7 @@ import { ErrorAlert } from "@/components/ui/error-message"
 
 interface SummaryCardProps {
   title: string
-  value: string | number
+  value: string | number | React.ReactNode
   icon: React.ElementType
   subtitle?: string
   variant?: "default" | "success" | "warning" | "danger"
@@ -73,6 +73,7 @@ function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default", 
     warning: "text-amber-400",
     danger: "text-red-400",
   }
+  const isSimpleValue = typeof value === "string" || typeof value === "number"
 
   return (
     <Card className="bg-card border-border">
@@ -80,7 +81,11 @@ function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default", 
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">{title}</p>
-            <p className={`text-base sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
+            {isSimpleValue ? (
+              <p className={`text-base sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</p>
+            ) : (
+              <div className={`text-base sm:text-2xl font-semibold ${variantStyles[variant]}`}>{value}</div>
+            )}
             {!compact && subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
           <div className={`p-2.5 rounded-lg bg-secondary ${variantStyles[variant]}`}>
@@ -92,8 +97,15 @@ function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default", 
   )
 }
 
+interface DashboardStats {
+  totalCount: number
+  dailyAverage: number
+  lastDetectionDate: string
+  lastDetectionTime: string
+}
+
 interface StatsSectionProps {
-  stats: DetectionStats | null
+  stats: DashboardStats | null
   isLoading: boolean
 }
 
@@ -119,23 +131,34 @@ function StatsSection({ stats, isLoading }: StatsSectionProps) {
     )
   }
 
+  const { totalCount, dailyAverage, lastDetectionDate, lastDetectionTime } = stats
+
+  const lastDetectionDisplay = lastDetectionDate
+    ? (
+        <div className="flex flex-col leading-tight">
+          <span className="text-xs text-muted-foreground font-normal">{lastDetectionDate}</span>
+          <span className="text-base sm:text-2xl font-semibold">{lastDetectionTime}</span>
+        </div>
+      )
+    : "-"
+
   return (
     <>
       <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
         <div className="min-w-[120px]">
-          <SummaryCard title="오늘 탐지" value={stats.todayCount} icon={Bug} subtitle="건" compact />
+          <SummaryCard title="필터 건수" value={totalCount} icon={Bug} subtitle="건" compact />
         </div>
         <div className="min-w-[120px]">
-          <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" compact />
+          <SummaryCard title="일평균" value={dailyAverage} icon={BarChart3} subtitle="건" compact />
         </div>
         <div className="min-w-[120px]">
-          <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" compact />
+          <SummaryCard title="최근 시각" value={lastDetectionDisplay} icon={Clock} subtitle="시각" compact />
         </div>
       </div>
       <div className="hidden lg:grid grid-cols-3 gap-4">
-        <SummaryCard title="오늘 탐지" value={stats.todayCount} icon={Bug} subtitle="건" />
-        <SummaryCard title="이번 주 탐지" value={stats.weekCount} icon={BarChart3} subtitle="건" />
-        <SummaryCard title="마지막 탐지" value={stats.lastDetectionTime} icon={Clock} subtitle="오늘" />
+        <SummaryCard title="필터 건수" value={totalCount} icon={Bug} subtitle="건" />
+        <SummaryCard title="일평균" value={dailyAverage} icon={BarChart3} subtitle="건" />
+        <SummaryCard title="최근 시각" value={lastDetectionDisplay} icon={Clock} subtitle="시각" />
       </div>
     </>
   )
@@ -471,7 +494,7 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
           <DialogHeader>
             <DialogTitle>탐지 영상</DialogTitle>
           <DialogDescription>
-            {record.date} {record.time} · {currentCarName ?? record.robotId}
+            {typeLabels[record.type] || record.type} · {record.date} {record.time}
           </DialogDescription>
           </DialogHeader>
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
@@ -689,6 +712,67 @@ function DashboardContent() {
     })
     return items
   }, [detections, logSort, useSearch])
+  const computedStats = React.useMemo<DashboardStats>(() => {
+    if (!displayedDetections.length) {
+      return { totalCount: 0, dailyAverage: 0, lastDetectionDate: "", lastDetectionTime: "-" }
+    }
+
+    const msPerDay = 24 * 60 * 60 * 1000
+    const toStartOfDayMs = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
+
+    const providedStart = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00`) : null
+    const providedEnd = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59`) : null
+    const startMs =
+      providedStart && !Number.isNaN(providedStart.getTime())
+        ? providedStart.getTime()
+        : displayedDetections.reduce<number | null>((acc, item) => {
+            if (!item.timestamp) return acc
+            const t = new Date(item.timestamp).getTime()
+            if (Number.isNaN(t)) return acc
+            if (acc === null || t < acc) return t
+            return acc
+          }, null) ?? Date.now()
+    const endMs =
+      providedEnd && !Number.isNaN(providedEnd.getTime())
+        ? providedEnd.getTime()
+        : displayedDetections.reduce<number | null>((acc, item) => {
+            if (!item.timestamp) return acc
+            const t = new Date(item.timestamp).getTime()
+            if (Number.isNaN(t)) return acc
+            if (acc === null || t > acc) return t
+            return acc
+          }, null) ?? Date.now()
+
+    const startDayMs = toStartOfDayMs(new Date(startMs))
+    const endDayMs = toStartOfDayMs(new Date(endMs))
+    const daySpan = Math.max(1, Math.floor((endDayMs - startDayMs) / msPerDay) + 1)
+    const totalCount = displayedDetections.length
+    const dailyAverageRaw = totalCount / daySpan
+    const dailyAverage = Number.isFinite(dailyAverageRaw) ? Math.round(dailyAverageRaw * 100) / 100 : 0
+
+    const lastTimestamp = displayedDetections.reduce<number | null>((acc, item) => {
+      if (!item.timestamp) return acc
+      const t = new Date(item.timestamp).getTime()
+      if (Number.isNaN(t)) return acc
+      if (acc === null || t > acc) return t
+      return acc
+    }, null)
+
+    const formatLast = (ms: number) => {
+      const d = new Date(ms)
+      const yy = String(d.getFullYear()).slice(-2)
+      const mm = String(d.getMonth() + 1).padStart(2, "0")
+      const dd = String(d.getDate()).padStart(2, "0")
+      const hh = String(d.getHours()).padStart(2, "0")
+      const min = String(d.getMinutes()).padStart(2, "0")
+      return { date: `${yy}.${mm}.${dd}`, time: `${hh}:${min}` }
+    }
+
+    const lastDetectionDate = lastTimestamp !== null ? formatLast(lastTimestamp).date : ""
+    const lastDetectionTime = lastTimestamp !== null ? formatLast(lastTimestamp).time : "-"
+
+    return { totalCount, dailyAverage, lastDetectionDate, lastDetectionTime }
+  }, [displayedDetections, filters.dateFrom, filters.dateTo])
 
   useEffect(() => {
     let mounted = true
@@ -1236,7 +1320,7 @@ function DashboardContent() {
         )}
 
         <div className="mb-4 sm:mb-6">
-          <StatsSection stats={stats} isLoading={isLoading} />
+          <StatsSection stats={computedStats} isLoading={isLoading} />
         </div>
 
         <Card className="bg-card border-border">

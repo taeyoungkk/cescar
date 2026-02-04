@@ -197,7 +197,13 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground uppercase tracking-wide">이름</p>
               <Input
                 value={profile.name}
-                onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))}
+                onChange={(e) => {
+                  setProfile((p) => ({ ...p, name: e.target.value }))
+                  if (profileMessageType) {
+                    setProfileMessage(null)
+                    setProfileMessageType(null)
+                  }
+                }}
                 className="bg-input border-border"
               />
             </div>
@@ -205,7 +211,13 @@ export default function SettingsPage() {
               <p className="text-xs text-muted-foreground uppercase tracking-wide">닉네임</p>
               <Input
                 value={profile.nickname}
-                onChange={(e) => setProfile((p) => ({ ...p, nickname: e.target.value }))}
+                onChange={(e) => {
+                  setProfile((p) => ({ ...p, nickname: e.target.value }))
+                  if (profileMessageType) {
+                    setProfileMessage(null)
+                    setProfileMessageType(null)
+                  }
+                }}
                 className="bg-input border-border"
               />
             </div>
@@ -231,7 +243,13 @@ export default function SettingsPage() {
               <Input
                 type="password"
                 value={passwords.currentPassword}
-                onChange={(e) => setPasswords((p) => ({ ...p, currentPassword: e.target.value }))}
+                onChange={(e) => {
+                  setPasswords((p) => ({ ...p, currentPassword: e.target.value }))
+                  if (passwordMessageType) {
+                    setPasswordMessage(null)
+                    setPasswordMessageType(null)
+                  }
+                }}
                 className="bg-input border-border"
               />
             </div>
@@ -240,7 +258,13 @@ export default function SettingsPage() {
               <Input
                 type="password"
                 value={passwords.newPassword}
-                onChange={(e) => setPasswords((p) => ({ ...p, newPassword: e.target.value }))}
+                onChange={(e) => {
+                  setPasswords((p) => ({ ...p, newPassword: e.target.value }))
+                  if (passwordMessageType) {
+                    setPasswordMessage(null)
+                    setPasswordMessageType(null)
+                  }
+                }}
                 className="bg-input border-border"
               />
               <p className="text-[11px] text-muted-foreground">영문/숫자/특수문자 포함 8자 이상</p>
@@ -250,7 +274,13 @@ export default function SettingsPage() {
               <Input
                 type="password"
                 value={passwords.confirmPassword}
-                onChange={(e) => setPasswords((p) => ({ ...p, confirmPassword: e.target.value }))}
+                onChange={(e) => {
+                  setPasswords((p) => ({ ...p, confirmPassword: e.target.value }))
+                  if (passwordMessageType) {
+                    setPasswordMessage(null)
+                    setPasswordMessageType(null)
+                  }
+                }}
                 className="bg-input border-border"
               />
             </div>
@@ -306,12 +336,18 @@ export default function SettingsPage() {
                     </AlertDialogHeader>
                     <div className="space-y-2">
                       <p className="text-sm text-muted-foreground">비밀번호 확인</p>
-                      <Input
-                        type="password"
-                        value={withdrawPassword}
-                        onChange={(e) => setWithdrawPassword(e.target.value)}
-                        className="bg-input border-border"
-                      />
+                  <Input
+                    type="password"
+                    value={withdrawPassword}
+                    onChange={(e) => {
+                      setWithdrawPassword(e.target.value)
+                      if (withdrawMessageType === "error") {
+                        setWithdrawMessage(null)
+                        setWithdrawMessageType(null)
+                      }
+                    }}
+                    className="bg-input border-border"
+                  />
                     </div>
                     <AlertDialogFooter>
                       <AlertDialogCancel>취소</AlertDialogCancel>

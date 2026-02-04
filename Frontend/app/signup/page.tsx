@@ -259,7 +259,7 @@ export default function SignupPage() {
     if (success) {
       setIsSuccess(true)
       setTimeout(() => {
-        router.push("/login")
+        router.replace("/login")
       }, 2000)
     }
   }

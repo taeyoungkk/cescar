@@ -71,7 +71,7 @@ public class DetectionHistoryService {
         if (car == null) {
             return;
         }
-        if (label == null || confidence == null || x == null || y == null) {
+        if (label == null || confidence == null) {
             return;
         }
 
@@ -91,12 +91,15 @@ public class DetectionHistoryService {
             return;
         }
 
+        BigDecimal mappedX = x != null ? BigDecimal.valueOf(x) : null;
+        BigDecimal mappedY = y != null ? BigDecimal.valueOf(y) : null;
+
         Detection detection = Detection.create(
                 carLog,
                 label,
                 confidence,
-                BigDecimal.valueOf(x),
-                BigDecimal.valueOf(y),
+                mappedX,
+                mappedY,
                 imageUrl,
                 videoUrl);
 

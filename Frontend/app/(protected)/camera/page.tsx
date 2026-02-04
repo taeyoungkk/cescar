@@ -25,8 +25,18 @@ import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
 import { ErrorAlert } from "@/components/ui/error-message"
 
-const DRIVE_MAX_V = 0.45
-const DRIVE_MAX_W = 1.2
+const DRIVE_MAX_V = 0.9
+const DRIVE_MAX_W = 2.0
+const TURN_MIN_FORWARD = 0.35
+const TURN_BOOST = 0.35
+
+function applyDriveCurve(v: number, w: number) {
+  const turn = Math.min(1, Math.abs(w))
+  const forwardSign = v < -0.001 ? -1 : 1
+  const vNorm = Math.max(Math.abs(v), TURN_MIN_FORWARD * turn) * forwardSign
+  const wNorm = Math.max(-1, Math.min(1, w * (1 + TURN_BOOST * (1 - Math.abs(v)))))
+  return { v: vNorm * DRIVE_MAX_V, w: wNorm * DRIVE_MAX_W }
+}
 
 // ============================================
 // Presentational Components (UI Only)
@@ -724,13 +734,16 @@ function LiveCameraView({
             <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap">
               <span className="text-[8px] text-white/25 font-medium">KBD</span>
             </div>
-            <JoystickPad
-              disabled={manualDisabled}
-              vector={driveVector}
-              onMove={(v, w) => onDriveVector(v * DRIVE_MAX_V, w * DRIVE_MAX_W)}
-              onStop={onDriveStop}
-              size={96}
-            />
+              <JoystickPad
+                disabled={manualDisabled}
+                vector={driveVector}
+                onMove={(v, w) => {
+                const curved = applyDriveCurve(v, w)
+                onDriveVector(curved.v, curved.w)
+                }}
+                onStop={onDriveStop}
+                size={96}
+              />
           </div>
         </div>
       )}
@@ -995,7 +1008,10 @@ function ControlPanel({
               <JoystickPad
                 disabled={manualDisabled}
                 vector={driveVector}
-                onMove={(v, w) => onDriveVector(v * DRIVE_MAX_V, w * DRIVE_MAX_W)}
+                onMove={(v, w) => {
+                  const curved = applyDriveCurve(v, w)
+                  onDriveVector(curved.v, curved.w)
+                }}
                 onStop={onDriveStop}
                 size={120}
               />
@@ -1845,10 +1861,10 @@ export default function CameraPage() {
       return cur + step
     }
 
-    const accelV = DRIVE_MAX_V * 0.08
-    const accelW = DRIVE_MAX_W * 0.08
-    const decelV = DRIVE_MAX_V * 0.2
-    const decelW = DRIVE_MAX_W * 0.2
+    const accelV = DRIVE_MAX_V * 0.12
+    const accelW = DRIVE_MAX_W * 0.12
+    const decelV = DRIVE_MAX_V * 0.28
+    const decelW = DRIVE_MAX_W * 0.28
 
     const nextV = stepAxis(
       current.v,
@@ -1953,32 +1969,35 @@ export default function CameraPage() {
 
       let v = 0
       let w = 0
-      if (up && !down) v = DRIVE_MAX_V
-      else if (down && !up) v = -DRIVE_MAX_V
+      if (up && !down) v = 1
+      else if (down && !up) v = -1
 
-      if (left && !right) w = DRIVE_MAX_W
-      else if (right && !left) w = -DRIVE_MAX_W
+      if (left && !right) w = 1
+      else if (right && !left) w = -1
 
       if (v === 0 && w !== 0) {
-        // Turn-in-place feels unnatural; add gentle forward creep
-        v = DRIVE_MAX_V * 0.18
+        // Side input should still creep forward
+        v = 0.4
       }
 
       if (v !== 0 && w !== 0) {
-        // Diagonal: soften forward speed, emphasize turning for smoother arc
-        v *= 0.85
-        w = Math.sign(w) * Math.min(DRIVE_MAX_W, Math.abs(w) * 1.35)
+        // Diagonal: preserve forward bias while turning
+        v = Math.sign(v) * Math.max(Math.abs(v) * 0.75, 0.5)
+        w = Math.sign(w) * Math.min(1, Math.abs(w) * 1.6)
       }
 
       if (v === 0 && w === 0) {
         handleDriveStop()
       } else {
-        handleDriveVector(v, w)
+        const curved = applyDriveCurve(v, w)
+        handleDriveVector(curved.v, curved.w)
       }
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isDirectionKey(e.code)) return
+      e.preventDefault()
+      e.stopPropagation()
       if (pressedKeys.has(e.code)) return
       pressedKeys.add(e.code)
       computeVector()
@@ -1986,6 +2005,8 @@ export default function CameraPage() {
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (!isDirectionKey(e.code)) return
+      e.preventDefault()
+      e.stopPropagation()
       pressedKeys.delete(e.code)
       computeVector()
     }

@@ -57,7 +57,7 @@ class WebRTCConfig:
     # 재연결 설정
     reconnect_enabled: bool = True
     reconnect_delay_sec: float = 3.0
-    max_reconnect_attempts: int = 5
+    max_reconnect_attempts: int = -1  # -1 for infinite retries
 
 
 class WebRTCService:
@@ -250,7 +250,7 @@ class WebRTCService:
 
     def _schedule_reconnect(self) -> None:
         """재연결 스케줄링"""
-        if self._reconnect_attempts >= self.config.max_reconnect_attempts:
+        if self.config.max_reconnect_attempts != -1 and self._reconnect_attempts >= self.config.max_reconnect_attempts:
             logger.error("Max reconnect attempts (%d) reached, giving up", 
                         self.config.max_reconnect_attempts)
             self._set_state(WebRTCState.ERROR, "reconnect failed - max attempts reached")

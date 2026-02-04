@@ -467,28 +467,6 @@ export default function MapDetailPage() {
     }
   }, [debouncedRefresh])
 
-  if (!carId) {
-    return (
-      <div className="p-3 sm:p-4 lg:p-6">
-        <div className="max-w-3xl mx-auto">
-          <Card className="bg-card border-border">
-            <CardHeader>
-              <CardTitle className="text-base font-medium">등록된 차량이 없습니다</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                차량을 등록하면 지도와 탐지 기록을 확인할 수 있습니다.
-              </p>
-              <Link href="/home">
-                <Button size="sm">차량 등록하러 가기</Button>
-              </Link>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    )
-  }
-
   const handleSelectMap = useCallback(async (mapId: string) => {
     await selectMap(Number(mapId))
   }, [selectMap])
@@ -562,6 +540,28 @@ export default function MapDetailPage() {
       }
     })
   }, [recentDetections])
+
+  if (!carId) {
+    return (
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="max-w-3xl mx-auto">
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base font-medium">등록된 차량이 없습니다</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                차량을 등록하면 지도와 탐지 기록을 확인할 수 있습니다.
+              </p>
+              <Link href="/home">
+                <Button size="sm">차량 등록하러 가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
 
   if (isLoading) {
     return (

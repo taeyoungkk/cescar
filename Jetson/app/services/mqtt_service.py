@@ -37,8 +37,16 @@ class MQTTService:
         if rc == 0:
             print(f"[*] MQTT Connected to {settings.MQTT_BROKER}!")
             logger.info(f"Connected to MQTT Broker: {settings.MQTT_BROKER}")
-            client.subscribe(settings.TOPIC_COMMAND)
-            print(f"[*] Subscribed to: {settings.TOPIC_COMMAND}")
+            
+            # Subscribe to topics
+            topics = [
+                (settings.TOPIC_COMMAND, 0),
+                (settings.TOPIC_MODE, 0),
+                (settings.TOPIC_CONTROL, 0),
+                (f"robot/+/+", 0)  # [DEBUG] Watch ALL robot topics
+            ]
+            client.subscribe(topics)
+            print(f"[*] Subscribed to: {[t[0] for t in topics]}")
         else:
             print(f"[!] MQTT Connection Failed with code: {rc}")
             logger.error(f"Failed to connect, return code {rc}")
@@ -46,10 +54,58 @@ class MQTTService:
     def on_message(self, client, userdata, msg):
         try:
             payload = msg.payload.decode()
-            print(f"\n[>>>] Message Received on {msg.topic}: {payload}")
-            logger.info(f"MQTT Received: {msg.topic} -> {payload}")
-            # TODO: Handle commands received via MQTT here
-            # e.g., dispatch to hardware_service.move_robot(...)
+            
+            # [DEBUG] odom/status 로그는 너무 많아서 제외하고 중요 메시지만 출력
+            if "odom" not in msg.topic and "status" not in msg.topic:
+                print(f"\n[>>>] Message Received on {msg.topic}: {payload}")
+                logger.info(f"MQTT Received: {msg.topic} -> {payload}")
+            
+            import json
+            data = json.loads(payload)
+            
+            # 1. Mode Change Protocol (Backend sends to .../mode)
+            if msg.topic == settings.TOPIC_MODE:
+                mode = data.get("mode", "").upper()
+                from app.services.tracking_service import tracking_service
+                
+                if mode == "AUTO" or mode == "TRACK":
+                    tracking_service.start_tracking()
+                    print(f"[MODE] -> TRACKING ON (Received via {msg.topic})")
+                elif mode == "MANUAL" or mode == "OFF" or mode == "STOP":
+                    tracking_service.stop_tracking()
+                    print(f"[MODE] -> TRACKING OFF (Received via {msg.topic})")
+            
+            # 2. Manual Control Protocol (Backend sends to .../control)
+            elif msg.topic == settings.TOPIC_CONTROL:
+                # Backend sends: {"v": -0.5, "w": 0.0} (inverted values)
+                v = float(data.get("v", 0.0))
+                w = float(data.get("w", 0.0))
+                
+                # Forward to Pi immediately (bypass tracking service logic)
+                # Pi expects: {"v": ..., "w": ..., "source": "jetson"}
+                # Note: We might need to invert v back if Pi expects positive for forward
+                # For now, forwarding as is (assuming Backend intentions are correct for the robot)
+                
+                cmd_payload = {
+                    "v": v, 
+                    "w": w,
+                    "source": "manual_control"
+                }
+                self.publish(settings.TOPIC_CMD_VEL, json.dumps(cmd_payload))
+                # logger.debug(f"[MANUAL] v={v}, w={w}")
+
+            # 3. Legacy Command Protocol (Unified topic)
+            elif msg.topic == settings.TOPIC_COMMAND:
+                cmd_type = data.get("type", "")
+                if cmd_type == "mode":
+                    mode = data.get("mode", "").upper()
+                    from app.services.tracking_service import tracking_service
+                    
+                    if mode == "AUTO" or mode == "TRACK":
+                        tracking_service.start_tracking()
+                    elif mode == "MANUAL" or mode == "OFF":
+                        tracking_service.stop_tracking()
+                        
         except Exception as e:
             logger.error(f"Message processing error: {e}")
 

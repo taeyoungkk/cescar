@@ -27,10 +27,10 @@ public class Detection {
     private float confidence; // 확신도 (0.0 ~ 1.0)
 
     // CarStatus와 통일성을 위해 BigDecimal 사용 (정밀도 유지)
-    @Column(nullable = false, precision = 10, scale = 4)
+    @Column(precision = 10, scale = 4)
     private BigDecimal x;
 
-    @Column(nullable = false, precision = 10, scale = 4)
+    @Column(precision = 10, scale = 4)
     private BigDecimal y;
 
     @Column(name = "image_url")

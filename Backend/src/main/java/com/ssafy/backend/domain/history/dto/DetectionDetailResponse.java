@@ -28,6 +28,9 @@ public class DetectionDetailResponse {
     @Schema(description = "Y 좌표")
     private BigDecimal y;
 
+    @Schema(description = "좌표 보유 여부")
+    private boolean hasLocation;
+
     @Schema(description = "이미지 접근 경로 (API 리다이렉트 경로)")
     private String imageUrl;
 
@@ -56,6 +59,7 @@ public class DetectionDetailResponse {
                 .confidence(detection.getConfidence())
                 .x(detection.getX())
                 .y(detection.getY())
+                .hasLocation(detection.getX() != null && detection.getY() != null)
                 .imageUrl(resolvedImageUrl)
                 .videoUrl(resolvedVideoUrl)
                 .createdAt(detection.getCreatedAt())

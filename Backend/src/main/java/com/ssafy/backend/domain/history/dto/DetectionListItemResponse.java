@@ -28,6 +28,9 @@ public class DetectionListItemResponse {
     @Schema(description = "Y 좌표")
     private BigDecimal y;
 
+    @Schema(description = "좌표 보유 여부")
+    private boolean hasLocation;
+
     @Schema(description = "이미지 접근 경로 (API 리다이렉트 경로)")
     private String imageUrl;
 
@@ -45,6 +48,7 @@ public class DetectionListItemResponse {
                 .confidence(detection.getConfidence())
                 .x(detection.getX())
                 .y(detection.getY())
+                .hasLocation(detection.getX() != null && detection.getY() != null)
                 // 목록에서는 절대 URL이면 그대로, 아니면 리다이렉트 API 경로 제공
                 .imageUrl(resolvedImageUrl)
                 .createdAt(detection.getCreatedAt())

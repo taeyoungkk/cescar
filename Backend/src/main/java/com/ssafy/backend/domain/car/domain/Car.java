@@ -67,7 +67,7 @@ public class Car {
     }
 
 
-    // ������ ��� ���� �޼���
+    // 소유자 등록 해제 메서드
     public void releaseOwner(Member member) {
         if (member == null || this.owner == null || !Objects.equals(this.owner.getId(), member.getId())) {
             throw new IllegalStateException("현재 오너만 해제할 수 있습니다.");
@@ -77,13 +77,13 @@ public class Car {
     }
 
 
-    // �г��� ���� �޼���
+    // 닉네임 변경 메서드
     public void updateNickname(String nickname) {
         this.nickname = nickname;
     }
 
 
-    // ���� ���� ���� �޼���
+    // 현재 지도 변경 메서드
     public void updateCurrentMap(SlamMap map) {
         if (map != null && map.getCar() != null && !Objects.equals(map.getCar().getId(), this.id)) {
             throw new IllegalArgumentException("해당 차량의 지도가 아닙니다.");

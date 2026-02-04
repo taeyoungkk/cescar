@@ -2,6 +2,7 @@
 "use client"
 
 import { create } from "zustand"
+import { getErrorMessage } from "@/lib/error-messages"
 import type { CarStatus } from "@/core/types"
 import * as carApi from "@/core/api/car"
 
@@ -141,7 +142,7 @@ export const useCarStatusStore = create<State>((set, get) => {
         failCount = 0
         currentIntervalMs = baseIntervalMs
       } catch (e: any) {
-        set({ error: e?.message ?? "차량 상태를 불러오는데 실패했습니다." })
+        set({ error: getErrorMessage(e, "차량 상태를 불러오는데 실패했습니다.") })
 
         // 실패 시 백오프 증가
         failCount += 1

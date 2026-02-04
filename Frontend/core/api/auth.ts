@@ -1,5 +1,6 @@
 import type { AuthResponse, LoginRequest, SignupRequest, User } from "../types"
-import { apiFetch } from "./http"
+import { apiFetch, ApiError } from "./http"
+import { getErrorMessage } from "@/lib/error-messages"
 
 const AUTH_TOKEN_KEY = "accessToken"
 const MOCK_DELAY = 800
@@ -29,34 +30,75 @@ export function isAuthenticated(): boolean {
 // ============================================
 // Auth API Functions
 // ============================================
+async function loginRequest(path: string, request: LoginRequest): Promise<any> {
+  return apiFetch<any>(path, {
+    method: "POST",
+    body: JSON.stringify(request),
+  })
+}
+
 export async function login(request: LoginRequest): Promise<AuthResponse> {
   try {
-    const res: any = await apiFetch<any>("/api/members/login", {
-      method: "POST",
-      body: JSON.stringify(request),
-    })
+    let res: any
+    try {
+      res = await loginRequest("/api/members/login", request)
+    } catch (e: any) {
+      if (e instanceof ApiError && e.status === 404) {
+        res = await loginRequest("/members/login", request)
+      } else {
+        throw e
+      }
+    }
 
     const accessToken = res?.accessToken ?? res?.token ?? res?.data?.accessToken ?? res?.data?.token
     if (accessToken) setAuthToken(accessToken)
 
     const user: User | undefined = res?.user ?? res?.data?.user ?? res?.data ?? undefined
 
+    const resolvedUser = user
+      ? {
+          id: String((user as any).id ?? ""),
+          email: String((user as any).email ?? request.email ?? ""),
+          name: String((user as any).name ?? ""),
+          nickname: (user as any).nickname ?? undefined,
+          role: (user as any).role ?? "viewer",
+          createdAt: String((user as any).createdAt ?? ""),
+        }
+      : undefined
+
+    if (!accessToken) {
+      const serverMessage =
+        typeof res?.message === "string"
+          ? res.message
+          : typeof res?.error === "string"
+          ? res.error
+          : typeof res?.data?.message === "string"
+          ? res.data.message
+          : typeof res?.data?.error === "string"
+          ? res.data.error
+          : null
+      const normalized =
+        serverMessage === "인증이 필요합니다." ? "아이디 또는 비밀번호가 일치하지 않습니다." : serverMessage
+      return {
+        success: false,
+        error: normalized ?? "이메일 또는 비밀번호를 확인해 주세요.",
+      }
+    }
+
     return {
-      success: Boolean(accessToken),
+      success: true,
       token: accessToken,
-      user: user
-        ? {
-            id: String((user as any).id ?? ""),
-            email: String((user as any).email ?? request.email ?? ""),
-            name: String((user as any).name ?? ""),
-            nickname: (user as any).nickname ?? undefined,
-            role: (user as any).role ?? "viewer",
-            createdAt: String((user as any).createdAt ?? ""),
-          }
-        : undefined,
+      user: resolvedUser,
     }
   } catch (e: any) {
-    return { success: false, error: e?.message ?? "로그인에 실패했습니다." }
+    if (e instanceof ApiError && e.status === 404) {
+      return { success: false, error: "로그인 API 경로를 찾을 수 없습니다. 서버 주소/경로를 확인해 주세요." }
+    }
+    const message = getErrorMessage(e, "이메일 또는 비밀번호를 확인해 주세요.")
+    return {
+      success: false,
+      error: message === "인증이 필요합니다." ? "아이디 또는 비밀번호가 일치하지 않습니다." : message,
+    }
   }
 }
 
@@ -68,7 +110,7 @@ export async function signup(request: SignupRequest): Promise<AuthResponse> {
     })
     return { success: true }
   } catch (e: any) {
-    return { success: false, error: e?.message ?? "회원가입에 실패했습니다." }
+    return { success: false, error: getErrorMessage(e, "회원가입에 실패했습니다. 입력값을 확인해 주세요.") }
   }
 }
 
@@ -121,10 +163,19 @@ export async function updateMe(request: { name: string; nickname?: string }): Pr
   }
 }
 
-export async function updatePassword(request: { currentPassword: string; newPassword: string }): Promise<void> {
+export async function updatePassword(request: {
+  currentPassword: string
+  newPassword: string
+  confirmPassword: string
+}): Promise<void> {
   await apiFetch<any>("/api/members/me/password", {
     method: "PATCH",
-    body: JSON.stringify(request),
+    body: JSON.stringify({
+      currentPassword: request.currentPassword,
+      newPassword: request.newPassword,
+      newPasswordConfirm: request.confirmPassword,
+      new_password_confirm: request.confirmPassword,
+    }),
   })
 }
 

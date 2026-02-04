@@ -25,7 +25,6 @@ import {
 import { useAuth } from "@/hooks/useAuth"
 import { useTheme } from "@/hooks/useTheme"
 import { useAlerts } from "@/hooks/useAlerts"
-import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
@@ -47,12 +46,11 @@ export function AppHeader() {
   const { user, logout } = useAuth()
   const { toggleTheme, isDark } = useTheme()
   const { unreadCount, alerts, markAsRead, markAllAsRead } = useAlerts()
-  const { carId } = usePrimaryCarId()
 
-  // ✅ 모바일 Sheet open state를 controlled로 관리
+  // 모바일 Sheet open state를 controlled로 관리
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
-  // ✅ 라우트(pathname) 변경 시 자동 닫기
+  // 라우트(pathname) 변경 시 자동 닫기
   useEffect(() => {
     setMobileNavOpen(false)
   }, [pathname])
@@ -92,7 +90,7 @@ export function AppHeader() {
                   <Link
                     key={item.href}
                     href={item.href}
-                    // ✅ 링크 클릭 시 즉시 닫기 (체감 UX 개선)
+                    // 링크 클릭 시 즉시 닫기 (체감 UX 개선)
                     onClick={() => setMobileNavOpen(false)}
                     className={cn(
                       "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors",
@@ -150,7 +148,7 @@ export function AppHeader() {
               {unreadCount > 0 && (
                 <div className="flex items-center gap-2">
                   <Badge variant="secondary" className="text-[10px]">
-                    {unreadCount} unread
+                    {unreadCount} 미확인
                   </Badge>
                   <Button
                     variant="ghost"
@@ -165,7 +163,7 @@ export function AppHeader() {
             </div>
             <div className="space-y-2 max-h-72 overflow-auto">
               {(!alerts || alerts.filter((a) => !a.isRead).length === 0) && (
-                <p className="text-xs text-muted-foreground">알림이 없습니다.</p>
+                <p className="text-xs text-muted-foreground">새 알림이 없습니다.</p>
               )}
               {alerts?.filter((a) => !a.isRead).slice(0, 5).map((alert) => (
                 <div key={alert.id} className="rounded-md border border-border bg-secondary/20 p-2">
@@ -203,12 +201,10 @@ export function AppHeader() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel>차량 ID: {carId ?? "-"}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
               <Link href="/settings" className="flex items-center">
-              <Settings className="mr-2 h-4 w-4" />
-              설정
+                <Settings className="mr-2 h-4 w-4" />
+                설정
               </Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />

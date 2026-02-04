@@ -11,14 +11,12 @@ import {
   MapPin,
   Bug,
   Clock,
-  RefreshCw,
   Info,
   History,
   Trash2,
   Grid3X3,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
@@ -46,6 +44,8 @@ import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useCarMaps } from "@/hooks/useCarMaps"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
 import type { CarMap } from "@/core/types"
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { ErrorAlert } from "@/components/ui/error-message"
 
 type MapStatus = "no_map" | "generating" | "completed"
 
@@ -449,11 +449,11 @@ function MapHistoryDialog({
 }
 
 export default function MapDetailPage() {
-  const { carId } = usePrimaryCarId()
-  const { maps, currentMap, isLoading, refresh, selectMap, deleteMap, renameMap, error: mapsError } = useCarMaps(carId)
+  const { carId, error: primaryCarError } = usePrimaryCarId()
+  const { maps, currentMap, isLoading, selectMap, deleteMap, renameMap, error: mapsError } = useCarMaps(carId)
   const { recentDetections, isLoading: detectionsLoading, error: detectionsError } = useRecentDetections(carId, 20)
   const { toast } = useToast()
-  const debouncedRefresh = useMemo(() => debounce(() => refresh(), 500, { leading: true, trailing: false }), [refresh])
+  const debouncedRefresh = useMemo(() => debounce(() => {}, 500, { leading: true, trailing: false }), [])
 
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameDraft, setRenameDraft] = useState("")
@@ -481,9 +481,9 @@ export default function MapDetailPage() {
     const remaining = maps.filter((map) => map.id !== currentMap.id)
     if (remaining.length > 0) {
       await handleSelectMap(String(remaining[0].id))
-      toast({ title: "다음 지도 선택", description: `“${remaining[0].name}”로 전환했습니다.` })
+      toastSuccess(toast, "다음 지도 선택", `“${remaining[0].name}”로 전환했습니다.`)
     } else {
-      toast({ title: "지도 삭제 완료", description: "선택 가능한 지도가 없습니다." })
+      toastInfo(toast, "지도 삭제 완료", "선택 가능한 지도가 없습니다.")
     }
   }, [currentMap, handleDeleteMap, handleSelectMap, maps, toast])
 
@@ -501,16 +501,16 @@ export default function MapDetailPage() {
     if (!currentMap) return
     const nextName = renameDraft.trim()
     if (!nextName) {
-      toast({ title: "이름 변경 실패", description: "지도 이름을 입력해 주세요." })
+      toastError(toast, "이름 변경 실패", "지도 이름을 입력해 주세요.")
       return
     }
     setRenaming(true)
     try {
       await renameMap(currentMap.id, nextName)
-      toast({ title: "이름 변경 완료", description: "지도 이름이 변경되었습니다." })
+      toastSuccess(toast, "이름 변경 완료", "지도 이름이 변경되었습니다.")
       setRenameOpen(false)
-    } catch (e: any) {
-      toast({ title: "이름 변경 실패", description: e?.message ?? "지도 이름 변경에 실패했습니다." })
+    } catch {
+      toastError(toast, "이름 변경 실패", "잠시 후 다시 시도해 주세요.")
     } finally {
       setRenaming(false)
     }
@@ -693,15 +693,16 @@ export default function MapDetailPage() {
           </div>
         </div>
 
+        <div className="mb-4 space-y-2">
+          <ErrorAlert title="차량 정보 불러오기 실패" message={primaryCarError} />
+        </div>
+
         {/* Main content */}
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
           {/* Map visualization - spans 3 columns */}
           <div className="lg:col-span-3">
             {mapsError && (
-              <Alert variant="destructive" className="mb-4">
-                <AlertTitle>지도 불러오기 실패</AlertTitle>
-                <AlertDescription>{mapsError}</AlertDescription>
-              </Alert>
+              <ErrorAlert title="지도 불러오기 실패" message={mapsError} className="mb-4" />
             )}
             <Card className="bg-card border-border overflow-hidden">
               <CardHeader className="pb-3">
@@ -719,12 +720,7 @@ export default function MapDetailPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
-                    <Button variant="outline" size="sm" className="bg-transparent" onClick={debouncedRefresh} disabled={isLoading}>
-                      <RefreshCw className="h-4 w-4 sm:mr-1" />
-                      <span className="hidden sm:inline">새로고침</span>
-                    </Button>
-                  </div>
+                  <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end" />
                 </div>
               </CardHeader>
               <CardContent>
@@ -774,10 +770,7 @@ export default function MapDetailPage() {
                       <CardContent className="p-0">
                         {detectionsError && (
                           <div className="p-4">
-                            <Alert variant="destructive">
-                              <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
-                              <AlertDescription>{detectionsError}</AlertDescription>
-                            </Alert>
+                            <ErrorAlert title="탐지 기록 불러오기 실패" message={detectionsError} />
                           </div>
                         )}
                         <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
@@ -825,10 +818,7 @@ export default function MapDetailPage() {
                 <CardContent className="p-0">
                   {detectionsError && (
                     <div className="p-4">
-                      <Alert variant="destructive">
-                        <AlertTitle>탐지 기록 불러오기 실패</AlertTitle>
-                        <AlertDescription>{detectionsError}</AlertDescription>
-                      </Alert>
+                      <ErrorAlert title="탐지 기록 불러오기 실패" message={detectionsError} />
                     </div>
                   )}
                   <div className="divide-y divide-border max-h-[320px] overflow-y-auto">

@@ -22,6 +22,8 @@ import * as carApi from "@/core/api/car"
 import * as mapApi from "@/core/api/map"
 import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { ErrorAlert } from "@/components/ui/error-message"
 
 const DRIVE_MAX_V = 0.45
 const DRIVE_MAX_W = 1.2
@@ -417,7 +419,7 @@ function LiveCameraView({
 
     await pc.setRemoteDescription({ type: "offer", sdp })
 
-    // offer ?꾩뿉 ?볦씤 candidate 泥섎━
+    // offer 전에 쌓인 candidate 처리
     for (const c of pendingCandidatesRef.current) {
       await pc.addIceCandidate(new RTCIceCandidate(c))
     }
@@ -1033,10 +1035,10 @@ function ControlPanel({
             {invalidLineCount > 0 && showInvalidLines && (
               <div className="space-y-2 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] text-red-300">좌표 형식을 확인해 주세요.</p>
+                  <p className="text-[11px] text-red-600">좌표 형식을 확인해 주세요.</p>
                   <button
                     type="button"
-                    className="text-[11px] text-red-200 hover:text-red-100"
+                    className="text-[11px] text-red-600 hover:text-red-500"
                     onClick={() => {
                       setShowInvalidLines(false)
                       setShowAllInvalidLines(false)
@@ -1048,7 +1050,7 @@ function ControlPanel({
                 </div>
                 <div className="space-y-1">
                   {limitedInvalidLines.map((line, idx) => (
-                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-200">
+                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-600">
                       {truncateLine(line)}
                     </div>
                   ))}
@@ -1467,9 +1469,9 @@ export default function CameraPage() {
         setSelectedCarId((prev) => prev ?? list[0]?.carId ?? null)
         setCarsError(null)
       })
-      .catch((e: any) => {
+      .catch(() => {
         if (!mounted) return
-        setCarsError(e?.message ?? "차량 목록을 불러오는 데 실패했습니다.")
+        setCarsError("차량 목록을 불러오는 데 실패했습니다. 잠시 후 다시 시도해 주세요.")
       })
       .finally(() => {
         if (!mounted) return
@@ -1495,10 +1497,10 @@ export default function CameraPage() {
         if (!mounted) return
         setCarDetail(detail)
       })
-      .catch((e: any) => {
+      .catch(() => {
         if (!mounted) return
         setCarDetail(null)
-        toast({ title: "차량 정보 불러오기 실패", description: e?.message ?? "차량 정보를 불러오지 못했습니다." })
+        toastError(toast, "차량 정보 불러오기 실패", "잠시 후 다시 시도해 주세요.")
       })
       .finally(() => {
         if (!mounted) return
@@ -1726,7 +1728,7 @@ export default function CameraPage() {
       .filter((d) => d.x != null && d.y != null)
       .map((d) => ({ x: d.x as number, y: d.y as number }))
     if (!points.length) {
-      toast({ title: "탐지 좌표 없음", description: "최근 탐지 좌표가 없습니다." })
+      toastInfo(toast, "탐지 좌표 없음", "최근 탐지 좌표가 없습니다.")
       return
     }
     setMissionError(null)
@@ -1734,9 +1736,9 @@ export default function CameraPage() {
     const validPoints = points.filter(isPointInBounds)
     appendMissionPoints(validPoints)
     if (validPoints.length !== points.length) {
-      toast({ title: "범위 밖 좌표 제외", description: "유효 범위 밖 좌표는 제외되었습니다." })
+      toastInfo(toast, "범위 밖 좌표 제외", "유효 범위 밖 좌표는 제외되었습니다.")
     } else {
-      toast({ title: "좌표 추가 완료", description: "최근 탐지 좌표가 추가되었습니다." })
+      toastSuccess(toast, "좌표 추가 완료", "최근 탐지 좌표가 추가되었습니다.")
     }
   }, [appendMissionPoints, isPointInBounds, recentDetections.recentDetections, toast])
 
@@ -1769,52 +1771,52 @@ export default function CameraPage() {
     if (!networkOnline) {
       setModeError("오프라인 상태에서는 모드를 변경할 수 없습니다.")
       setDriveMode(prev)
-      toast({ title: "모드 변경 실패", description: "오프라인 상태입니다." })
+      toastError(toast, "모드 변경 실패", "오프라인 상태입니다.")
       return
     }
     try {
       await carApi.setCarMode(selectedCarId, mode)
-      toast({ title: "모드 변경 완료", description: `현재 모드: ${mode}` })
+      toastSuccess(toast, "모드 변경 완료", `현재 모드: ${mode}`)
     } catch {
       setDriveMode(prev)
-      setModeError("모드 변경에 실패했습니다. 다시 시도해 주세요.")
-      toast({ title: "모드 변경 실패", description: "잠시 후 다시 시도해 주세요." })
+      setModeError("모드 변경에 실패했습니다. 잠시 후 다시 시도해 주세요.")
+      toastError(toast, "모드 변경 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
 
   const handleStartMission = async () => {
     if (!selectedCarId) return
     if (driveMode !== "AUTO") {
-      toast({ title: "AUTO 모드 필요", description: "AUTO 모드에서만 미션을 시작할 수 있습니다." })
+      toastInfo(toast, "AUTO 모드 필요", "AUTO 모드에서만 미션을 시작할 수 있습니다.")
       return
     }
     if (!networkOnline) {
-      toast({ title: "미션 시작 실패", description: "오프라인 상태입니다." })
+      toastError(toast, "미션 시작 실패", "오프라인 상태입니다.")
       return
     }
     if (missionPoints.length === 0) {
-      toast({ title: "미션 좌표 없음", description: "미션 좌표를 입력한 뒤 다시 시도해 주세요." })
+      toastInfo(toast, "미션 좌표 없음", "미션 좌표를 입력한 뒤 다시 시도해 주세요.")
       return
     }
     try {
       await carApi.startMission(selectedCarId, { points: missionPoints })
-      toast({ title: "미션 시작 완료", description: "미션이 차량으로 전송되었습니다." })
+      toastSuccess(toast, "미션 시작 완료", "미션이 차량으로 전송되었습니다.")
     } catch {
-      toast({ title: "미션 시작 실패", description: "미션 전송에 실패했습니다." })
+      toastError(toast, "미션 시작 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
 
   const handleStopMission = async () => {
     if (!selectedCarId) return
     if (!networkOnline) {
-      toast({ title: "탐지 중지 실패", description: "오프라인 상태입니다." })
+      toastError(toast, "탐지 중지 실패", "오프라인 상태입니다.")
       return
     }
     try {
       await carApi.setCarMode(selectedCarId, "STOP")
-      toast({ title: "탐지 중지 완료", description: "차량이 정지 모드로 전환되었습니다." })
+      toastSuccess(toast, "탐지 중지 완료", "차량이 정지 모드로 전환되었습니다.")
     } catch {
-      toast({ title: "탐지 중지 실패", description: "요청에 실패했습니다." })
+      toastError(toast, "탐지 중지 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
 
@@ -1825,7 +1827,7 @@ export default function CameraPage() {
     } catch {
       const now = Date.now()
       if (now - lastDriveToastRef.current > 2000) {
-        toast({ title: "수동 조작 실패", description: "차량 제어 요청에 실패했습니다." })
+        toastError(toast, "수동 조작 실패", "잠시 후 다시 시도해 주세요.")
         lastDriveToastRef.current = now
       }
     }
@@ -2004,7 +2006,7 @@ export default function CameraPage() {
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">차량 선택</p>
           {selectedCarId && (
             <Badge variant="secondary" className="h-5 px-2 text-[10px]">
-              {selectedCarId}
+              {cars.find((c) => c.carId === selectedCarId)?.nickname ?? "내 차"}
             </Badge>
           )}
         </div>
@@ -2018,7 +2020,7 @@ export default function CameraPage() {
           <SelectContent>
             {cars.map((c) => (
               <SelectItem key={c.carId} value={String(c.carId)}>
-                {c.nickname} · {c.carId}
+                {c.nickname || "내 차"}
               </SelectItem>
             ))}
           </SelectContent>
@@ -2084,6 +2086,11 @@ export default function CameraPage() {
           </div>
         </div>
 
+        <div className="mb-4 space-y-2">
+          <ErrorAlert title="차량 상태 불러오기 실패" message={carStatus.error} />
+          <ErrorAlert title="최근 탐지 불러오기 실패" message={recentDetections.error} />
+        </div>
+
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
           <div className="flex-1">
             <div className="w-full">
@@ -2106,10 +2113,11 @@ export default function CameraPage() {
                   onToggleCameraConnection={() => {
                     setCameraConnected((prev) => {
                       const next = !prev
-                      toast({
-                        title: next ? "카메라 연결 시도" : "카메라 연결 해제",
-                        description: next ? "WebRTC 연결을 시작합니다..." : "카메라 연결을 해제했습니다.",
-                      })
+                      if (next) {
+                        toastInfo(toast, "카메라 연결 시도", "WebRTC 연결을 시작합니다.")
+                      } else {
+                        toastInfo(toast, "카메라 연결 해제", "카메라 연결을 해제했습니다.")
+                      }
                       return next
                     })
                   }}

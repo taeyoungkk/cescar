@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { ErrorMessage } from "@/components/ui/error-message"
 import { useAuth } from "@/hooks/useAuth"
 
 // ============================================
@@ -52,6 +53,19 @@ function SignupForm({
   onTogglePassword,
   onSubmit,
 }: SignupFormProps) {
+  const validationMessages = Object.values(validationErrors).filter(Boolean)
+  const combinedError = error
+    ? error
+    : validationMessages.length
+    ? (
+        <ul className="list-disc pl-4 space-y-1">
+          {validationMessages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      )
+    : null
+
   return (
     <Card className="w-full max-w-sm bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="text-center pb-4">
@@ -73,12 +87,8 @@ function SignupForm({
               placeholder="홍길동"
               value={name}
               onChange={(e) => onNameChange(e.target.value)}
-              required
               className="bg-input border-border"
             />
-            {validationErrors.name && (
-              <p className="text-xs text-destructive">{validationErrors.name}</p>
-            )}
           </div>
 
           <div className="space-y-2">
@@ -89,12 +99,8 @@ function SignupForm({
               placeholder="닉네임을 입력해주세요"
               value={nickname}
               onChange={(e) => onNicknameChange(e.target.value)}
-              required
               className="bg-input border-border"
             />
-            {validationErrors.nickname && (
-              <p className="text-xs text-destructive">{validationErrors.nickname}</p>
-            )}
           </div>
 
           <div className="space-y-2">
@@ -105,12 +111,8 @@ function SignupForm({
               placeholder="name@example.com"
               value={email}
               onChange={(e) => onEmailChange(e.target.value)}
-              required
               className="bg-input border-border"
             />
-            {validationErrors.email && (
-              <p className="text-xs text-destructive">{validationErrors.email}</p>
-            )}
           </div>
 
           <div className="space-y-2">
@@ -122,7 +124,6 @@ function SignupForm({
                 placeholder="8자 이상 입력"
                 value={password}
                 onChange={(e) => onPasswordChange(e.target.value)}
-                required
                 className="bg-input border-border pr-10"
               />
               <Button
@@ -139,9 +140,7 @@ function SignupForm({
                 )}
               </Button>
             </div>
-            {validationErrors.password && (
-              <p className="text-xs text-destructive">{validationErrors.password}</p>
-            )}
+            <p className="text-[11px] text-muted-foreground">영문/숫자/특수문자 포함 8자 이상</p>
           </div>
 
           <div className="space-y-2">
@@ -152,19 +151,11 @@ function SignupForm({
               placeholder="비밀번호 재입력"
               value={confirmPassword}
               onChange={(e) => onConfirmPasswordChange(e.target.value)}
-              required
               className="bg-input border-border"
             />
-            {validationErrors.confirmPassword && (
-              <p className="text-xs text-destructive">{validationErrors.confirmPassword}</p>
-            )}
           </div>
 
-          {error && (
-            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30">
-              <p className="text-sm text-destructive">{error}</p>
-            </div>
-          )}
+          <ErrorMessage message={combinedError} />
 
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
@@ -222,6 +213,7 @@ export default function SignupPage() {
   const [showPassword, setShowPassword] = useState(false)
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [isSuccess, setIsSuccess] = useState(false)
+  const passwordRule = /^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z0-9]).{8,}$/
 
   // Clear errors when inputs change
   useEffect(() => {
@@ -229,7 +221,7 @@ export default function SignupPage() {
       clearError()
     }
     setValidationErrors({})
-  }, [name, nickname, email, password, confirmPassword])
+  }, [name, nickname, email, password, confirmPassword, clearError])
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {}
@@ -246,8 +238,8 @@ export default function SignupPage() {
       errors.email = "이메일을 입력해주세요."
     }
 
-    if (password.length < 8) {
-      errors.password = "비밀번호는 8자 이상이어야 합니다."
+    if (!passwordRule.test(password)) {
+      errors.password = "영문/숫자/특수문자를 포함해 8자 이상으로 입력해주세요."
     }
 
     if (password !== confirmPassword) {

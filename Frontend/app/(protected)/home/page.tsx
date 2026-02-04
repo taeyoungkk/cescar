@@ -34,6 +34,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { useToast } from "@/components/ui/use-toast"
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { getErrorMessage } from "@/lib/error-messages"
+import { ErrorAlert } from "@/components/ui/error-message"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -113,13 +116,24 @@ function RobotStatusSection({
 }) {
   if (isLoading || !status) {
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        {[...Array(4)].map((_, i) => (
-          <Card key={i} className="bg-card border-border">
-            <CardContent className="p-3 sm:p-4 h-20 sm:h-24 animate-pulse bg-secondary/20" />
-          </Card>
-        ))}
-      </div>
+      <>
+        <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="min-w-[140px]">
+              <Card className="bg-card border-border">
+                <CardContent className="p-3 h-20 animate-pulse bg-secondary/20" />
+              </Card>
+            </div>
+          ))}
+        </div>
+        <div className="hidden lg:grid grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i} className="bg-card border-border">
+              <CardContent className="p-4 h-24 animate-pulse bg-secondary/20" />
+            </Card>
+          ))}
+        </div>
+      </>
     )
   }
 
@@ -440,7 +454,7 @@ function MapHistoryDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="bg-transparent">
+        <Button variant="outline" size="sm" className="bg-transparent w-full sm:w-auto">
           <History className="mr-2 h-4 w-4" />
           기존 지도 보기
         </Button>
@@ -583,14 +597,14 @@ function MapGenerationSection({
             </Badge>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end">
+          <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end w-full sm:w-auto">
             {mapActions}
             {maps.length > 0 && onSelectMap && onDeleteMap && (
               <MapHistoryDialog maps={maps} onSelect={onSelectMap} onDelete={onDeleteMap} />
             )}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <OfflineGuardButton
-                className={`h-8 px-3 text-xs ${
+                className={`h-8 px-3 text-xs w-full sm:w-auto ${
                   isDetecting ? "bg-secondary hover:bg-secondary/80" : "bg-primary hover:bg-primary/90"
                 }`}
                 onClick={() => onStartDetect()}
@@ -602,7 +616,7 @@ function MapGenerationSection({
               </OfflineGuardButton>
               <OfflineGuardButton
                 variant="destructive"
-                className="h-8 px-3 text-xs"
+                className="h-8 px-3 text-xs w-full sm:w-auto"
                 onClick={() => onStopDetect()}
                 disabled={!isDetecting || detectionLoading || !canStop}
                 offlineMessage={stopBlockMessage}
@@ -877,7 +891,7 @@ export default function HomePage() {
     originY: "",
   })
 
-  const { carId, setCarId, refresh: refreshPrimaryCar } = usePrimaryCarId()
+  const { carId, setCarId, refresh: refreshPrimaryCar, error: primaryCarError } = usePrimaryCarId()
   const carStatus = useCarStatus(carId ?? 0, { enabled: !!carId, intervalMs: 1000 })
 
   const realDetections = useRecentDetections(carId, 5)
@@ -936,7 +950,7 @@ export default function HomePage() {
       setCarError(null)
     } catch (e: any) {
       if (refreshCarsRequestIdRef.current !== requestId) return
-      setCarError(e?.message ?? "차량 목록을 불러오지 못했습니다.")
+      setCarError("차량 목록을 불러오지 못했습니다.")
       setCarList([])
     } finally {
       if (refreshCarsRequestIdRef.current === requestId) {
@@ -1020,6 +1034,7 @@ export default function HomePage() {
 
   detectionsLoading = realDetections.isLoading
   alertsLoading = realAlerts.isLoading
+  const hasTopErrors = Boolean(primaryCarError || carStatus.error || realDetections.error || realAlerts.error)
 
   const computedAlerts = React.useMemo(() => {
     const list: SystemAlert[] = []
@@ -1106,19 +1121,19 @@ export default function HomePage() {
   const detectionLoading = false
 
   const onStart = React.useCallback(async () => {
-    toast({ title: "탐지 시작 불가", description: "탐지 시작/중지 API 연동이 필요합니다." })
+      toastError(toast, "탐지 시작 불가", "탐지 시작/중지 API 연동이 필요합니다.")
     return false
   }, [toast])
 
   const onStop = React.useCallback(async () => {
-    toast({ title: "탐지 중지 불가", description: "탐지 시작/중지 API 연동이 필요합니다." })
+      toastError(toast, "탐지 중지 불가", "탐지 시작/중지 API 연동이 필요합니다.")
     return false
   }, [toast])
 
   const handleClaim = async () => {
     if (!claimCode.trim()) {
       setCarError("클레임 코드를 입력해 주세요.")
-      toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+      toastError(toast, "차량 등록 실패", "클레임 코드를 입력해 주세요.")
       return
     }
     setIsClaiming(true)
@@ -1128,16 +1143,17 @@ export default function HomePage() {
       setClaimNickname("")
       await refreshCars()
       await refreshPrimaryCar()
-      toast({
-        title: "차량 등록 완료",
-        description: claimNickname.trim()
+      toastSuccess(
+        toast,
+        "차량 등록 완료",
+        claimNickname.trim()
           ? `닉네임 “${claimNickname.trim()}”으로 등록되었습니다.`
-          : "차량이 성공적으로 등록되었습니다.",
-      })
+          : "차량이 성공적으로 등록되었습니다."
+      )
     } catch (e: any) {
-      const message = e?.message ?? "차량 등록에 실패했습니다."
+      const message = getErrorMessage(e, "차량 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.")
       setCarError(message)
-      toast({ title: "차량 등록 실패", description: message })
+      toastError(toast, "차량 등록 실패", message)
     } finally {
       setIsClaiming(false)
     }
@@ -1150,14 +1166,11 @@ export default function HomePage() {
       await carApi.unclaimCar(primaryCar.carId)
       await refreshCars()
       await refreshPrimaryCar()
-      toast({
-        title: "차량 연결 해제",
-        description: `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제되었습니다.`,
-      })
+      toastSuccess(toast, "차량 연결 해제", `${primaryCar.nickname} (${primaryCar.carId}) 연결이 해제되었습니다.`)
     } catch (e: any) {
-      const message = e?.message ?? "차량 해제에 실패했습니다."
+      const message = getErrorMessage(e, "차량 해제에 실패했습니다. 잠시 후 다시 시도해 주세요.")
       setCarError(message)
-      toast({ title: "차량 해제 실패", description: message })
+      toastError(toast, "차량 해제 실패", message)
     } finally {
       setIsUnclaiming(false)
     }
@@ -1168,18 +1181,18 @@ export default function HomePage() {
     const nextName = nicknameDraft.trim()
     if (!nextName) {
       setCarError("닉네임을 입력해 주세요.")
-      toast({ title: "닉네임 저장 실패", description: "닉네임을 입력해 주세요." })
+      toastError(toast, "닉네임 저장 실패", "닉네임을 입력해 주세요.")
       return
     }
     setIsSavingNickname(true)
     try {
       await carApi.updateCarNickname(primaryCar.carId, nextName)
       await refreshCars()
-      toast({ title: "닉네임 저장 완료", description: `“${nextName}”으로 변경되었습니다.` })
+      toastSuccess(toast, "닉네임 저장 완료", `“${nextName}”으로 변경되었습니다.`)
     } catch (e: any) {
-      const message = e?.message ?? "닉네임 수정에 실패했습니다."
+      const message = "닉네임 수정에 실패했습니다. 잠시 후 다시 시도해 주세요."
       setCarError(message)
-      toast({ title: "닉네임 저장 실패", description: message })
+      toastError(toast, "닉네임 저장 실패", "잠시 후 다시 시도해 주세요.")
     } finally {
       setIsSavingNickname(false)
     }
@@ -1201,7 +1214,7 @@ export default function HomePage() {
 
   const handleCreateMap = async () => {
     if (!carId) {
-      toast({ title: "지도 등록 실패", description: "차량을 먼저 선택해 주세요." })
+      toastError(toast, "지도 등록 실패", "차량을 먼저 선택해 주세요.")
       return
     }
     const width = Number(mapDraft.width)
@@ -1213,49 +1226,49 @@ export default function HomePage() {
     if (!mapDraft.name.trim()) {
       setMapDraftError("지도 이름을 입력해 주세요.")
       setMapFieldErrors({ name: "지도 이름을 입력해 주세요." })
-      toast({ title: "지도 등록 실패", description: "지도 이름을 입력해 주세요." })
+      toastError(toast, "지도 등록 실패", "지도 이름을 입력해 주세요.")
       return
     }
     if (!mapDraft.imageUrl.trim()) {
       setMapDraftError("이미지 URL을 입력해 주세요.")
       setMapFieldErrors({ imageUrl: "이미지 URL을 입력해 주세요." })
-      toast({ title: "지도 등록 실패", description: "이미지 URL을 입력해 주세요." })
+      toastError(toast, "지도 등록 실패", "이미지 URL을 입력해 주세요.")
       return
     }
     if (!/^(https?:\/\/|gs:\/\/)/i.test(mapDraft.imageUrl.trim())) {
       setMapDraftError("이미지 URL은 http(s):// 또는 gs://로 시작해야 합니다.")
       setMapFieldErrors({ imageUrl: "http(s):// 또는 gs:// 형식을 입력해 주세요." })
-      toast({ title: "지도 등록 실패", description: "이미지 URL 형식을 확인해 주세요." })
+      toastError(toast, "지도 등록 실패", "이미지 URL 형식을 확인해 주세요.")
       return
     }
     if (!Number.isFinite(width) || width <= 0 || !Number.isFinite(height) || height <= 0) {
       setMapDraftError("지도 크기(width/height)를 입력해 주세요.")
       setMapFieldErrors({ width: "가로/세로 값을 확인해 주세요.", height: "가로/세로 값을 확인해 주세요." })
-      toast({ title: "지도 등록 실패", description: "지도 크기(width/height)를 입력해 주세요." })
+      toastError(toast, "지도 등록 실패", "지도 크기(width/height)를 입력해 주세요.")
       return
     }
     if (!Number.isFinite(resolution) || resolution <= 0) {
       setMapDraftError("해상도(resolution)를 입력해 주세요.")
       setMapFieldErrors({ resolution: "해상도를 입력해 주세요." })
-      toast({ title: "지도 등록 실패", description: "해상도(resolution)를 입력해 주세요." })
+      toastError(toast, "지도 등록 실패", "해상도(resolution)를 입력해 주세요.")
       return
     }
     if (resolution < 0.01 || resolution > 1) {
       setMapDraftError("해상도는 0.01 ~ 1.0 범위여야 합니다.")
       setMapFieldErrors({ resolution: "0.01 ~ 1.0 범위로 입력해 주세요." })
-      toast({ title: "지도 등록 실패", description: "해상도 범위를 확인해 주세요." })
+      toastError(toast, "지도 등록 실패", "해상도 범위를 확인해 주세요.")
       return
     }
     if (!Number.isFinite(originX) || !Number.isFinite(originY)) {
       setMapDraftError("origin 좌표를 입력해 주세요.")
       setMapFieldErrors({ originX: "origin 좌표를 입력해 주세요.", originY: "origin 좌표를 입력해 주세요." })
-      toast({ title: "지도 등록 실패", description: "origin 좌표를 입력해 주세요." })
+      toastError(toast, "지도 등록 실패", "origin 좌표를 입력해 주세요.")
       return
     }
     if (Math.abs(originX) > 1000 || Math.abs(originY) > 1000) {
       setMapDraftError("origin 좌표는 -1000 ~ 1000 범위여야 합니다.")
       setMapFieldErrors({ originX: "좌표 범위를 확인해 주세요.", originY: "좌표 범위를 확인해 주세요." })
-      toast({ title: "지도 등록 실패", description: "origin 좌표 범위를 확인해 주세요." })
+      toastError(toast, "지도 등록 실패", "origin 좌표 범위를 확인해 주세요.")
       return
     }
 
@@ -1273,13 +1286,13 @@ export default function HomePage() {
       if (created?.id) {
         await carMaps.selectMap(created.id)
       }
-      toast({ title: "지도 등록 완료", description: "지도 메타데이터가 등록되었고 현재 지도로 설정되었습니다." })
+      toastSuccess(toast, "지도 등록 완료", "지도 메타데이터가 등록되었고 현재 지도로 설정되었습니다.")
       setCreateMapOpen(false)
       resetMapDraft()
     } catch (e: any) {
-      setMapDraftError(e?.message ?? "지도 등록에 실패했습니다.")
+      setMapDraftError("지도 등록에 실패했습니다. 잠시 후 다시 시도해 주세요.")
       setMapFieldErrors({})
-      toast({ title: "지도 등록 실패", description: e?.message ?? "지도 등록에 실패했습니다." })
+      toastError(toast, "지도 등록 실패", "잠시 후 다시 시도해 주세요.")
     } finally {
       setIsCreatingMap(false)
     }
@@ -1294,7 +1307,7 @@ export default function HomePage() {
       }}
     >
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="bg-transparent" disabled={!carId}>
+        <Button variant="outline" size="sm" className="bg-transparent w-full sm:w-auto" disabled={!carId}>
           <MapIcon className="mr-2 h-4 w-4" />
           지도 등록
         </Button>
@@ -1475,14 +1488,23 @@ export default function HomePage() {
   // 탐지 시작/중지 API 연동 시 여기에 상태 연동 로직 추가
 
   return (
-    <div className="p-3 sm:p-4 lg:p-6">
-      <div className="max-w-7xl mx-auto">
+    <div className="p-3 sm:p-4 lg:p-6 overflow-x-hidden">
+      <div className="max-w-7xl mx-auto w-full">
         <div className="mb-4 sm:mb-6">
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">홈</h1>
           <p className="text-sm text-muted-foreground mt-1">
             로봇 상태 및 감지 현황을 확인하세요
           </p>
         </div>
+
+        {hasTopErrors && (
+          <div className="mb-4 space-y-2">
+            <ErrorAlert title="차량 정보 불러오기 실패" message={primaryCarError} />
+            <ErrorAlert title="차량 상태 불러오기 실패" message={carStatus.error} />
+            <ErrorAlert title="최근 탐지 불러오기 실패" message={realDetections.error} />
+            <ErrorAlert title="알림 불러오기 실패" message={realAlerts.error} />
+          </div>
+        )}
 
         {!isStandalone && (
           <Alert className="mb-6">
@@ -1511,12 +1533,7 @@ export default function HomePage() {
         {(() => {
           const mapSection = (
             <div className="space-y-4">
-              {carMaps.error && (
-                <Alert variant="destructive">
-                  <AlertTitle>지도 불러오기 실패</AlertTitle>
-                  <AlertDescription>{carMaps.error}</AlertDescription>
-                </Alert>
-              )}
+              <ErrorAlert title="지도 불러오기 실패" message={carMaps.error} />
               <MapGenerationSection
                 mapStatus={currentMap ? "completed" : "no_map"}
                 progress={0}
@@ -1561,7 +1578,7 @@ export default function HomePage() {
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
                             <p className="text-xs text-muted-foreground">현재 차량</p>
-                            <Badge variant="secondary">{primaryCar.carId}</Badge>
+                            <Badge variant="secondary">{primaryCar.nickname || "내 차"}</Badge>
                           </div>
                           <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">차량 선택</p>
@@ -1580,7 +1597,7 @@ export default function HomePage() {
                               <SelectContent>
                                 {carList.map((car) => (
                                   <SelectItem key={car.carId} value={String(car.carId)}>
-                                    {car.nickname} · {car.carId}
+                                    {car.nickname || "내 차"}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -1640,7 +1657,7 @@ export default function HomePage() {
                           onClick={() => {
                             if (!claimCode.trim()) {
                               setCarError("클레임 코드를 입력해 주세요.")
-                              toast({ title: "차량 등록 실패", description: "클레임 코드를 입력해 주세요." })
+                              toastError(toast, "차량 등록 실패", "클레임 코드를 입력해 주세요.")
                               return
                             }
                             setClaimConfirmOpen(true)

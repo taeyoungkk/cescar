@@ -3,20 +3,32 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL
 if (!BASE_URL) console.warn("NEXT_PUBLIC_API_BASE_URL is not set")
 
 function hasJsonBody(init?: RequestInit) {
-  // body가 있고, FormData가 아닌 경우에만 JSON으로 취급
-  const b: any = init?.body
-  return b != null && !(b instanceof FormData)
+  // If body exists and is not FormData, treat as JSON
+  const body: any = init?.body
+  return body != null && !(body instanceof FormData)
+}
+
+export class ApiError extends Error {
+  status: number
+  statusText: string
+  body: string
+
+  constructor(status: number, statusText: string, body: string) {
+    super(`API ${status} ${statusText}`)
+    this.status = status
+    this.statusText = statusText
+    this.body = body
+  }
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
+  const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
 
   const headers: Record<string, string> = {
     ...(init?.headers as any),
   }
 
-  // ✅ body가 있을 때만 Content-Type 세팅
+  // Set Content-Type for JSON body
   if (hasJsonBody(init) && !headers["Content-Type"]) {
     headers["Content-Type"] = "application/json"
   }
@@ -33,10 +45,10 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`API ${res.status} ${res.statusText} - ${text}`)
+    throw new ApiError(res.status, res.statusText, text)
   }
 
-  // 204 대비 (혹시 생기면)
+  // 204 No Content
   if (res.status === 204) return null as T
 
   return (await res.json()) as T

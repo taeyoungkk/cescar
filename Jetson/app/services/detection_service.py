@@ -101,7 +101,18 @@ class DetectionService:
             frame_height=camera_service.height
         )
         
-        # 4. 탐지가 있고, 녹화 중이 아니며, 쿨다운이 지났을 때만 이벤트 발생
+        # 4. 추적 모드일 때 cmd_vel 계산 및 Pi로 전송 (tracking_service 연동)
+        # import를 여기서 하는 이유: circular import 방지
+        from app.services.tracking_service import tracking_service
+        
+        if tracking_service.is_tracking() and detections:
+            tracking_service.process_detection(
+                detections,
+                frame_width=camera_service.width,
+                frame_height=camera_service.height
+            )
+        
+        # 5. 탐지가 있고, 녹화 중이 아니며, 쿨다운이 지났을 때만 이벤트 발생
         if detections and not self.is_recording:
             if current_time - self._last_detection_time > self._detection_cooldown:
                 self._last_detection_time = current_time

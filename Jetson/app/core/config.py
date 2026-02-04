@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     MQTT_BROKER: str = "localhost"
-    MQTT_PORT: int = 1883
+    MQTT_PORT: int = 8085
     ROBOT_ID: str = "robot_default"
     
     # GCS Settings
@@ -26,12 +26,24 @@ class Settings(BaseSettings):
         return f"robot/{self.ROBOT_ID}/command"
 
     @property
+    def TOPIC_MODE(self) -> str:
+        return f"robot/{self.ROBOT_ID}/mode"
+
+    @property
+    def TOPIC_CONTROL(self) -> str:
+        return f"robot/{self.ROBOT_ID}/control"
+
+    @property
     def TOPIC_STATUS(self) -> str:
         return f"robot/{self.ROBOT_ID}/status"
 
     @property
     def TOPIC_DETECTION(self) -> str:
         return f"robot/{self.ROBOT_ID}/detection"
+
+    @property
+    def TOPIC_CMD_VEL(self) -> str:
+        return f"robot/{self.ROBOT_ID}/cmd_vel"
 
     model_config = SettingsConfigDict(
         env_file=".env",

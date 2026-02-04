@@ -54,7 +54,8 @@ class DetectionWebSocketService:
                 
                 self._ws = websocket.create_connection(
                     ws_url,
-                    timeout=10
+                    timeout=10,
+                    origin="https://I14B201.p.ssafy.io"
                 )
                 
                 # room 참가 메시지 전송

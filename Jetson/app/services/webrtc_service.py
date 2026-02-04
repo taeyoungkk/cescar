@@ -242,6 +242,7 @@ class WebRTCService:
             on_message=on_message,
             on_error=on_error,
             on_close=on_close,
+            header={"Origin": "https://I14B201.p.ssafy.io"}
         )
         
         self._ws_thread = threading.Thread(target=self._ws.run_forever, daemon=True)

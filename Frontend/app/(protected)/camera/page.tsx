@@ -24,7 +24,7 @@ import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/typ
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 
 const DRIVE_MAX_V = 0.45
-const DRIVE_MAX_W = 0.9
+const DRIVE_MAX_W = 1.2
 
 // ============================================
 // Presentational Components (UI Only)
@@ -780,6 +780,7 @@ function JoystickPad({
   const baseRef = React.useRef<HTMLDivElement | null>(null)
   const knobRef = React.useRef<HTMLDivElement | null>(null)
   const activeRef = React.useRef(false)
+  const pointerIdRef = React.useRef<number | null>(null)
 
   const resetKnob = () => {
     if (knobRef.current) {
@@ -818,11 +819,35 @@ function JoystickPad({
 
     if (w !== 0) {
       const fade = 1 - Math.min(1, Math.abs(ny) / 0.25)
-      const creep = 0.22 * Math.min(1, Math.abs(w))
+      const creep = 0.18 * Math.min(1, Math.abs(w))
       if (v < creep) v = creep * fade + v * (1 - fade)
     }
     onMove(v, w)
   }
+
+  const handleStop = React.useCallback(() => {
+    if (!activeRef.current) return
+    activeRef.current = false
+    pointerIdRef.current = null
+    resetKnob()
+    onStop()
+  }, [onStop])
+
+  React.useEffect(() => {
+    const handleWindowPointerUp = (e: PointerEvent) => {
+      if (!activeRef.current) return
+      if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
+      handleStop()
+    }
+    window.addEventListener("pointerup", handleWindowPointerUp)
+    window.addEventListener("pointercancel", handleWindowPointerUp)
+    window.addEventListener("blur", handleStop)
+    return () => {
+      window.removeEventListener("pointerup", handleWindowPointerUp)
+      window.removeEventListener("pointercancel", handleWindowPointerUp)
+      window.removeEventListener("blur", handleStop)
+    }
+  }, [handleStop])
 
   React.useEffect(() => {
     if (activeRef.current) return
@@ -853,25 +878,30 @@ function JoystickPad({
         if (disabled) return
         e.preventDefault()
         activeRef.current = true
+        pointerIdRef.current = e.pointerId
         e.currentTarget.setPointerCapture?.(e.pointerId)
         updateFromEvent(e.clientX, e.clientY)
       }}
       onPointerMove={(e) => {
         if (!activeRef.current) return
+        if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
         updateFromEvent(e.clientX, e.clientY)
       }}
       onPointerUp={(e) => {
         if (!activeRef.current) return
+        if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
         activeRef.current = false
+        pointerIdRef.current = null
         e.currentTarget.releasePointerCapture?.(e.pointerId)
         resetKnob()
         onStop()
       }}
       onPointerCancel={() => {
+        handleStop()
+      }}
+      onPointerLeave={() => {
         if (!activeRef.current) return
-        activeRef.current = false
-        resetKnob()
-        onStop()
+        handleStop()
       }}
     >
       <div className="absolute inset-2 rounded-full border border-white/10" />
@@ -1420,6 +1450,7 @@ export default function CameraPage() {
   const lastDriveToastRef = useRef<number>(0)
 
   const driveTimerRef = useRef<number | null>(null)
+  const lastDriveSentRef = useRef(0)
   const driveCommandRef = useRef<{ v: number; w: number } | null>(null)
   const driveTargetRef = useRef<{ v: number; w: number } | null>(null)
   const driveCurrentRef = useRef<{ v: number; w: number }>({ v: 0, w: 0 })
@@ -1812,10 +1843,10 @@ export default function CameraPage() {
       return cur + step
     }
 
-    const accelV = DRIVE_MAX_V * 0.12
-    const accelW = DRIVE_MAX_W * 0.12
-    const decelV = DRIVE_MAX_V * 0.3
-    const decelW = DRIVE_MAX_W * 0.3
+    const accelV = DRIVE_MAX_V * 0.08
+    const accelW = DRIVE_MAX_W * 0.08
+    const decelV = DRIVE_MAX_V * 0.2
+    const decelW = DRIVE_MAX_W * 0.2
 
     const nextV = stepAxis(
       current.v,
@@ -1830,7 +1861,11 @@ export default function CameraPage() {
 
     driveCurrentRef.current = { v: nextV, w: nextW }
     driveCommandRef.current = { v: nextV, w: nextW }
-    sendDriveVector(nextV, nextW).catch(() => { })
+    const now = Date.now()
+    if (now - lastDriveSentRef.current >= 60) {
+      lastDriveSentRef.current = now
+      sendDriveVector(nextV, nextW).catch(() => { })
+    }
   }, [sendDriveVector])
 
   const handleDriveVector = React.useCallback((v: number, w: number) => {
@@ -1844,7 +1879,7 @@ export default function CameraPage() {
     if (driveTimerRef.current == null) {
       driveTimerRef.current = window.setInterval(() => {
         stepDriveCommand()
-      }, 120)
+      }, 40)
     }
     stepDriveCommand()
   }, [driveMode, stepDriveCommand])
@@ -1924,13 +1959,13 @@ export default function CameraPage() {
 
       if (v === 0 && w !== 0) {
         // Turn-in-place feels unnatural; add gentle forward creep
-        v = DRIVE_MAX_V * 0.25
+        v = DRIVE_MAX_V * 0.18
       }
 
       if (v !== 0 && w !== 0) {
         // Diagonal: soften forward speed, emphasize turning for smoother arc
         v *= 0.85
-        w = Math.sign(w) * Math.min(DRIVE_MAX_W, Math.abs(w) * 1.2)
+        w = Math.sign(w) * Math.min(DRIVE_MAX_W, Math.abs(w) * 1.35)
       }
 
       if (v === 0 && w === 0) {

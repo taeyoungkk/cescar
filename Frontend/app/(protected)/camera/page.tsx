@@ -22,9 +22,30 @@ import * as carApi from "@/core/api/car"
 import * as mapApi from "@/core/api/map"
 import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { ErrorAlert } from "@/components/ui/error-message"
 
-const DRIVE_MAX_V = 0.45
-const DRIVE_MAX_W = 0.9
+const DRIVE_MAX_V = 2.4
+const DRIVE_MAX_W = 5.0
+const TURN_MIN_FORWARD = 0.6
+const TURN_BOOST = 0.6
+
+function applyDriveCurve(v: number, w: number) {
+  let vAdj = v
+  let wAdj = w
+  if (vAdj === 0 && wAdj !== 0) {
+    vAdj = 0.4
+  }
+  if (vAdj !== 0 && wAdj !== 0) {
+    vAdj = Math.sign(vAdj) * Math.max(Math.abs(vAdj) * 0.75, 0.5)
+    wAdj = Math.sign(wAdj) * Math.min(1, Math.abs(wAdj) * 1.6)
+  }
+  const turn = Math.min(1, Math.abs(w))
+  const forwardSign = vAdj < -0.001 ? -1 : 1
+  const vNorm = Math.max(Math.abs(vAdj), TURN_MIN_FORWARD * turn) * forwardSign
+  const wNorm = Math.max(-1, Math.min(1, wAdj * (1 + TURN_BOOST * (1 - Math.abs(vAdj)))))
+  return { v: vNorm * DRIVE_MAX_V, w: wNorm * DRIVE_MAX_W }
+}
 
 // ============================================
 // Presentational Components (UI Only)
@@ -417,7 +438,7 @@ function LiveCameraView({
 
     await pc.setRemoteDescription({ type: "offer", sdp })
 
-    // offer ?꾩뿉 ?볦씤 candidate 泥섎━
+    // offer 전에 쌓인 candidate 처리
     for (const c of pendingCandidatesRef.current) {
       await pc.addIceCandidate(new RTCIceCandidate(c))
     }
@@ -722,13 +743,16 @@ function LiveCameraView({
             <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap">
               <span className="text-[8px] text-white/25 font-medium">KBD</span>
             </div>
-            <JoystickPad
-              disabled={manualDisabled}
-              vector={driveVector}
-              onMove={(v, w) => onDriveVector(v * DRIVE_MAX_V, w * DRIVE_MAX_W)}
-              onStop={onDriveStop}
-              size={96}
-            />
+              <JoystickPad
+                disabled={manualDisabled}
+                vector={driveVector}
+                onMove={(v, w) => {
+                const curved = applyDriveCurve(v, w)
+                onDriveVector(curved.v, curved.w)
+                }}
+                onStop={onDriveStop}
+                size={96}
+              />
           </div>
         </div>
       )}
@@ -780,6 +804,8 @@ function JoystickPad({
   const baseRef = React.useRef<HTMLDivElement | null>(null)
   const knobRef = React.useRef<HTMLDivElement | null>(null)
   const activeRef = React.useRef(false)
+  const pointerIdRef = React.useRef<number | null>(null)
+  const pointerTypeRef = React.useRef<string | null>(null)
 
   const resetKnob = () => {
     if (knobRef.current) {
@@ -813,16 +839,35 @@ function JoystickPad({
       return Math.sign(value) * scaled
     }
 
-    let v = applyDeadZone(-ny)
-    const w = applyDeadZone(-nx)
-
-    if (w !== 0) {
-      const fade = 1 - Math.min(1, Math.abs(ny) / 0.25)
-      const creep = 0.22 * Math.min(1, Math.abs(w))
-      if (v < creep) v = creep * fade + v * (1 - fade)
-    }
+    const v = applyDeadZone(-ny)
+    const invertTouchX = pointerTypeRef.current === "touch"
+    const w = applyDeadZone(invertTouchX ? nx : -nx)
     onMove(v, w)
   }
+
+  const handleStop = React.useCallback(() => {
+    if (!activeRef.current) return
+    activeRef.current = false
+    pointerIdRef.current = null
+    resetKnob()
+    onStop()
+  }, [onStop])
+
+  React.useEffect(() => {
+    const handleWindowPointerUp = (e: PointerEvent) => {
+      if (!activeRef.current) return
+      if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
+      handleStop()
+    }
+    window.addEventListener("pointerup", handleWindowPointerUp)
+    window.addEventListener("pointercancel", handleWindowPointerUp)
+    window.addEventListener("blur", handleStop)
+    return () => {
+      window.removeEventListener("pointerup", handleWindowPointerUp)
+      window.removeEventListener("pointercancel", handleWindowPointerUp)
+      window.removeEventListener("blur", handleStop)
+    }
+  }, [handleStop])
 
   React.useEffect(() => {
     if (activeRef.current) return
@@ -853,25 +898,31 @@ function JoystickPad({
         if (disabled) return
         e.preventDefault()
         activeRef.current = true
+        pointerIdRef.current = e.pointerId
+        pointerTypeRef.current = e.pointerType
         e.currentTarget.setPointerCapture?.(e.pointerId)
         updateFromEvent(e.clientX, e.clientY)
       }}
       onPointerMove={(e) => {
         if (!activeRef.current) return
+        if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
         updateFromEvent(e.clientX, e.clientY)
       }}
       onPointerUp={(e) => {
         if (!activeRef.current) return
+        if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
         activeRef.current = false
+        pointerIdRef.current = null
         e.currentTarget.releasePointerCapture?.(e.pointerId)
         resetKnob()
         onStop()
       }}
       onPointerCancel={() => {
+        handleStop()
+      }}
+      onPointerLeave={() => {
         if (!activeRef.current) return
-        activeRef.current = false
-        resetKnob()
-        onStop()
+        handleStop()
       }}
     >
       <div className="absolute inset-2 rounded-full border border-white/10" />
@@ -963,7 +1014,10 @@ function ControlPanel({
               <JoystickPad
                 disabled={manualDisabled}
                 vector={driveVector}
-                onMove={(v, w) => onDriveVector(v * DRIVE_MAX_V, w * DRIVE_MAX_W)}
+                onMove={(v, w) => {
+                  const curved = applyDriveCurve(v, w)
+                  onDriveVector(curved.v, curved.w)
+                }}
                 onStop={onDriveStop}
                 size={120}
               />
@@ -1003,10 +1057,10 @@ function ControlPanel({
             {invalidLineCount > 0 && showInvalidLines && (
               <div className="space-y-2 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2">
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] text-red-300">좌표 형식을 확인해 주세요.</p>
+                  <p className="text-[11px] text-red-600">좌표 형식을 확인해 주세요.</p>
                   <button
                     type="button"
-                    className="text-[11px] text-red-200 hover:text-red-100"
+                    className="text-[11px] text-red-600 hover:text-red-500"
                     onClick={() => {
                       setShowInvalidLines(false)
                       setShowAllInvalidLines(false)
@@ -1018,7 +1072,7 @@ function ControlPanel({
                 </div>
                 <div className="space-y-1">
                   {limitedInvalidLines.map((line, idx) => (
-                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-200">
+                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-600">
                       {truncateLine(line)}
                     </div>
                   ))}
@@ -1417,9 +1471,15 @@ export default function CameraPage() {
   const [missionError, setMissionError] = useState<string | null>(null)
   const [missionPoints, setMissionPoints] = useState<{ x: number; y: number }[]>([])
   const [invalidMissionLines, setInvalidMissionLines] = useState<string[]>([])
+  const handleMissionInputChange = React.useCallback((value: string) => {
+    setMissionInput(value)
+    if (missionError) setMissionError(null)
+    if (invalidMissionLines.length) setInvalidMissionLines([])
+  }, [missionError, invalidMissionLines.length])
   const lastDriveToastRef = useRef<number>(0)
 
   const driveTimerRef = useRef<number | null>(null)
+  const lastDriveSentRef = useRef(0)
   const driveCommandRef = useRef<{ v: number; w: number } | null>(null)
   const driveTargetRef = useRef<{ v: number; w: number } | null>(null)
   const driveCurrentRef = useRef<{ v: number; w: number }>({ v: 0, w: 0 })
@@ -1436,9 +1496,9 @@ export default function CameraPage() {
         setSelectedCarId((prev) => prev ?? list[0]?.carId ?? null)
         setCarsError(null)
       })
-      .catch((e: any) => {
+      .catch(() => {
         if (!mounted) return
-        setCarsError(e?.message ?? "차량 목록을 불러오는 데 실패했습니다.")
+        setCarsError("차량 목록을 불러오는 데 실패했습니다. 잠시 후 다시 시도해 주세요.")
       })
       .finally(() => {
         if (!mounted) return
@@ -1464,10 +1524,10 @@ export default function CameraPage() {
         if (!mounted) return
         setCarDetail(detail)
       })
-      .catch((e: any) => {
+      .catch(() => {
         if (!mounted) return
         setCarDetail(null)
-        toast({ title: "차량 정보 불러오기 실패", description: e?.message ?? "차량 정보를 불러오지 못했습니다." })
+        toastError(toast, "차량 정보 불러오기 실패", "잠시 후 다시 시도해 주세요.")
       })
       .finally(() => {
         if (!mounted) return
@@ -1695,7 +1755,7 @@ export default function CameraPage() {
       .filter((d) => d.x != null && d.y != null)
       .map((d) => ({ x: d.x as number, y: d.y as number }))
     if (!points.length) {
-      toast({ title: "탐지 좌표 없음", description: "최근 탐지 좌표가 없습니다." })
+      toastInfo(toast, "탐지 좌표 없음", "최근 탐지 좌표가 없습니다.")
       return
     }
     setMissionError(null)
@@ -1703,9 +1763,9 @@ export default function CameraPage() {
     const validPoints = points.filter(isPointInBounds)
     appendMissionPoints(validPoints)
     if (validPoints.length !== points.length) {
-      toast({ title: "범위 밖 좌표 제외", description: "유효 범위 밖 좌표는 제외되었습니다." })
+      toastInfo(toast, "범위 밖 좌표 제외", "유효 범위 밖 좌표는 제외되었습니다.")
     } else {
-      toast({ title: "좌표 추가 완료", description: "최근 탐지 좌표가 추가되었습니다." })
+      toastSuccess(toast, "좌표 추가 완료", "최근 탐지 좌표가 추가되었습니다.")
     }
   }, [appendMissionPoints, isPointInBounds, recentDetections.recentDetections, toast])
 
@@ -1738,52 +1798,52 @@ export default function CameraPage() {
     if (!networkOnline) {
       setModeError("오프라인 상태에서는 모드를 변경할 수 없습니다.")
       setDriveMode(prev)
-      toast({ title: "모드 변경 실패", description: "오프라인 상태입니다." })
+      toastError(toast, "모드 변경 실패", "오프라인 상태입니다.")
       return
     }
     try {
       await carApi.setCarMode(selectedCarId, mode)
-      toast({ title: "모드 변경 완료", description: `현재 모드: ${mode}` })
+      toastSuccess(toast, "모드 변경 완료", `현재 모드: ${mode}`)
     } catch {
       setDriveMode(prev)
-      setModeError("모드 변경에 실패했습니다. 다시 시도해 주세요.")
-      toast({ title: "모드 변경 실패", description: "잠시 후 다시 시도해 주세요." })
+      setModeError("모드 변경에 실패했습니다. 잠시 후 다시 시도해 주세요.")
+      toastError(toast, "모드 변경 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
 
   const handleStartMission = async () => {
     if (!selectedCarId) return
     if (driveMode !== "AUTO") {
-      toast({ title: "AUTO 모드 필요", description: "AUTO 모드에서만 미션을 시작할 수 있습니다." })
+      toastInfo(toast, "AUTO 모드 필요", "AUTO 모드에서만 미션을 시작할 수 있습니다.")
       return
     }
     if (!networkOnline) {
-      toast({ title: "미션 시작 실패", description: "오프라인 상태입니다." })
+      toastError(toast, "미션 시작 실패", "오프라인 상태입니다.")
       return
     }
     if (missionPoints.length === 0) {
-      toast({ title: "미션 좌표 없음", description: "미션 좌표를 입력한 뒤 다시 시도해 주세요." })
+      toastInfo(toast, "미션 좌표 없음", "미션 좌표를 입력한 뒤 다시 시도해 주세요.")
       return
     }
     try {
       await carApi.startMission(selectedCarId, { points: missionPoints })
-      toast({ title: "미션 시작 완료", description: "미션이 차량으로 전송되었습니다." })
+      toastSuccess(toast, "미션 시작 완료", "미션이 차량으로 전송되었습니다.")
     } catch {
-      toast({ title: "미션 시작 실패", description: "미션 전송에 실패했습니다." })
+      toastError(toast, "미션 시작 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
 
   const handleStopMission = async () => {
     if (!selectedCarId) return
     if (!networkOnline) {
-      toast({ title: "탐지 중지 실패", description: "오프라인 상태입니다." })
+      toastError(toast, "탐지 중지 실패", "오프라인 상태입니다.")
       return
     }
     try {
       await carApi.setCarMode(selectedCarId, "STOP")
-      toast({ title: "탐지 중지 완료", description: "차량이 정지 모드로 전환되었습니다." })
+      toastSuccess(toast, "탐지 중지 완료", "차량이 정지 모드로 전환되었습니다.")
     } catch {
-      toast({ title: "탐지 중지 실패", description: "요청에 실패했습니다." })
+      toastError(toast, "탐지 중지 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
 
@@ -1794,7 +1854,7 @@ export default function CameraPage() {
     } catch {
       const now = Date.now()
       if (now - lastDriveToastRef.current > 2000) {
-        toast({ title: "수동 조작 실패", description: "차량 제어 요청에 실패했습니다." })
+        toastError(toast, "수동 조작 실패", "잠시 후 다시 시도해 주세요.")
         lastDriveToastRef.current = now
       }
     }
@@ -1814,8 +1874,8 @@ export default function CameraPage() {
 
     const accelV = DRIVE_MAX_V * 0.12
     const accelW = DRIVE_MAX_W * 0.12
-    const decelV = DRIVE_MAX_V * 0.3
-    const decelW = DRIVE_MAX_W * 0.3
+    const decelV = DRIVE_MAX_V * 0.28
+    const decelW = DRIVE_MAX_W * 0.28
 
     const nextV = stepAxis(
       current.v,
@@ -1830,7 +1890,11 @@ export default function CameraPage() {
 
     driveCurrentRef.current = { v: nextV, w: nextW }
     driveCommandRef.current = { v: nextV, w: nextW }
-    sendDriveVector(nextV, nextW).catch(() => { })
+    const now = Date.now()
+    if (now - lastDriveSentRef.current >= 60) {
+      lastDriveSentRef.current = now
+      sendDriveVector(nextV, nextW).catch(() => { })
+    }
   }, [sendDriveVector])
 
   const handleDriveVector = React.useCallback((v: number, w: number) => {
@@ -1844,7 +1908,7 @@ export default function CameraPage() {
     if (driveTimerRef.current == null) {
       driveTimerRef.current = window.setInterval(() => {
         stepDriveCommand()
-      }, 120)
+      }, 40)
     }
     stepDriveCommand()
   }, [driveMode, stepDriveCommand])
@@ -1916,32 +1980,24 @@ export default function CameraPage() {
 
       let v = 0
       let w = 0
-      if (up && !down) v = DRIVE_MAX_V
-      else if (down && !up) v = -DRIVE_MAX_V
+      if (up && !down) v = 1
+      else if (down && !up) v = -1
 
-      if (left && !right) w = DRIVE_MAX_W
-      else if (right && !left) w = -DRIVE_MAX_W
-
-      if (v === 0 && w !== 0) {
-        // Turn-in-place feels unnatural; add gentle forward creep
-        v = DRIVE_MAX_V * 0.25
-      }
-
-      if (v !== 0 && w !== 0) {
-        // Diagonal: soften forward speed, emphasize turning for smoother arc
-        v *= 0.85
-        w = Math.sign(w) * Math.min(DRIVE_MAX_W, Math.abs(w) * 1.2)
-      }
+      if (left && !right) w = 1
+      else if (right && !left) w = -1
 
       if (v === 0 && w === 0) {
         handleDriveStop()
       } else {
-        handleDriveVector(v, w)
+        const curved = applyDriveCurve(v, w)
+        handleDriveVector(curved.v, curved.w)
       }
     }
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isDirectionKey(e.code)) return
+      e.preventDefault()
+      e.stopPropagation()
       if (pressedKeys.has(e.code)) return
       pressedKeys.add(e.code)
       computeVector()
@@ -1949,6 +2005,8 @@ export default function CameraPage() {
 
     const handleKeyUp = (e: KeyboardEvent) => {
       if (!isDirectionKey(e.code)) return
+      e.preventDefault()
+      e.stopPropagation()
       pressedKeys.delete(e.code)
       computeVector()
     }
@@ -1969,7 +2027,7 @@ export default function CameraPage() {
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">차량 선택</p>
           {selectedCarId && (
             <Badge variant="secondary" className="h-5 px-2 text-[10px]">
-              {selectedCarId}
+              {cars.find((c) => c.carId === selectedCarId)?.nickname ?? "내 차"}
             </Badge>
           )}
         </div>
@@ -1983,7 +2041,7 @@ export default function CameraPage() {
           <SelectContent>
             {cars.map((c) => (
               <SelectItem key={c.carId} value={String(c.carId)}>
-                {c.nickname} · {c.carId}
+                {c.nickname || "내 차"}
               </SelectItem>
             ))}
           </SelectContent>
@@ -2049,6 +2107,11 @@ export default function CameraPage() {
           </div>
         </div>
 
+        <div className="mb-4 space-y-2">
+          <ErrorAlert title="차량 상태 불러오기 실패" message={carStatus.error} />
+          <ErrorAlert title="최근 탐지 불러오기 실패" message={recentDetections.error} />
+        </div>
+
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
           <div className="flex-1">
             <div className="w-full">
@@ -2071,10 +2134,11 @@ export default function CameraPage() {
                   onToggleCameraConnection={() => {
                     setCameraConnected((prev) => {
                       const next = !prev
-                      toast({
-                        title: next ? "카메라 연결 시도" : "카메라 연결 해제",
-                        description: next ? "WebRTC 연결을 시작합니다..." : "카메라 연결을 해제했습니다.",
-                      })
+                      if (next) {
+                        toastInfo(toast, "카메라 연결 시도", "WebRTC 연결을 시작합니다.")
+                      } else {
+                        toastInfo(toast, "카메라 연결 해제", "카메라 연결을 해제했습니다.")
+                      }
                       return next
                     })
                   }}
@@ -2096,7 +2160,7 @@ export default function CameraPage() {
                 missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
                 missionStopDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO"}
                 missionInput={missionInput}
-                onMissionInputChange={setMissionInput}
+                onMissionInputChange={handleMissionInputChange}
                 missionPointCount={missionPoints.length}
                 missionError={missionError}
                 missionPoints={missionPoints}

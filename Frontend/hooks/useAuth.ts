@@ -91,14 +91,14 @@ export function useAuth(): UseAuthReturn {
             setUser(currentUser)
           }
           registerFcmToken({ requestPermission: true }).catch(() => {})
-          router.push("/home")
+          router.replace("/home")
           return true
         }
 
-        setError(response.error || "로그인에 실패했습니다.")
+        setError(response.error ?? "로그인에 실패했습니다.")
         return false
       } catch {
-        setError("\uB85C\uADF8\uC778 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.")
+        setError("로그인 중 오류가 발생했습니다.")
         return false
       } finally {
         if (loginRequestIdRef.current == requestId) {
@@ -110,44 +110,46 @@ export function useAuth(): UseAuthReturn {
     [online, router]
   )
 
-  const signup = useCallback(async (request: SignupRequest): Promise<boolean> => {
-    if (!online) {
-      setError("오프라인 상태입니다.")
-      return false
-    }
-    if (signupInFlightRef.current) return false
-    signupInFlightRef.current = true
-    const requestId = ++signupRequestIdRef.current
-    setIsLoading(true)
-    setError(null)
-
-    try {
-      const response = await authApi.signup(request)
-      if (signupRequestIdRef.current != requestId) return false
-
-      if (response.success) {
-        return true
-      } else {
-        setError(response.error || "회원가입에 실패했습니다.")
+  const signup = useCallback(
+    async (request: SignupRequest): Promise<boolean> => {
+      if (!online) {
+        setError("오프라인 상태입니다.")
         return false
       }
-    } catch {
-      setError("\uD68C\uC6D0\uAC00\uC785 \uC911 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4.")
-      return false
-    } finally {
-      if (signupRequestIdRef.current == requestId) {
-        setIsLoading(false)
+      if (signupInFlightRef.current) return false
+      signupInFlightRef.current = true
+      const requestId = ++signupRequestIdRef.current
+      setIsLoading(true)
+      setError(null)
+
+      try {
+        const response = await authApi.signup(request)
+        if (signupRequestIdRef.current != requestId) return false
+
+        if (response.success) {
+          return true
+        }
+        setError(response.error ?? "회원가입에 실패했습니다.")
+        return false
+      } catch {
+        setError("회원가입 중 오류가 발생했습니다.")
+        return false
+      } finally {
+        if (signupRequestIdRef.current == requestId) {
+          setIsLoading(false)
+        }
+        signupInFlightRef.current = false
       }
-      signupInFlightRef.current = false
-    }
-  }, [online])
+    },
+    [online]
+  )
 
   const logout = useCallback(async (): Promise<void> => {
-      if (!online) {
-        setError("\uC624\uD504\uB77C\uC778 \uC0C1\uD0DC\uC785\uB2C8\uB2E4.")
-        return
-      }
-      if (logoutInFlightRef.current) return
+    if (!online) {
+      setError("오프라인 상태입니다.")
+      return
+    }
+    if (logoutInFlightRef.current) return
     logoutInFlightRef.current = true
     const requestId = ++logoutRequestIdRef.current
     setIsLoading(true)
@@ -165,37 +167,39 @@ export function useAuth(): UseAuthReturn {
     }
   }, [online, router])
 
-  const requestPasswordReset = useCallback(async (email: string): Promise<boolean> => {
+  const requestPasswordReset = useCallback(
+    async (email: string): Promise<boolean> => {
       if (!online) {
-        setError("\uC624\uD504\uB77C\uC778 \uC0C1\uD0DC\uC785\uB2C8\uB2E4.")
+        setError("오프라인 상태입니다.")
         return false
       }
       if (resetInFlightRef.current) return false
-    resetInFlightRef.current = true
-    const requestId = ++resetRequestIdRef.current
-    setIsLoading(true)
-    setError(null)
+      resetInFlightRef.current = true
+      const requestId = ++resetRequestIdRef.current
+      setIsLoading(true)
+      setError(null)
 
-    try {
-      const response = await authApi.requestPasswordReset(email)
-      if (resetRequestIdRef.current != requestId) return false
+      try {
+        const response = await authApi.requestPasswordReset(email)
+        if (resetRequestIdRef.current != requestId) return false
 
-      if (response.success) {
-        return true
-      } else {
-        setError(response.error || "요청에 실패했습니다.")
+        if (response.success) {
+          return true
+        }
+        setError(response.error ?? "요청에 실패했습니다.")
         return false
+      } catch {
+        setError("요청 중 오류가 발생했습니다.")
+        return false
+      } finally {
+        if (resetRequestIdRef.current == requestId) {
+          setIsLoading(false)
+        }
+        resetInFlightRef.current = false
       }
-    } catch {
-      setError("요청 중 오류가 발생했습니다.")
-      return false
-    } finally {
-      if (resetRequestIdRef.current == requestId) {
-        setIsLoading(false)
-      }
-      resetInFlightRef.current = false
-    }
-  }, [online])
+    },
+    [online]
+  )
 
   const clearError = useCallback(() => {
     setError(null)

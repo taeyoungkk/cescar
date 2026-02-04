@@ -9,6 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
+import { ErrorMessage } from "@/components/ui/error-message"
+import { useToast } from "@/components/ui/use-toast"
+import { toastError } from "@/lib/toast-helpers"
 import { useAuth } from "@/hooks/useAuth"
 
 // ============================================
@@ -37,17 +40,17 @@ function BrandingSection() {
           <CescarLogo size={56} className="text-primary" />
           <div>
             <h1 className="text-3xl font-bold text-foreground">Cescar</h1>
-            <p className="text-muted-foreground">벌레 탐지 로봇 모니터링 시스템</p>
+            <p className="text-muted-foreground">벌레 감지 로봇 모니터링 시스템</p>
           </div>
         </div>
 
         <p className="text-lg text-muted-foreground leading-relaxed">
-          AI 기반 실시간 해충 탐지 및 모니터링 솔루션으로 시설을 안전하게 관리하세요.
+          AI 기반 실시간 감지와 모니터링 환경으로 시설을 안전하게 관리하세요.
         </p>
 
         <div className="space-y-3">
           <FeatureCard icon={Camera} title="실시간 카메라" description="로봇 카메라를 통한 실시간 모니터링" />
-          <FeatureCard icon={Bug} title="AI 탐지" description="딥러닝 기반 해충 자동 인식" />
+          <FeatureCard icon={Bug} title="AI 감지" description="딥러닝 기반 해충 자동 인식" />
           <FeatureCard icon={Wifi} title="원격 제어" description="어디서나 로봇을 제어하고 관리" />
         </div>
       </div>
@@ -61,6 +64,7 @@ interface LoginFormProps {
   showPassword: boolean
   isLoading: boolean
   error: string | null
+  validationErrors: Record<string, string>
   onEmailChange: (value: string) => void
   onPasswordChange: (value: string) => void
   onTogglePassword: () => void
@@ -73,11 +77,25 @@ function LoginForm({
   showPassword,
   isLoading,
   error,
+  validationErrors,
   onEmailChange,
   onPasswordChange,
   onTogglePassword,
   onSubmit,
 }: LoginFormProps) {
+  const validationMessages = Object.values(validationErrors).filter(Boolean)
+  const combinedError = error
+    ? error
+    : validationMessages.length
+    ? (
+        <ul className="list-disc pl-4 space-y-1">
+          {validationMessages.map((message) => (
+            <li key={message}>{message}</li>
+          ))}
+        </ul>
+      )
+    : null
+
   return (
     <Card className="w-full max-w-sm bg-card/80 backdrop-blur-sm border-border/50">
       <CardHeader className="text-center pb-4">
@@ -86,7 +104,7 @@ function LoginForm({
           <span className="text-xl font-bold text-foreground">Cescar</span>
         </div>
         <CardTitle className="text-xl">로그인</CardTitle>
-        <CardDescription>계정 정보를 입력해주세요</CardDescription>
+        <CardDescription>계정 정보를 입력해 주세요</CardDescription>
       </CardHeader>
 
       <CardContent>
@@ -99,7 +117,6 @@ function LoginForm({
               placeholder="name@example.com"
               value={email}
               onChange={(e) => onEmailChange(e.target.value)}
-              required
               className="bg-input border-border"
               autoComplete="email"
             />
@@ -114,7 +131,6 @@ function LoginForm({
                 placeholder="비밀번호 입력"
                 value={password}
                 onChange={(e) => onPasswordChange(e.target.value)}
-                required
                 className="bg-input border-border pr-10"
                 autoComplete="current-password"
               />
@@ -134,11 +150,7 @@ function LoginForm({
             </div>
           </div>
 
-          {error && (
-            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/30">
-              <p className="text-sm text-destructive">{error}</p>
-            </div>
-          )}
+          <ErrorMessage message={combinedError} />
 
           <Button type="submit" className="w-full" disabled={isLoading}>
             {isLoading ? (
@@ -166,15 +178,12 @@ function LoginForm({
             <Link href="/signup" className="text-primary hover:underline">
               계정이 없으신가요? 회원가입
             </Link>
-            <Link href="/forgot-password" className="text-muted-foreground hover:text-foreground">
-              비밀번호를 잊으셨나요?
-            </Link>
           </div>
         </div>
 
         <div className="mt-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="h-3.5 w-3.5" />
-          <span>안전한 연결로 보호됩니다</span>
+          <span>안전한 연결로 보호합니다</span>
         </div>
       </CardContent>
     </Card>
@@ -188,27 +197,57 @@ function LoginForm({
 export default function LoginPage() {
   const router = useRouter()
   const { login, isLoading, error, isAuthenticated, clearError } = useAuth()
-  
+  const { toast } = useToast()
+
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+  const lastToastRef = React.useRef<string | null>(null)
 
-  // Redirect if already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       router.replace("/home")
     }
   }, [isAuthenticated, router])
 
-  // Clear error when inputs change
-  useEffect(() => {
+  const handleEmailChange = (value: string) => {
+    setEmail(value)
     if (error) {
       clearError()
     }
-  }, [email, password])
+    setValidationErrors({})
+  }
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value)
+    if (error) {
+      clearError()
+    }
+    setValidationErrors({})
+  }
+
+  useEffect(() => {
+    if (!error || error === lastToastRef.current) return
+    toastError(toast, "로그인 실패", error)
+    lastToastRef.current = error
+  }, [error, toast])
+
+  const validateForm = (): boolean => {
+    const errors: Record<string, string> = {}
+    if (!email.trim()) {
+      errors.email = "이메일을 입력해주세요."
+    }
+    if (!password.trim()) {
+      errors.password = "비밀번호를 입력해주세요."
+    }
+    setValidationErrors(errors)
+    return Object.keys(errors).length === 0
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!validateForm()) return
     await login({ email, password })
   }
 
@@ -223,8 +262,9 @@ export default function LoginPage() {
           showPassword={showPassword}
           isLoading={isLoading}
           error={error}
-          onEmailChange={setEmail}
-          onPasswordChange={setPassword}
+          validationErrors={validationErrors}
+          onEmailChange={handleEmailChange}
+          onPasswordChange={handlePasswordChange}
           onTogglePassword={() => setShowPassword(!showPassword)}
           onSubmit={handleSubmit}
         />

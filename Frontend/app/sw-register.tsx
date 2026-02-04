@@ -63,11 +63,11 @@ export function SwRegister() {
 
       const waiting = reg.waiting
       toast({
-        title: "Update ready",
-        description: "A new version is available.",
+        title: "업데이트 준비됨",
+        description: "새 버전이 있습니다. 새로고침하면 반영됩니다.",
         action: (
           <ToastAction
-            altText="Reload"
+            altText="새로고침"
             onClick={() => {
               if (waiting) {
                 waiting.postMessage({ type: "SKIP_WAITING" })
@@ -77,7 +77,7 @@ export function SwRegister() {
               }
             }}
           >
-            Reload
+            새로고침
           </ToastAction>
         ),
       })

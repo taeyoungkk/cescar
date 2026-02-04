@@ -8,6 +8,7 @@ import type {
   DetectionType,
 } from "../types"
 import { apiFetch } from "./http"
+import { getErrorMessage } from "@/lib/error-messages"
 
 const ok = <T,>(data: T): ApiResponse<T> => ({ success: true, data })
 const fail = <T,>(error: string): ApiResponse<T> => ({ success: false, error })
@@ -160,7 +161,7 @@ export async function getRecentDetections(carId: number, limit: number = 5): Pro
     const robotId = `car-${carId}`
     return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
   } catch (e: any) {
-    return fail(e?.message ?? "최근 감지 조회 실패")
+    return fail(getErrorMessage(e, "최근 감지 조회 실패"))
   }
 }
 
@@ -176,7 +177,7 @@ export async function getLatestLogStatistics(
     const raw = await apiFetch<LogStatisticsResponse>(`/api/logs/${latestLog.id}/statistics`)
     return ok(normalizeLogStats(raw, fallbackLastTime))
   } catch (e: any) {
-    return fail(e?.message ?? "통계 조회 실패")
+    return fail(getErrorMessage(e, "통계 조회 실패"))
   }
 }
 
@@ -186,7 +187,7 @@ export async function getCarLogs(carId: number, size: number = 20): Promise<ApiR
     const logs = Array.isArray(page?.content) ? page.content.map(normalizeLog) : []
     return ok(logs)
   } catch (e: any) {
-    return fail(e?.message ?? "운행 기록 조회 실패")
+    return fail(getErrorMessage(e, "운행 기록 조회 실패"))
   }
 }
 
@@ -198,7 +199,7 @@ export async function getDetectionsByLog(logId: number, limit: number = 50, carI
     const robotId = carId ? `car-${carId}` : "unknown"
     return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
   } catch (e: any) {
-    return fail(e?.message ?? "감지 목록 조회 실패")
+    return fail(getErrorMessage(e, "감지 목록 조회 실패"))
   }
 }
 
@@ -207,7 +208,7 @@ export async function getLogStatistics(logId: number, fallbackLastTime?: string)
     const raw = await apiFetch<LogStatisticsResponse>(`/api/logs/${logId}/statistics`)
     return ok(normalizeLogStats(raw, fallbackLastTime))
   } catch (e: any) {
-    return fail(e?.message ?? "통계 조회 실패")
+    return fail(getErrorMessage(e, "통계 조회 실패"))
   }
 }
 
@@ -216,7 +217,7 @@ export async function deleteDetection(id: string): Promise<ApiResponse<void>> {
     await apiFetch(`/api/detections/${id}`, { method: "DELETE" })
     return ok(undefined)
   } catch (e: any) {
-    return fail(e?.message ?? "감지 삭제 실패")
+    return fail(getErrorMessage(e, "감지 삭제 실패"))
   }
 }
 
@@ -242,7 +243,7 @@ export async function searchDetections(params: {
     const content = Array.isArray(res) ? res : Array.isArray(res?.content) ? res.content : []
     return ok(content.map((d: any) => mapToUiDetection(d)))
   } catch (e: any) {
-    return fail(e?.message ?? "통합 감지 검색 실패")
+    return fail(getErrorMessage(e, "통합 감지 검색 실패"))
   }
 }
 
@@ -284,7 +285,7 @@ export async function getDetectionHistory(
 // ?? ?? ????? ???(??)
     return ok(items)
   } catch (e: any) {
-    return fail(e?.message ?? "감지 기록 조회 실패")
+    return fail(getErrorMessage(e, "감지 기록 조회 실패"))
   }
 }
 

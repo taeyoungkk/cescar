@@ -1,5 +1,6 @@
 
 import logging
+import time
 from typing import Optional
 from paho.mqtt import client as mqtt_client
 from app.core.config import settings
@@ -9,6 +10,8 @@ logger = logging.getLogger(__name__)
 class MQTTService:
     def __init__(self):
         self.client: Optional[mqtt_client.Client] = None
+        self.last_map_request_id = None
+        self.last_map_request_time = 0
 
     def initialize(self):
         client_id = f"fastapi-client-{settings.ROBOT_ID}"
@@ -43,7 +46,7 @@ class MQTTService:
                 (settings.TOPIC_COMMAND, 0),
                 (settings.TOPIC_MODE, 0),
                 (settings.TOPIC_CONTROL, 0),
-                (f"robot/+/+", 0)  # [DEBUG] Watch ALL robot topics
+                (f"robot/+/map_generate", 0)
             ]
             client.subscribe(topics)
             print(f"[*] Subscribed to: {[t[0] for t in topics]}")
@@ -94,7 +97,7 @@ class MQTTService:
                 self.publish(settings.TOPIC_CMD_VEL, json.dumps(cmd_payload))
                 # logger.debug(f"[MANUAL] v={v}, w={w}")
 
-            # 3. Legacy Command Protocol (Unified topic)
+            # 3. 레거시 명령 프로토콜 (통합 토픽)
             elif msg.topic == settings.TOPIC_COMMAND:
                 cmd_type = data.get("type", "")
                 if cmd_type == "mode":
@@ -105,7 +108,42 @@ class MQTTService:
                         tracking_service.start_tracking()
                     elif mode == "MANUAL" or mode == "OFF":
                         tracking_service.stop_tracking()
-                        
+
+            # 4. 지도 생성 프로토콜
+            elif "map_generate" in msg.topic:
+                request_id = data.get("requestId")
+                
+                # 중복 요청 방지 (2초 내 동일 ID 무시)
+                current_time = time.time()
+                if request_id == self.last_map_request_id and (current_time - self.last_map_request_time) < 2.0:
+                    logger.warning(f"Duplicate map request ignored: {request_id}")
+                    return
+
+                self.last_map_request_id = request_id
+                self.last_map_request_time = current_time
+
+                print(f"[MAP] 요청 수신: ID={request_id}")
+                
+                if request_id:
+                    import asyncio
+                    from app.services.map_service import map_service
+                    
+                    # paho-mqtt의 콜백 스레드에는 이벤트 루프가 없으므로 asyncio.run()을 사용하여 실행해야 합니다.
+                    # 하지만 asyncio.run()은 블로킹되므로 별도 스레드에서 실행하거나 create_task를 쓰려면 
+                    # 메인 루프에 threadsafe하게 던져야 합니다.
+                    # 여기서는 간단하고 안전하게 별도 실행을 위해 asyncio.run()을 쓰되,
+                    # MQTT 수신이 막히지 않으려면 이 자체를 스레드로 분리하거나 해야 합니다.
+                    # map_service 내부가 비동기이므로, 안전하게 실행하기 위해 run_in_executor를 
+                    # 흉내낼 수도 있지만, 가장 확실한 방법은 loop.run_in_executor를 사용하는 것입니다.
+                    # 그러나 현재 콜백내라 루프 접근이 어려우므로, asyncio.run()을 쓰되 
+                    # 이것이 블로킹되지 않게 threading.Thread를 사용합니다.
+                    
+                    import threading
+                    def run_async_task():
+                        asyncio.run(map_service.generate_map_task(request_id))
+                    
+                    threading.Thread(target=run_async_task, daemon=True).start()
+
         except Exception as e:
             logger.error(f"Message processing error: {e}")
 

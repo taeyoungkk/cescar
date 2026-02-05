@@ -8,6 +8,8 @@ import com.ssafy.backend.domain.history.dto.DetectionListItemResponse;
 import com.ssafy.backend.global.exception.CustomException;
 import com.ssafy.backend.global.exception.ErrorCode;
 import com.ssafy.backend.global.storage.StorageService;
+import com.ssafy.backend.domain.car.dao.CarStatusRepository;
+import com.ssafy.backend.domain.car.domain.CarMode;
 import com.ssafy.backend.domain.car.domain.Car;
 import com.ssafy.backend.domain.map.domain.SlamMap;
 import lombok.RequiredArgsConstructor;
@@ -31,6 +33,7 @@ public class DetectionHistoryService {
 
     private final DetectionRepository detectionRepository;
     private final com.ssafy.backend.domain.history.dao.CarLogRepository carLogRepository;
+    private final CarStatusRepository carStatusRepository;
     private final StorageService storageService;
     @Value("${storage.allowed-hosts:storage.googleapis.com}")
     private String allowedHosts;
@@ -109,6 +112,12 @@ public class DetectionHistoryService {
 
         detectionRepository.save(detection);
         carLog.increaseDetectionCount();
+
+        com.ssafy.backend.domain.car.domain.CarStatus carStatus = carStatusRepository.findById(car.getId()).orElse(null);
+        if (carStatus != null && carStatus.getMode() == CarMode.STOP) {
+            carLog.finish(LogStatus.COMPLETED);
+            carLogRepository.save(carLog);
+        }
     }
 
     private boolean isAbsoluteUrl(String value) {

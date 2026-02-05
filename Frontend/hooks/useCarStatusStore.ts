@@ -154,6 +154,9 @@ export const useCarStatusStore = create<State>((set, get) => {
     },
 
     start: (carId: number, intervalMs = 1000) => {
+      if (currentCarId !== null && currentCarId !== carId) {
+        set({ data: null, error: null, isLoading: true, isRefreshing: false })
+      }
       refCount += 1
       currentCarId = carId
       baseIntervalMs = intervalMs

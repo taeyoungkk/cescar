@@ -1197,6 +1197,7 @@ export default function HomePage() {
 
   const computedAlerts = React.useMemo(() => {
     const list: SystemAlert[] = []
+    if (!carId) return list
     const now = Date.now()
     if (!isGeneratingMap && status && !status.isOnline) {
       list.push({

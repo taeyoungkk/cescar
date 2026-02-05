@@ -50,10 +50,11 @@ class WebRTCConfig:
     bitrate_kbps: int = 1200
     keyint: int = 30
     stun_server: str = "stun://stun.l.google.com:19302"
-    # TURN 서버 설정 (Metered.ca Open Relay - 무료 공개 TURN)
-    turn_server: str = "turn://openrelay.metered.ca:80"
-    turn_username: str = "openrelayproject"
-    turn_password: str = "openrelayproject"
+    # TURN 서버 설정 (Custom Coturn on EC2)
+    # 8000~9000번 포트가 열려있으므로 8086 포트 사용
+    turn_server: str = "turn://I14B201.p.ssafy.io:8086"
+    turn_username: str = "ssafy"
+    turn_password: str = "1234"
     # 재연결 설정
     reconnect_enabled: bool = True
     reconnect_delay_sec: float = 3.0
@@ -686,9 +687,21 @@ class WebRTCService:
         # TURN 서버 설정 (NAT/방화벽 통과를 위해 필요)
         # turn://username:password@host:port 형식도 가능하지만
         # GStreamer webrtcbin은 별도 property로 설정
-        turn_uri = f"turn://{cfg.turn_username}:{cfg.turn_password}@openrelay.metered.ca:80"
+        # Config에 있는 전체 주소(turn://...)를 그대로 사용하거나 파싱해서 쓸 수 있는데,
+        # 여기서는 Config 값을 그대로 활용하도록 수정합니다.
+        
+        # turn_server가 "turn://Host:Port" 형태라고 가정하고, username/password를 중간에 끼워넣거나
+        # 또는 GStreamer가 요구하는 포맷으로 재조립
+        
+        # 현재 Config: turn_server="turn://I14B201.p.ssafy.io:8086"
+        # 목표 URI: turn://ssafy:1234@I14B201.p.ssafy.io:8086
+        
+        # 간단하게 Config의 turn_server 문자열에서 "turn://"을 떼고 조립
+        host_port = cfg.turn_server.replace("turn://", "")
+        turn_uri = f"turn://{cfg.turn_username}:{cfg.turn_password}@{host_port}"
+        
         webrtc.set_property("turn-server", turn_uri)
-        logger.info(f"ICE servers configured: STUN={cfg.stun_server}, TURN=openrelay.metered.ca:80")
+        logger.info(f"ICE servers configured: STUN={cfg.stun_server}, TURN={host_port}")
         
         webrtc.set_property("bundle-policy", 3)  # max-bundle
 

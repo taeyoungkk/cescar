@@ -50,6 +50,7 @@ import type { Detection, DetectionStatus, DetectionType, DetectionHistoryFilters
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { parseBackendDate } from "@/lib/date"
 import { ErrorAlert } from "@/components/ui/error-message"
 
 
@@ -421,7 +422,7 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
               <SheetDescription className="text-muted-foreground text-[11px] sm:text-sm">탐지 ID: {record.id}</SheetDescription>
             </div>
             <div className="shrink-0">
-              <StatusBadge status={record.status} />
+              {record.status !== "pending" && <StatusBadge status={record.status} />}
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 sm:pt-3">
@@ -709,11 +710,13 @@ function DashboardContent() {
     deleteDetection,
     refresh,
   } = useDetectionHistory(carId)
+  const [removedDetectionIds, setRemovedDetectionIds] = useState<Set<string>>(new Set())
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Detection | null>(null)
   const lastOpenedRef = React.useRef<string | null>(null)
   const dismissedDeepLinkRef = React.useRef<string | null>(null)
+  const pendingDeepLinkRef = React.useRef<string | null>(null)
   const detailRequestIdRef = React.useRef(0)
   const detailInFlightRef = React.useRef(false)
   const detailQueuedRef = React.useRef(false)
@@ -726,16 +729,20 @@ function DashboardContent() {
   const [logSort, setLogSort] = useState<"desc" | "asc">("desc")
   const [currentPage, setCurrentPage] = useState(1)
   const pageSize = 10
+  const visibleDetections = React.useMemo(
+    () => detections.filter((d) => !removedDetectionIds.has(String(d.id))),
+    [detections, removedDetectionIds]
+  )
   const displayedDetections = React.useMemo(() => {
-    if (!useSearch) return detections
-    const items = [...detections]
+    if (!useSearch) return visibleDetections
+    const items = [...visibleDetections]
     items.sort((a, b) => {
       const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0
       const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0
       return logSort === "desc" ? bTime - aTime : aTime - bTime
     })
     return items
-  }, [detections, logSort, useSearch])
+  }, [visibleDetections, logSort, useSearch])
   const totalPages = Math.max(1, Math.ceil(displayedDetections.length / pageSize))
   const pagedDetections = React.useMemo(() => {
     const start = (currentPage - 1) * pageSize
@@ -805,7 +812,7 @@ function DashboardContent() {
 
   React.useEffect(() => {
     setCurrentPage(1)
-  }, [filters.dateFrom, filters.dateTo, filters.status, filters.type, useSearch, logSort, mapFilter, detections.length])
+  }, [filters.dateFrom, filters.dateTo, filters.status, filters.type, useSearch, logSort, mapFilter, visibleDetections.length])
 
   useEffect(() => {
     let mounted = true
@@ -847,6 +854,10 @@ function DashboardContent() {
           return false
         }
         selectDetection(res.data)
+        if (pendingDeepLinkRef.current === id) {
+          setIsDetailOpen(true)
+          pendingDeepLinkRef.current = null
+        }
         return true
       } catch {
         if (detailRequestIdRef.current !== requestId) return false
@@ -917,7 +928,7 @@ function DashboardContent() {
   }, [searchParams])
 
   const activeLogId = logId
-  const activeLogCount = logId ? detections.length : null
+  const activeLogCount = logId ? visibleDetections.length : null
 
   const formatLogLabel = (log: {
     id: number
@@ -928,10 +939,16 @@ function DashboardContent() {
     detectionCount: number
     mapName?: string | null
   }) => {
-    const start = log.startAt ? new Date(log.startAt) : null
-    const end = log.endAt ? new Date(log.endAt) : null
-    const startLabel = start && !Number.isNaN(start.getTime()) ? start.toLocaleString("ko-KR") : log.startAt
-    const endLabel = end && !Number.isNaN(end.getTime()) ? end.toLocaleString("ko-KR") : "-"
+    const start = log.startAt ? parseBackendDate(log.startAt) : null
+    const end = log.endAt ? parseBackendDate(log.endAt) : null
+    const startLabel =
+      start && !Number.isNaN(start.getTime())
+        ? start.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
+        : log.startAt
+    const endLabel =
+      end && !Number.isNaN(end.getTime())
+        ? end.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
+        : "-"
     const mapLabel = log.mapName ?? (log.mapId ? `지도 ${log.mapId}` : "지도 미지정")
     const count = activeLogId === log.id && activeLogCount !== null ? activeLogCount : log.detectionCount
     const countSuffix = activeLogId === log.id && activeLogCount !== null ? " (현재)" : ""
@@ -1075,20 +1092,22 @@ function DashboardContent() {
     if (dismissedDeepLinkRef.current === deepLinkId) return
     if (lastOpenedRef.current === deepLinkId) return
 
-    const existing = detections.find((d) => String(d.id) === deepLinkId)
+    const existing = visibleDetections.find((d) => String(d.id) === deepLinkId)
     if (existing) {
       selectDetection(existing)
       setIsDetailOpen(true)
       lastOpenedRef.current = deepLinkId
+      pendingDeepLinkRef.current = null
       return
     }
 
+    pendingDeepLinkRef.current = deepLinkId
     fetchDetectionDetail(deepLinkId).then((ok) => {
       if (!ok) return
       setIsDetailOpen(true)
       lastOpenedRef.current = deepLinkId
     })
-  }, [deepLinkId, detections, fetchDetectionDetail])
+  }, [deepLinkId, visibleDetections, fetchDetectionDetail])
 
   return (
     <div className="p-3 sm:p-4 lg:p-6">
@@ -1205,7 +1224,7 @@ function DashboardContent() {
                   지도: {mapFilter}
                 </Badge>
               )}
-              <span className="text-xs text-muted-foreground whitespace-nowrap">총 {detections.length}건</span>
+              <span className="text-xs text-muted-foreground whitespace-nowrap">총 {visibleDetections.length}건</span>
             </div>
             <Button
               variant="ghost"
@@ -1341,7 +1360,7 @@ function DashboardContent() {
                     </Badge>
                   )}
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">총 {detections.length}건</span>
+                    <span className="text-sm text-muted-foreground">총 {visibleDetections.length}건</span>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -1430,7 +1449,7 @@ function DashboardContent() {
           onClose={() => setIsDetailOpen(false)}
           currentCarName={currentCarName}
           onDelete={async (id) => {
-            const target = detections.find((d) => d.id === id) ?? null
+            const target = visibleDetections.find((d) => d.id === id) ?? null
             setDeleteTarget(target)
           }}
         />
@@ -1457,11 +1476,18 @@ function DashboardContent() {
                     selectDetection(null)
                     setIsDetailOpen(false)
                     clearDetectionIdParam()
-                    const ok = await runDeleteDetection(deletedId)
+                    setRemovedDetectionIds((prev) => {
+                      const next = new Set(prev)
+                      next.add(String(deletedId))
+                      return next
+                    })
+                    toastInfo(toast, "삭제 처리 중", "탐지 내역을 삭제하는 중입니다.")
+                    const ok = await deleteDetection(deletedId)
                     if (ok) {
                       dismissedDeepLinkRef.current = String(deletedId)
                       toastSuccess(toast, "삭제 완료", "탐지 내역을 삭제했습니다.")
-                      setTimeout(() => window.location.reload(), 100)
+                      refresh()
+                      refreshLogs()
                     } else {
                       toastError(toast, "삭제 실패", "잠시 후 다시 시도해 주세요.")
                     }

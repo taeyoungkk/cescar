@@ -36,6 +36,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { useToast } from "@/components/ui/use-toast"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
 import { getErrorMessage } from "@/lib/error-messages"
+import { getKstNow, parseBackendDate } from "@/lib/date"
 import { ErrorAlert } from "@/components/ui/error-message"
 import {
   AlertDialog,
@@ -145,12 +146,6 @@ function RobotStatusSection({
 
   const modeLabels: Record<CarMode, string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
   
-  const parseBackendDate = (value: string) => {
-    const normalized = value.includes("T") ? value : value.replace(" ", "T")
-    const hasTimezone = /Z$|[+-]\d{2}:\d{2}$/.test(normalized)
-    return new Date(hasTimezone ? normalized : `${normalized}+09:00`)
-  }
-
   const formatKstDateTime = (date: Date) => {
     const parts = new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul",
@@ -258,7 +253,22 @@ type StoredMap = {
   mapSeed: number
 }
 
-function MapVisualization({ status, progress = 0 }: { status: MapStatus; progress?: number }) {
+function MapVisualization({
+  status,
+  progress = 0,
+  imageUrl,
+  imageVersion,
+  mapName,
+}: {
+  status: MapStatus
+  progress?: number
+  imageUrl?: string | null
+  imageVersion?: string | number | null
+  mapName?: string | null
+}) {
+  const resolvedImageUrl = imageUrl
+    ? `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${imageVersion ?? "latest"}`
+    : null
   return (
     <div className="relative w-full aspect-[16/9] max-h-[200px] sm:max-h-none sm:aspect-[4/3] bg-zinc-900 rounded-lg overflow-hidden border border-border">
       {/* Grid background */}
@@ -343,96 +353,86 @@ function MapVisualization({ status, progress = 0 }: { status: MapStatus; progres
 
       {status === "completed" && (
         <>
-          <div className="absolute inset-4">
-            <svg className="w-full h-full" viewBox="0 0 200 150">
-              <rect x="20" y="20" width="160" height="4" fill="rgba(120,120,120,0.9)" />
-              <rect x="20" y="20" width="4" height="110" fill="rgba(120,120,120,0.9)" />
-              <rect x="176" y="20" width="4" height="110" fill="rgba(120,120,120,0.9)" />
-              <rect x="20" y="126" width="160" height="4" fill="rgba(120,120,120,0.9)" />
+          {resolvedImageUrl ? (
+            <img
+              src={resolvedImageUrl}
+              alt="지도 미리보기"
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+          ) : (
+            <div className="absolute inset-4">
+              <svg className="w-full h-full" viewBox="0 0 200 150">
+                <rect x="20" y="20" width="160" height="4" fill="rgba(120,120,120,0.9)" />
+                <rect x="20" y="20" width="4" height="110" fill="rgba(120,120,120,0.9)" />
+                <rect x="176" y="20" width="4" height="110" fill="rgba(120,120,120,0.9)" />
+                <rect x="20" y="126" width="160" height="4" fill="rgba(120,120,120,0.9)" />
 
-              <rect x="60" y="20" width="4" height="50" fill="rgba(120,120,120,0.9)" />
-              <rect x="120" y="80" width="4" height="50" fill="rgba(120,120,120,0.9)" />
-              <rect x="60" y="90" width="40" height="4" fill="rgba(120,120,120,0.9)" />
+                <rect x="60" y="20" width="4" height="50" fill="rgba(120,120,120,0.9)" />
+                <rect x="120" y="80" width="4" height="50" fill="rgba(120,120,120,0.9)" />
+                <rect x="60" y="90" width="40" height="4" fill="rgba(120,120,120,0.9)" />
 
-              <rect x="28" y="28" width="28" height="58" fill="rgba(34, 197, 94, 0.15)" />
-              <rect x="68" y="28" width="48" height="58" fill="rgba(34, 197, 94, 0.15)" />
-              <rect x="128" y="28" width="44" height="94" fill="rgba(34, 197, 94, 0.15)" />
-              <rect x="28" y="98" width="88" height="24" fill="rgba(34, 197, 94, 0.15)" />
+                <rect x="28" y="28" width="28" height="58" fill="rgba(34, 197, 94, 0.15)" />
+                <rect x="68" y="28" width="48" height="58" fill="rgba(34, 197, 94, 0.15)" />
+                <rect x="128" y="28" width="44" height="94" fill="rgba(34, 197, 94, 0.15)" />
+                <rect x="28" y="98" width="88" height="24" fill="rgba(34, 197, 94, 0.15)" />
 
-              <g opacity="0.3">
-                {[...Array(7)].map((_, i) => (
-                  <line key={`h-${i}`} x1="28" y1={28 + i * 14} x2="172" y2={28 + i * 14} stroke="rgba(34, 197, 94, 0.3)" strokeWidth="0.5" />
-                ))}
-                {[...Array(10)].map((_, i) => (
-                  <line key={`v-${i}`} x1={28 + i * 16} y1="28" x2={28 + i * 16} y2="122" stroke="rgba(34, 197, 94, 0.3)" strokeWidth="0.5" />
-                ))}
-              </g>
+                <g opacity="0.3">
+                  {[...Array(7)].map((_, i) => (
+                    <line key={`h-${i}`} x1="28" y1={28 + i * 14} x2="172" y2={28 + i * 14} stroke="rgba(34, 197, 94, 0.3)" strokeWidth="0.5" />
+                  ))}
+                  {[...Array(10)].map((_, i) => (
+                    <line key={`v-${i}`} x1={28 + i * 16} y1="28" x2={28 + i * 16} y2="122" stroke="rgba(34, 197, 94, 0.3)" strokeWidth="0.5" />
+                  ))}
+                </g>
 
-              {/* Robot marker with ripple */}
-              <g>
-                <circle cx="100" cy="75" r="5" fill="none" stroke="#22c55e" strokeWidth="1" opacity="0">
-                  <animate attributeName="r" values="5;20" dur="2s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.6;0" dur="2s" repeatCount="indefinite" />
-                </circle>
-                <circle cx="100" cy="75" r="5" fill="none" stroke="#22c55e" strokeWidth="1" opacity="0">
-                  <animate attributeName="r" values="5;20" dur="2s" begin="0.5s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.6;0" dur="2s" begin="0.5s" repeatCount="indefinite" />
-                </circle>
-                <circle cx="100" cy="75" r="5" fill="none" stroke="#22c55e" strokeWidth="1" opacity="0">
-                  <animate attributeName="r" values="5;20" dur="2s" begin="1s" repeatCount="indefinite" />
-                  <animate attributeName="opacity" values="0.6;0" dur="2s" begin="1s" repeatCount="indefinite" />
-                </circle>
+                {/* Robot marker with ripple */}
+                <g>
+                  <circle cx="100" cy="75" r="5" fill="none" stroke="#22c55e" strokeWidth="1" opacity="0">
+                    <animate attributeName="r" values="5;20" dur="2s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.6;0" dur="2s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx="100" cy="75" r="5" fill="none" stroke="#22c55e" strokeWidth="1" opacity="0">
+                    <animate attributeName="r" values="5;20" dur="2s" begin="0.5s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.6;0" dur="2s" begin="0.5s" repeatCount="indefinite" />
+                  </circle>
+                  <circle cx="100" cy="75" r="5" fill="none" stroke="#22c55e" strokeWidth="1" opacity="0">
+                    <animate attributeName="r" values="5;20" dur="2s" begin="1s" repeatCount="indefinite" />
+                    <animate attributeName="opacity" values="0.6;0" dur="2s" begin="1s" repeatCount="indefinite" />
+                  </circle>
 
-                <circle cx="100" cy="75" r="8" fill="#22c55e" opacity="0.3" />
-                <circle cx="100" cy="75" r="5" fill="#22c55e" />
-                <polygon points="100,67 104,73 96,73" fill="#22c55e" />
-              </g>
+                  <circle cx="100" cy="75" r="8" fill="#22c55e" opacity="0.3" />
+                  <circle cx="100" cy="75" r="5" fill="#22c55e" />
+                  <polygon points="100,67 104,73 96,73" fill="#22c55e" />
+                </g>
 
-              <g>
-                <circle cx="45" cy="50" r="4" fill="#f59e0b" opacity="0.8" />
-                <circle cx="140" cy="100" r="4" fill="#f59e0b" opacity="0.8" />
-                <circle cx="85" cy="110" r="4" fill="#f59e0b" opacity="0.8" />
-              </g>
+                <g>
+                  <circle cx="45" cy="50" r="4" fill="#f59e0b" opacity="0.8" />
+                  <circle cx="140" cy="100" r="4" fill="#f59e0b" opacity="0.8" />
+                  <circle cx="85" cy="110" r="4" fill="#f59e0b" opacity="0.8" />
+                </g>
 
-              <path d="M 40 40 L 50 50 L 80 50 L 100 75 L 140 100 L 85 110 L 100 75" stroke="#22c55e" strokeWidth="1.5" fill="none" strokeDasharray="4 2" opacity="0.4" />
-            </svg>
-          </div>
+                <path d="M 40 40 L 50 50 L 80 50 L 100 75 L 140 100 L 85 110 L 100 75" stroke="#22c55e" strokeWidth="1.5" fill="none" strokeDasharray="4 2" opacity="0.4" />
+              </svg>
+            </div>
+          )}
 
-          <div className="absolute top-3 left-3 flex items-center gap-2">
+          <div className="absolute top-3 left-3 flex flex-col gap-1 max-w-[90%]">
             <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
               <MapPin className="h-3 w-3 mr-1" />
               지도 완료
             </Badge>
-          </div>
-
-          <div className="absolute top-3 right-3 flex items-center gap-2">
-            <div className="flex items-center gap-1.5 bg-black/60 rounded px-2 py-1">
-              <div className="h-2 w-2 rounded-full bg-emerald-400" />
-              <span className="text-xs text-white/80">차량</span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-black/60 rounded px-2 py-1">
-              <div className="h-2 w-2 rounded-full bg-amber-400" />
-              <span className="text-xs text-white/80">탐지</span>
-            </div>
-          </div>
-
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-3">
-            <div className="flex items-center justify-between text-xs text-white/80">
-              <span>마지막 업데이트: 방금 전</span>
-              <span>탐지 지점 3개</span>
-            </div>
+            {mapName && (
+              <div
+                className="bg-black/60 text-white/90 text-xs px-2 py-1 rounded max-w-full truncate"
+                title={mapName}
+              >
+                {mapName}
+              </div>
+            )}
           </div>
         </>
       )}
 
-      {/* Compass indicator */}
-      <div className="absolute top-3 left-3">
-        {status !== "no_map" && (
-          <div className="bg-black/60 rounded-full p-1.5">
-            <Navigation className="h-4 w-4 text-white/70" />
-          </div>
-        )}
-      </div>
     </div>
   )
 }
@@ -477,17 +477,19 @@ function MapHistoryDialog({
   maps,
   onSelect,
   onDelete,
+  disabled = false,
 }: {
   maps: StoredMap[]
   onSelect: (mapId: string) => void
   onDelete: (mapId: string) => void
+  disabled?: boolean
 }) {
   const [open, setOpen] = React.useState(false)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="bg-transparent w-full sm:w-auto">
+        <Button variant="outline" size="sm" className="bg-transparent w-full sm:w-auto" disabled={disabled}>
           <History className="mr-2 h-4 w-4" />
           기존 지도 보기
         </Button>
@@ -521,6 +523,7 @@ function MapHistoryDialog({
                     <Button
                       size="sm"
                       variant="default"
+                      disabled={disabled}
                       onClick={() => {
                         onSelect(map.id)
                         setOpen(false)
@@ -532,6 +535,7 @@ function MapHistoryDialog({
                       size="sm"
                       variant="ghost"
                       className="text-red-400 hover:text-red-300 hover:bg-red-500/10"
+                      disabled={disabled}
                       onClick={() => onDelete(map.id)}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -555,6 +559,9 @@ function MapGenerationSection({
   generatedAtTime,
   areaSize,
   robotId,
+  imageUrl,
+  imageVersion,
+  mapName,
   mapActions,
   maps,
   onStartGeneration,
@@ -570,6 +577,7 @@ function MapGenerationSection({
   networkOnline,
   robotOnline,
   mapReady,
+  isGeneratingMap = false,
   generationEnabled = true,
   generationDisabledReason,
 }: {
@@ -580,6 +588,9 @@ function MapGenerationSection({
   generatedAtTime?: string
   areaSize?: string
   robotId?: string
+  imageUrl?: string | null
+  imageVersion?: string | number | null
+  mapName?: string | null
   mapActions?: React.ReactNode
   maps: StoredMap[]
   onStartGeneration?: () => void
@@ -595,12 +606,13 @@ function MapGenerationSection({
   networkOnline: boolean
   robotOnline: boolean
   mapReady: boolean
+  isGeneratingMap?: boolean
   generationEnabled?: boolean
   generationDisabledReason?: string
 }) {
   const isDisabled = !isOnline
   const enabled = detectionEnabled ?? true
-  const canGenerate = generationEnabled && !!onStartGeneration
+  const canGenerate = generationEnabled && !!onStartGeneration && !isGeneratingMap
   const canStart = enabled && networkOnline && robotOnline && mapReady
   const canStop = enabled && networkOnline && robotOnline
   const startBlockMessage = !enabled
@@ -633,7 +645,12 @@ function MapGenerationSection({
           <div className="flex items-center gap-2 flex-wrap justify-start sm:justify-end w-full sm:w-auto">
             {mapActions}
             {maps.length > 0 && onSelectMap && onDeleteMap && (
-              <MapHistoryDialog maps={maps} onSelect={onSelectMap} onDelete={onDeleteMap} />
+              <MapHistoryDialog
+                maps={maps}
+                onSelect={onSelectMap}
+                onDelete={onDeleteMap}
+                disabled={isGeneratingMap}
+              />
             )}
             <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
               <OfflineGuardButton
@@ -641,7 +658,7 @@ function MapGenerationSection({
                   isDetecting ? "bg-secondary hover:bg-secondary/80" : "bg-primary hover:bg-primary/90"
                 }`}
                 onClick={() => onStartDetect()}
-                disabled={isDetecting || detectionLoading || !canStart}
+                disabled={isDetecting || detectionLoading || !canStart || isGeneratingMap}
                 offlineMessage={startBlockMessage}
               >
                 <Play className="mr-1.5 h-3.5 w-3.5" />
@@ -651,14 +668,17 @@ function MapGenerationSection({
                 variant="destructive"
                 className="h-8 px-3 text-xs w-full sm:w-auto"
                 onClick={() => onStopDetect()}
-                disabled={!isDetecting || detectionLoading || !canStop}
+                disabled={!isDetecting || detectionLoading || !canStop || isGeneratingMap}
                 offlineMessage={stopBlockMessage}
               >
                 <Square className="mr-1.5 h-3.5 w-3.5" />
                 탐지 중지
               </OfflineGuardButton>
             </div>
-            {mapStatus === "completed" && (
+            {isGeneratingMap && (
+              <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 shrink-0">생성 중</Badge>
+            )}
+            {mapStatus === "completed" && !isGeneratingMap && (
               <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shrink-0">완료됨</Badge>
             )}
           </div>
@@ -666,7 +686,13 @@ function MapGenerationSection({
       </CardHeader>
 
       <CardContent className="space-y-3 sm:space-y-4">
-        <MapVisualization status={mapStatus} progress={progress} />
+        <MapVisualization
+          status={mapStatus}
+          progress={progress}
+          imageUrl={imageUrl}
+          imageVersion={imageVersion}
+          mapName={mapName}
+        />
         <MapMetadataPanel
           status={mapStatus}
           generatedAtDate={generatedAtDate}
@@ -676,35 +702,37 @@ function MapGenerationSection({
         />
 
         <div className="flex gap-2 sm:gap-3">
-          {mapStatus === "generating" ? (
-            <Button
-              variant="destructive"
-              className="flex-1 h-9 text-xs sm:h-10 sm:text-sm"
-              onClick={onStopGeneration}
-              disabled={isDisabled || !onStopGeneration}
-            >
-              <Square className="mr-2 h-4 w-4" />
-              생성 중지
-            </Button>
-          ) : (
-            <Button
-              className="flex-1 h-9 text-xs sm:h-10 sm:text-sm bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={onStartGeneration}
-              disabled={isDisabled || !canGenerate}
-            >
-              {mapStatus === "completed" ? (
-                <>
-                  <MapIcon className="mr-2 h-4 w-4" />
-                  지도 재생성
-                </>
-              ) : (
-                <>
-                  <Play className="mr-2 h-4 w-4" />
-                  지도 생성 시작
-                </>
-              )}
-            </Button>
-          )}
+          <Button
+            className="flex-1 h-9 text-xs sm:h-10 sm:text-sm bg-primary hover:bg-primary/90 text-primary-foreground"
+            onClick={onStartGeneration}
+            disabled={isDisabled || !canGenerate}
+          >
+            {isGeneratingMap ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                지도 생성 중
+              </>
+            ) : mapStatus === "completed" ? (
+              <>
+                <MapIcon className="mr-2 h-4 w-4" />
+                지도 재생성
+              </>
+            ) : (
+              <>
+                <Play className="mr-2 h-4 w-4" />
+                지도 생성 시작
+              </>
+            )}
+          </Button>
+          <Button
+            variant="destructive"
+            className="flex-1 h-9 text-xs sm:h-10 sm:text-sm"
+            onClick={onStopGeneration}
+            disabled={isDisabled || !onStopGeneration}
+          >
+            <Square className="mr-2 h-4 w-4" />
+            생성 중단
+          </Button>
 
           {mapStatus === "completed" && (
             <Button asChild variant="outline" className="flex-1 h-9 text-xs sm:h-10 sm:text-sm bg-transparent">
@@ -723,7 +751,15 @@ function MapGenerationSection({
             <p className="text-xs text-amber-400">차량이 오프라인이면 지도 생성이 불가합니다.</p>
           </div>
         )}
-        {!generationEnabled && (
+          {isGeneratingMap && (
+            <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
+              <Info className="h-4 w-4 text-amber-400" />
+              <p className="text-xs text-amber-400">
+                지도 생성 중에는 차량이 온라인 상태를 유지해야 합니다. AUTO 모드를 권장합니다.
+              </p>
+            </div>
+          )}
+          {!generationEnabled && (
           <div className="flex items-center gap-2 p-3 bg-secondary/40 border border-border rounded-lg">
             <Info className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">
@@ -735,7 +771,7 @@ function MapGenerationSection({
           <div className="flex items-center gap-2 p-3 bg-secondary/20 border border-border rounded-lg">
             <Info className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">
-              지도 재생성은 차량에서 새 지도를 만든 뒤, 여기서 “지도 등록”으로 메타데이터를 입력해 주세요.
+              지도 생성은 차량에서 수행됩니다. “지도 생성 시작”을 누르면 차량에 생성 요청이 전송됩니다.
             </p>
           </div>
         )}
@@ -923,6 +959,16 @@ export default function HomePage() {
     originX: "",
     originY: "",
   })
+  const [mapGenerateOpen, setMapGenerateOpen] = React.useState(false)
+  const [mapGenerateName, setMapGenerateName] = React.useState("")
+  const [mapGenerateError, setMapGenerateError] = React.useState<string | null>(null)
+  const [manualGenerating, setManualGenerating] = React.useState(false)
+  const [mapRenderPending, setMapRenderPending] = React.useState<{
+    startedAt: number
+    lastImageUrl: string | null
+  } | null>(null)
+  const mapRenderTimerRef = React.useRef<number | null>(null)
+  const mapRenderAttemptsRef = React.useRef(0)
 
   const { carId, setCarId, refresh: refreshPrimaryCar, error: primaryCarError } = usePrimaryCarId()
   const carStatus = useCarStatus(carId ?? 0, { enabled: !!carId, intervalMs: 1000 })
@@ -1020,6 +1066,60 @@ export default function HomePage() {
     setNotificationPermission(Notification.permission)
   }, [])
 
+  React.useEffect(() => {
+    if (!mapRenderPending) {
+      if (mapRenderTimerRef.current) {
+        window.clearInterval(mapRenderTimerRef.current)
+        mapRenderTimerRef.current = null
+      }
+      mapRenderAttemptsRef.current = 0
+      return
+    }
+
+    const intervalMs = 5000
+    const maxAttempts = 120
+    mapRenderAttemptsRef.current = 0
+
+    const tick = async () => {
+      mapRenderAttemptsRef.current += 1
+      await carMaps.refresh()
+    if (mapRenderAttemptsRef.current >= maxAttempts) {
+      setMapRenderPending(null)
+      setManualGenerating(false)
+    }
+    }
+
+    const id = window.setInterval(() => {
+      tick()
+    }, intervalMs)
+    mapRenderTimerRef.current = id
+
+    return () => {
+      if (mapRenderTimerRef.current) {
+        window.clearInterval(mapRenderTimerRef.current)
+        mapRenderTimerRef.current = null
+      }
+    }
+  }, [carMaps, mapRenderPending])
+
+  React.useEffect(() => {
+    if (!mapRenderPending) return
+    if (!currentMap?.imageUrl) return
+    if (currentMap.imageUrl === mapRenderPending.lastImageUrl) return
+
+    const isRendered = currentMap.imageUrl.includes("maps/rendered")
+    if (isRendered) {
+      setMapRenderPending(null)
+      setManualGenerating(false)
+      toastSuccess(toast, "지도 변환 완료", "새 지도가 적용되었습니다.")
+      return
+    }
+
+    setMapRenderPending((prev) =>
+      prev ? { ...prev, lastImageUrl: currentMap.imageUrl } : prev
+    )
+  }, [currentMap?.imageUrl, mapRenderPending, toast])
+
   useEffect(() => {
     if (!createMapOpen) return
     setMapDraft((prev) => {
@@ -1061,9 +1161,10 @@ export default function HomePage() {
 
   status = carStatus.data
   statusLoading = carStatus.isLoading
+  const isGeneratingMap = Boolean(mapRenderPending || manualGenerating)
 
   recentDetections = realDetections.recentDetections
-  const today = new Date()
+  const today = getKstNow()
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
   const startOfWeek = new Date(startOfToday)
   const day = startOfWeek.getDay()
@@ -1071,12 +1172,14 @@ export default function HomePage() {
   startOfWeek.setDate(startOfWeek.getDate() + diffToMonday)
   const todayCount = recentDetections.filter((d) => {
     if (!d.timestamp) return false
-    const t = new Date(d.timestamp)
+    const t = parseBackendDate(d.timestamp)
+    if (!t) return false
     return t >= startOfToday
   }).length
   const weekCount = recentDetections.filter((d) => {
     if (!d.timestamp) return false
-    const t = new Date(d.timestamp)
+    const t = parseBackendDate(d.timestamp)
+    if (!t) return false
     return t >= startOfWeek
   }).length
   const last = recentDetections[0]
@@ -1095,7 +1198,7 @@ export default function HomePage() {
   const computedAlerts = React.useMemo(() => {
     const list: SystemAlert[] = []
     const now = Date.now()
-    if (status && !status.isOnline) {
+    if (!isGeneratingMap && status && !status.isOnline) {
       list.push({
         id: "offline",
         type: "error",
@@ -1105,8 +1208,9 @@ export default function HomePage() {
         isRead: false,
       })
     }
-    if (status?.updatedAt) {
-      const updated = new Date(status.updatedAt).getTime()
+    if (!isGeneratingMap && status?.updatedAt) {
+      const updatedDate = parseBackendDate(status.updatedAt)
+      const updated = updatedDate ? updatedDate.getTime() : NaN
       if (!Number.isNaN(updated) && now - updated > 2 * 60 * 1000) {
         list.push({
           id: "stale",
@@ -1129,7 +1233,7 @@ export default function HomePage() {
       })
     }
     return list
-  }, [status?.isOnline, status?.updatedAt, currentMap])
+  }, [status?.isOnline, status?.updatedAt, currentMap, isGeneratingMap])
 
   React.useEffect(() => {
     setExternalAlerts([...fcmAlerts, ...computedAlerts])
@@ -1170,7 +1274,7 @@ export default function HomePage() {
   alerts = realAlerts.alerts
 
 
-  const robotOnline = status?.isOnline ?? false
+  const robotOnline = isGeneratingMap ? true : status?.isOnline ?? false
   const mapReady = Boolean(currentMap)
   const areaSize =
     currentMap && currentMap.width && currentMap.height && currentMap.resolution
@@ -1178,24 +1282,23 @@ export default function HomePage() {
       : "-"
   const formatDateLine = (value?: string | null) => {
     if (!value) return "-"
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return value
-    const yyyy = date.getFullYear()
-    const mm = String(date.getMonth() + 1).padStart(2, "0")
-    const dd = String(date.getDate()).padStart(2, "0")
-    return `${yyyy}-${mm}-${dd}`
+    const date = parseBackendDate(value)
+    if (!date) return value
+    return date.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })
   }
   const formatTimeLine = (value?: string | null) => {
     if (!value) return "-"
-    const date = new Date(value)
-    if (Number.isNaN(date.getTime())) return "-"
-    return date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true })
+    const date = parseBackendDate(value)
+    if (!date) return "-"
+    return date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true, timeZone: "Asia/Seoul" })
   }
   const generatedAtDate = formatDateLine(currentMap?.createdAt ?? null)
   const generatedAtTime = formatTimeLine(currentMap?.createdAt ?? null)
   const mapHistoryItems: StoredMap[] = carMaps.maps.map((m) => ({
     id: String(m.id),
-    generatedAt: new Date(m.createdAt).toLocaleString("ko-KR"),
+    generatedAt: (parseBackendDate(m.createdAt) ?? new Date(m.createdAt)).toLocaleString("ko-KR", {
+      timeZone: "Asia/Seoul",
+    }),
     areaSize:
       m.width && m.height && m.resolution
         ? `${(m.width * m.resolution).toFixed(1)}m x ${(m.height * m.resolution).toFixed(1)}m`
@@ -1300,6 +1403,40 @@ export default function HomePage() {
     setMapFieldErrors({})
   }
 
+  const handleOpenGenerateDialog = () => {
+    if (mapRenderPending) {
+      toastInfo(toast, "지도 생성 중", "현재 지도 생성이 진행 중입니다.")
+      return
+    }
+    if (!carId) {
+      toastError(toast, "지도 생성 실패", "차량을 먼저 선택해 주세요.")
+      return
+    }
+    setMapGenerateName("")
+    setMapGenerateError(null)
+    setMapGenerateOpen(true)
+  }
+
+  const handleConfirmGenerate = async () => {
+    const name = mapGenerateName.trim()
+    if (!name) {
+      setMapGenerateError("지도 이름을 입력해 주세요.")
+      return
+    }
+    const ok = await carMaps.generateMap(name)
+    if (ok) {
+      toastSuccess(toast, "지도 생성 요청", "차량에 지도 생성을 요청했습니다.")
+      setManualGenerating(true)
+      setMapRenderPending({
+        startedAt: Date.now(),
+        lastImageUrl: currentMap?.imageUrl ?? null,
+      })
+      setMapGenerateOpen(false)
+    } else {
+      toastError(toast, "지도 생성 실패", "잠시 후 다시 시도해 주세요.")
+    }
+  }
+
   const handleCreateMap = async () => {
     if (!carId) {
       toastError(toast, "지도 등록 실패", "차량을 먼저 선택해 주세요.")
@@ -1385,6 +1522,7 @@ export default function HomePage() {
       setIsCreatingMap(false)
     }
   }
+
 
   const createMapAction = (
     <Dialog
@@ -1630,14 +1768,16 @@ export default function HomePage() {
                 generatedAtTime={generatedAtTime}
                 areaSize={areaSize}
                 robotId={carId ? String(carId) : undefined}
-                mapActions={createMapAction}
+                imageUrl={currentMap?.imageUrl ?? null}
+                imageVersion={currentMap?.id ?? currentMap?.createdAt ?? null}
+                mapName={currentMap?.name ?? null}
+                mapActions={null}
                 maps={mapHistoryItems}
-                onStartGeneration={undefined}
+                onStartGeneration={handleOpenGenerateDialog}
                 onStopGeneration={undefined}
                 onSelectMap={(id) => carMaps.selectMap(Number(id))}
                 onDeleteMap={(id) => carMaps.deleteMap(Number(id))}
-                generationEnabled={false}
-                generationDisabledReason="지도 생성은 차량에서 수행됩니다. 현재는 조회만 가능합니다."
+                generationEnabled={true}
                 detectionEnabled={false}
                 detectionDisabledReason="탐지 시작/중지 API 연동이 필요합니다."
                 isDetecting={isDetecting}
@@ -1647,7 +1787,33 @@ export default function HomePage() {
                 networkOnline={networkOnline}
                 robotOnline={robotOnline}
                 mapReady={mapReady}
+                isGeneratingMap={isGeneratingMap}
               />
+              <Dialog open={mapGenerateOpen} onOpenChange={setMapGenerateOpen}>
+                <DialogContent className="sm:max-w-md bg-card border-border">
+                  <DialogHeader>
+                    <DialogTitle>지도 이름 입력</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <Input
+                      value={mapGenerateName}
+                      onChange={(e) => {
+                        setMapGenerateName(e.target.value)
+                        setMapGenerateError(null)
+                      }}
+                      placeholder="지도 이름을 입력하세요"
+                      className={mapGenerateError ? "border-red-500 focus-visible:ring-red-500" : ""}
+                    />
+                    {mapGenerateError && <p className="text-[11px] text-red-400">{mapGenerateError}</p>}
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setMapGenerateOpen(false)}>
+                        취소
+                      </Button>
+                      <Button onClick={handleConfirmGenerate}>생성 시작</Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
             </div>
           )
 

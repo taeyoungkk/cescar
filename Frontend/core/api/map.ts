@@ -45,6 +45,13 @@ export async function deleteMap(carId: number, mapId: number): Promise<void> {
   })
 }
 
+export async function generateMap(carId: number, payload?: { name?: string }): Promise<void> {
+  await apiFetch<void>(`/api/cars/${carId}/maps/generate`, {
+    method: "POST",
+    body: JSON.stringify({ name: payload?.name ?? "" }),
+  })
+}
+
 export async function getMapDetail(carId: number, mapId: number): Promise<CarMap | null> {
   try {
     const raw = await apiFetch<any>(`/api/cars/${carId}/maps/${mapId}`)

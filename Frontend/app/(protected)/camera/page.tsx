@@ -24,6 +24,7 @@ import * as mapApi from "@/core/api/map"
 import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { parseBackendDate } from "@/lib/date"
 import { ErrorAlert } from "@/components/ui/error-message"
 
 const DRIVE_MAX_V = 2.4
@@ -378,17 +379,11 @@ function LiveCameraView({
 
   const ICE_SERVERS: RTCIceServer[] = [
     { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
     {
-      urls: "turn:openrelay.metered.ca:80",
-      username: "openrelayproject",
-      credential: "openrelayproject"
+      urls: "turn:I14B201.p.ssafy.io:8086",
+      username: "ssafy",
+      credential: "1234",
     },
-    {
-      urls: "turn:openrelay.metered.ca:443",
-      username: "openrelayproject",
-      credential: "openrelayproject"
-    }
   ]
 
   const send = (msg: any) => {
@@ -767,9 +762,16 @@ function LiveCameraView({
           </div>
           <div className="text-right space-y-0.5">
             <p className="text-[10px] text-white/80 font-mono sm:text-xs">
-              {currentTime.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+              {currentTime.toLocaleTimeString("ko-KR", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                timeZone: "Asia/Seoul",
+              })}
             </p>
-            <p className="text-[9px] text-white/50 font-mono sm:text-[10px]">{currentTime.toLocaleDateString("ko-KR")}</p>
+            <p className="text-[9px] text-white/50 font-mono sm:text-[10px]">
+              {currentTime.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })}
+            </p>
           </div>
         </div>
       </div>
@@ -1260,11 +1262,15 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
     )
   }
   const modeLabels: Record<CarStatus["mode"], string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
-  const updatedLabel = new Date(status.updatedAt).toLocaleTimeString("ko-KR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  })
+  const updatedLabel = (parseBackendDate(status.updatedAt) ?? new Date(status.updatedAt)).toLocaleTimeString(
+    "ko-KR",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "Asia/Seoul",
+    }
+  )
   const xLabel = status.x == null ? "-" : status.x.toFixed(2)
   const yLabel = status.y == null ? "-" : status.y.toFixed(2)
   const headingLabel = Number.isFinite(status.heading) ? status.heading.toFixed(0) : "-"
@@ -1559,7 +1565,14 @@ export default function CameraPage() {
   const [selectedCarId, setSelectedCarId] = useState<number | null>(null)
   const [carDetail, setCarDetail] = useState<CarDetail | null>(null)
   const [carDetailLoading, setCarDetailLoading] = useState(false)
-  const [currentMap, setCurrentMap] = useState<{ width: number; height: number; resolution: number; originX: number; originY: number } | null>(null)
+  const [currentMap, setCurrentMap] = useState<{
+    name?: string
+    width: number
+    height: number
+    resolution: number
+    originX: number
+    originY: number
+  } | null>(null)
   const fallbackRoomId = process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"
   const roomId = carDetail?.deviceId || (selectedCarId ? `car-${selectedCarId}` : fallbackRoomId)
 
@@ -1682,6 +1695,7 @@ export default function CameraPage() {
           return
         }
         setCurrentMap({
+          name: map.name,
           width: map.width,
           height: map.height,
           resolution: map.resolution,
@@ -2227,6 +2241,12 @@ export default function CameraPage() {
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">닉네임</span>
               <span className="font-medium text-foreground">{carDetail.nickname}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">현재 지도</span>
+              <span className="text-xs text-foreground font-medium">
+                {currentMap?.name ?? "없음"}
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">디바이스 ID</span>

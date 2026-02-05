@@ -12,6 +12,7 @@ interface UseCarMapsReturn {
   refresh: () => Promise<void>
   selectMap: (mapId: number) => Promise<boolean>
   deleteMap: (mapId: number) => Promise<boolean>
+  generateMap: (name?: string) => Promise<boolean>
   createMap: (payload: {
     name: string
     imageUrl: string
@@ -124,6 +125,16 @@ export function useCarMaps(carId: number | null): UseCarMapsReturn {
     [carId, online, refresh]
   )
 
+  const generateMap = useCallback(async (name?: string) => {
+    if (!carId) return false
+    if (!online) {
+      setError("\uC624\uD504\uB77C\uC778 \uC0C1\uD0DC\uC785\uB2C8\uB2E4.")
+      return false
+    }
+    await mapApi.generateMap(carId, { name })
+    return true
+  }, [carId, online])
+
   const createMap = useCallback(
     async (payload: {
       name: string
@@ -168,6 +179,7 @@ export function useCarMaps(carId: number | null): UseCarMapsReturn {
     refresh,
     selectMap,
     deleteMap,
+    generateMap,
     createMap,
     renameMap,
   }

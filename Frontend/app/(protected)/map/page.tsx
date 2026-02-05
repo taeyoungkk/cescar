@@ -40,6 +40,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { useToast } from "@/components/ui/use-toast"
+import { parseBackendDate } from "@/lib/date"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useCarMaps } from "@/hooks/useCarMaps"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
@@ -55,9 +56,14 @@ type MapStatus = "no_map" | "generating" | "completed"
 
 interface LargeMapVisualizationProps {
   status: MapStatus
+  imageUrl?: string | null
+  imageVersion?: string | number | null
 }
 
-function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
+function LargeMapVisualization({ status, imageUrl, imageVersion }: LargeMapVisualizationProps) {
+  const resolvedImageUrl = imageUrl
+    ? `${imageUrl}${imageUrl.includes("?") ? "&" : "?"}v=${imageVersion ?? "latest"}`
+    : null
   return (
     <div className="relative w-full bg-zinc-900 rounded-lg overflow-hidden border border-border
                 h-[320px] sm:h-auto sm:aspect-[16/10]">
@@ -102,13 +108,21 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
 
       {status === "completed" && (
         <>
-          {/* Complete map visualization - larger version */}
-          <div className="absolute inset-6">
-            <svg
-              className="w-full h-full"
-              viewBox="0 0 400 250"
-              preserveAspectRatio="xMidYMid meet"
-            >
+          {resolvedImageUrl ? (
+            <img
+              src={resolvedImageUrl}
+              alt="지도 상세"
+              className="absolute inset-0 h-full w-full object-contain"
+            />
+          ) : (
+            <>
+              {/* Complete map visualization - larger version */}
+              <div className="absolute inset-6">
+                <svg
+                  className="w-full h-full"
+                  viewBox="0 0 400 250"
+                  preserveAspectRatio="xMidYMid meet"
+                >
               {/* Outer walls */}
               <rect x="30" y="30" width="340" height="6" fill="rgba(140,140,140,0.9)" />
               <rect x="30" y="30" width="6" height="190" fill="rgba(140,140,140,0.9)" />
@@ -216,29 +230,10 @@ function LargeMapVisualization({ status }: LargeMapVisualizationProps) {
                 <circle cx="200" cy="125" r="9" fill="#22c55e" />
                 <polygon points="200,112 206,122 194,122" fill="#22c55e" />
               </g>
-            </svg>
-          </div>
-
-          {/* Legend */}
-          <div className="hidden sm:flex absolute top-4 right-4 flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
-              <span className="text-xs text-white/80">로봇</span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-amber-400" />
-              <span className="text-xs text-white/80">탐지 (확인)</span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-red-400" />
-              <span className="text-xs text-white/80">탐지 (미확인)</span>
-            </div>
-          </div>
-
-          {/* Compass */}
-          <div className="absolute top-3 left-3 sm:top-4 sm:left-4 bg-black/70 rounded-full p-1.5 sm:p-2">
-            <Navigation className="h-4 w-4 sm:h-5 sm:w-5 text-white/80" />
-          </div>
+                </svg>
+              </div>
+            </>
+          )}
 
           {/* Scale indicator */}
           <div className="hidden sm:block absolute bottom-4 left-4 bg-black/70 rounded px-3 py-2">
@@ -337,21 +332,25 @@ function toAreaSize(map: CarMap | null) {
 
 function formatDateLabel(value?: string | null) {
   if (!value) return "-"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString("ko-KR")
+  const date = parseBackendDate(value)
+  if (!date) return value
+  return date.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
 }
 
 function formatDateParts(value?: string | null) {
   if (!value) return { date: "-", time: "-" }
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return { date: value, time: "-" }
-  const yyyy = date.getFullYear()
-  const mm = String(date.getMonth() + 1).padStart(2, "0")
-  const dd = String(date.getDate()).padStart(2, "0")
+  const date = parseBackendDate(value)
+  if (!date) return { date: value, time: "-" }
+  const yyyy = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", year: "numeric" }).format(date)
+  const mm = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit" })
+    .format(date)
+    .replace(/\D/g, "")
+  const dd = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", day: "2-digit" })
+    .format(date)
+    .replace(/\D/g, "")
   return {
     date: `${yyyy}-${mm}-${dd}`,
-    time: date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true }),
+    time: date.toLocaleTimeString("ko-KR", { hour: "numeric", hour12: true, timeZone: "Asia/Seoul" }),
   }
 }
 
@@ -724,7 +723,11 @@ export default function MapDetailPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <LargeMapVisualization status={mapStatus} />
+                <LargeMapVisualization
+                  status={mapStatus}
+                  imageUrl={currentMap?.imageUrl ?? null}
+                  imageVersion={currentMap?.id ?? currentMap?.createdAt ?? null}
+                />
               </CardContent>
             </Card>
 

@@ -42,10 +42,10 @@ class TrackingService:
         self.mode: TrackingMode = TrackingMode.OFF
         
         # 추적 파라미터
-        self._dead_zone = 0.15  # 화면 중앙 15% 이내면 직진
-        self._max_steer = 0.5   # 최대 조향값
-        self._base_speed = 0.4  # 기본 전진 속도
-        self._min_speed = 0.15  # 최소 속도 (가까울 때)
+        self._dead_zone = 0.30  # 화면 중앙 30% 이내면 직진
+        self._max_steer = 0.8   # 최대 조향값
+        self._base_speed = 2.4  # 기본 전진 속도
+        self._min_speed = 2.0  # 최소 속도 (가까울 때)
         
         # 상태 추적
         self._last_cmd_time: float = 0.0
@@ -204,16 +204,16 @@ class TrackingService:
         if area_ratio > 0.2:  # 20% 이상이면 매우 가까움
             v = self._min_speed
         elif area_ratio > 0.1:  # 10% 이상
-            v = self._base_speed * 0.5
+            v = self._base_speed
         else:
             v = self._base_speed
         
         # 값 클램핑
-        v = max(-1.0, min(1.0, v))
-        w = max(-1.0, min(1.0, w))
+        v = max(-3.0, min(3.0, v))
+        w = max(-3.0, min(3.0, w))
         
-        # [Correct] Hardware: Positive=Backward, Negative=Forward
-        # Tracking needs Forward, so we invert v.
+        # [Correct] Hardware: Positive=Forward, Negative=Backward
+        # Tracking needs Forward, so we use v.
         return CmdVel(v=-v, w=w)
     
     def _send_cmd_vel(self, cmd: CmdVel) -> bool:

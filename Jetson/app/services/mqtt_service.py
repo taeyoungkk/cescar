@@ -56,9 +56,9 @@ class MQTTService:
             payload = msg.payload.decode()
             
             # [DEBUG] odom/status 로그는 너무 많아서 제외하고 중요 메시지만 출력
-            if "odom" not in msg.topic and "status" not in msg.topic:
-                print(f"\n[>>>] Message Received on {msg.topic}: {payload}")
-                logger.info(f"MQTT Received: {msg.topic} -> {payload}")
+            # if "odom" not in msg.topic and "status" not in msg.topic:
+                # print(f"\n[>>>] Message Received on {msg.topic}: {payload}")
+                # logger.info(f"MQTT Received: {msg.topic} -> {payload}")
             
             import json
             data = json.loads(payload)

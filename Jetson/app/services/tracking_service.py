@@ -230,7 +230,7 @@ class TrackingService:
             topic = settings.TOPIC_CMD_VEL
             mqtt_service.publish(topic, json.dumps(payload))
             
-            logger.info(f"🎯 [TRACKING] Sent cmd_vel: v={cmd.v:.2f}, w={cmd.w:.2f}")
+            # logger.info(f"🎯 [TRACKING] Sent cmd_vel: v={cmd.v:.2f}, w={cmd.w:.2f}")
             return True
             
         except Exception as e:

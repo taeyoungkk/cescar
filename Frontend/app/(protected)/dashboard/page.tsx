@@ -286,9 +286,10 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
   const [videoSrc, setVideoSrc] = useState<string | null>(null)
   const [videoLoading, setVideoLoading] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+  const normalizeGcsUrl = (url: string) => url.replace("storage.googleapisapis.com", "storage.googleapis.com")
   const toAbsUrl = (url?: string | null) => {
     if (!url) return null
-    if (url.startsWith("http://") || url.startsWith("https://")) return url
+    if (url.startsWith("http://") || url.startsWith("https://")) return normalizeGcsUrl(url)
     return `${BASE_URL}${url}`
   }
 
@@ -315,10 +316,19 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
     let objectUrl: string | null = null
 
     setSnapshotLoading(true)
-    fetch(snapshotUrl, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      signal: controller.signal,
-    })
+    if (snapshotUrl?.includes("storage.googleapis.com")) {
+      setSnapshotSrc(snapshotUrl)
+      setSnapshotLoading(false)
+      return () => {
+        controller.abort()
+      }
+    }
+    const headers = snapshotUrl?.includes("storage.googleapis.com")
+      ? undefined
+      : accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined
+    fetch(snapshotUrl, { headers, signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error("snapshot fetch failed")
         const blob = await res.blob()
@@ -354,10 +364,19 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
     let objectUrl: string | null = null
 
     setVideoLoading(true)
-    fetch(videoUrl, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      signal: controller.signal,
-    })
+    if (videoUrl?.includes("storage.googleapis.com")) {
+      setVideoSrc(videoUrl)
+      setVideoLoading(false)
+      return () => {
+        controller.abort()
+      }
+    }
+    const headers = videoUrl?.includes("storage.googleapis.com")
+      ? undefined
+      : accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined
+    fetch(videoUrl, { headers, signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error("video fetch failed")
         const blob = await res.blob()
@@ -668,7 +687,8 @@ function DashboardContent() {
   const { toast } = useToast()
   const { isOnline: networkOnline } = useNetworkStatus()
   const { carId, error: primaryCarError } = usePrimaryCarId()
-  const { logs, isLoading: logsLoading, error: logsError } = useCarLogs(carId)
+  const { logs, isLoading: logsLoading, error: logsError, refresh: refreshLogs } = useCarLogs(carId)
+  const [logItems, setLogItems] = useState<CarLogSummary[]>([])
   const [carList, setCarList] = useState<{ carId: number; nickname: string }[]>([])
   const currentCar = carList.find((car) => car.carId === carId)
   const currentCarName = currentCar?.nickname ?? null
@@ -687,11 +707,13 @@ function DashboardContent() {
     setUseSearch,
     selectDetection,
     deleteDetection,
+    refresh,
   } = useDetectionHistory(carId)
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Detection | null>(null)
   const lastOpenedRef = React.useRef<string | null>(null)
+  const dismissedDeepLinkRef = React.useRef<string | null>(null)
   const detailRequestIdRef = React.useRef(0)
   const detailInFlightRef = React.useRef(false)
   const detailQueuedRef = React.useRef(false)
@@ -702,6 +724,8 @@ function DashboardContent() {
   const deleteQueuedIdRef = React.useRef<string | null>(null)
   const [mapFilter, setMapFilter] = useState<string>("all")
   const [logSort, setLogSort] = useState<"desc" | "asc">("desc")
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
   const displayedDetections = React.useMemo(() => {
     if (!useSearch) return detections
     const items = [...detections]
@@ -712,6 +736,11 @@ function DashboardContent() {
     })
     return items
   }, [detections, logSort, useSearch])
+  const totalPages = Math.max(1, Math.ceil(displayedDetections.length / pageSize))
+  const pagedDetections = React.useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return displayedDetections.slice(start, start + pageSize)
+  }, [currentPage, displayedDetections])
   const computedStats = React.useMemo<DashboardStats>(() => {
     if (!displayedDetections.length) {
       return { totalCount: 0, dailyAverage: 0, lastDetectionDate: "", lastDetectionTime: "-" }
@@ -773,6 +802,10 @@ function DashboardContent() {
 
     return { totalCount, dailyAverage, lastDetectionDate, lastDetectionTime }
   }, [displayedDetections, filters.dateFrom, filters.dateTo])
+
+  React.useEffect(() => {
+    setCurrentPage(1)
+  }, [filters.dateFrom, filters.dateTo, filters.status, filters.type, useSearch, logSort, mapFilter, detections.length])
 
   useEffect(() => {
     let mounted = true
@@ -843,9 +876,8 @@ function DashboardContent() {
         return false
       }
       if (deleteInFlightRef.current) {
-        deleteQueuedRef.current = true
-        deleteQueuedIdRef.current = id
-        return null
+        toastInfo(toast, "삭제 처리 중", "잠시만 기다려 주세요.")
+        return false
       }
 
       deleteInFlightRef.current = true
@@ -875,8 +907,21 @@ function DashboardContent() {
     [deleteDetection, networkOnline, toast]
   )
 
+  const clearDetectionIdParam = React.useCallback(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (!params.has("detectionId")) return
+    params.delete("detectionId")
+    const next = params.toString()
+    const url = next ? `${window.location.pathname}?${next}` : window.location.pathname
+    window.history.replaceState(null, "", url)
+  }, [searchParams])
+
+  const activeLogId = logId
+  const activeLogCount = logId ? detections.length : null
+
   const formatLogLabel = (log: {
     id: number
+    mapId: number | null
     startAt: string
     endAt: string | null
     status: string
@@ -887,21 +932,23 @@ function DashboardContent() {
     const end = log.endAt ? new Date(log.endAt) : null
     const startLabel = start && !Number.isNaN(start.getTime()) ? start.toLocaleString("ko-KR") : log.startAt
     const endLabel = end && !Number.isNaN(end.getTime()) ? end.toLocaleString("ko-KR") : "-"
-    const mapLabel = log.mapName ? ` · ${log.mapName}` : ""
-    return `${startLabel} ~ ${endLabel} · ${log.status} · ${log.detectionCount}건${mapLabel}`
+    const mapLabel = log.mapName ?? (log.mapId ? `지도 ${log.mapId}` : "지도 미지정")
+    const count = activeLogId === log.id && activeLogCount !== null ? activeLogCount : log.detectionCount
+    const countSuffix = activeLogId === log.id && activeLogCount !== null ? " (현재)" : ""
+    return `${startLabel} ~ ${endLabel} · ${log.status} · ${count}건${countSuffix} · ${mapLabel}`
   }
 
   const mapOptions = React.useMemo(() => {
-    const names = logs
+    const names = logItems
       .map((log) => log.mapName)
       .filter((name): name is string => Boolean(name && name.trim()))
     return Array.from(new Set(names))
-  }, [logs])
+  }, [logItems])
 
   const filteredLogs = React.useMemo(() => {
-    if (mapFilter === "all") return logs
-    return logs.filter((log) => log.mapName === mapFilter)
-  }, [logs, mapFilter])
+    if (mapFilter === "all") return logItems
+    return logItems.filter((log) => log.mapName === mapFilter)
+  }, [logItems, mapFilter])
 
   const sortedLogs = React.useMemo(() => {
     const items = [...filteredLogs]
@@ -915,6 +962,10 @@ function DashboardContent() {
     })
     return items
   }, [filteredLogs, logSort])
+
+  React.useEffect(() => {
+    setLogItems(logs)
+  }, [logs])
 
   React.useEffect(() => {
     if (useSearch) return
@@ -1021,6 +1072,7 @@ function DashboardContent() {
 
   React.useEffect(() => {
     if (!deepLinkId) return
+    if (dismissedDeepLinkRef.current === deepLinkId) return
     if (lastOpenedRef.current === deepLinkId) return
 
     const existing = detections.find((d) => String(d.id) === deepLinkId)
@@ -1164,6 +1216,7 @@ function DashboardContent() {
                 }
                 setMapFilter("all")
                 setLogSort("desc")
+                setUseSearch(false)
                 clearFilters()
                 window.history.replaceState(null, "", window.location.pathname)
                 toastInfo(toast, "필터 초기화", "필터와 저장값을 초기화했습니다.")
@@ -1298,6 +1351,7 @@ function DashboardContent() {
                         }
                         setMapFilter("all")
                         setLogSort("desc")
+                        setUseSearch(false)
                         clearFilters()
                         window.history.replaceState(null, "", window.location.pathname)
                         toastInfo(toast, "필터 초기화", "필터와 저장값을 초기화했습니다.")
@@ -1334,7 +1388,7 @@ function DashboardContent() {
           <CardContent>
             <ErrorAlert title="탐지 기록 불러오기 실패" message={error} className="mb-4" />
             <DetectionTable
-              detections={displayedDetections}
+              detections={pagedDetections}
               onViewDetail={async (d) => {
                 selectDetection(d)
                 setIsDetailOpen(true)
@@ -1342,6 +1396,31 @@ function DashboardContent() {
               }}
               isLoading={isLoading}
             />
+            {displayedDetections.length > pageSize && (
+              <div className="mt-4 flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">
+                  {currentPage} / {totalPages} 페이지
+                </span>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  >
+                    이전
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    다음
+                  </Button>
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
@@ -1366,22 +1445,30 @@ function DashboardContent() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel onClick={() => setDeleteTarget(null)}>취소</AlertDialogCancel>
-                  <AlertDialogAction
-                className="bg-red-500 hover:bg-red-500/90"
-                onClick={async () => {
-                  if (!deleteTarget) return
-                  const ok = await runDeleteDetection(deleteTarget.id)
-                  if (ok === null) return
-                  if (ok) {
+              <AlertDialogAction asChild>
+                <Button
+                  type="button"
+                  className="bg-red-500 hover:bg-red-500/90"
+                  onClick={async () => {
+                    if (!deleteTarget) return
+                    const deletedId = deleteTarget.id
+                    // Close UI immediately to avoid stuck dialogs
+                    setDeleteTarget(null)
+                    selectDetection(null)
                     setIsDetailOpen(false)
-                    toastSuccess(toast, "삭제 완료", "탐지 내역을 삭제했습니다.")
-                  } else {
-                    toastError(toast, "삭제 실패", "잠시 후 다시 시도해 주세요.")
-                  }
-                  setDeleteTarget(null)
-                }}
-              >
-                삭제
+                    clearDetectionIdParam()
+                    const ok = await runDeleteDetection(deletedId)
+                    if (ok) {
+                      dismissedDeepLinkRef.current = String(deletedId)
+                      toastSuccess(toast, "삭제 완료", "탐지 내역을 삭제했습니다.")
+                      setTimeout(() => window.location.reload(), 100)
+                    } else {
+                      toastError(toast, "삭제 실패", "잠시 후 다시 시도해 주세요.")
+                    }
+                  }}
+                >
+                  삭제
+                </Button>
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

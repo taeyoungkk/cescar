@@ -1,6 +1,6 @@
 ﻿"use client"
 
-import React, { useEffect } from "react"
+import React, { useEffect, useState } from "react"
 import Link from "next/link"
 import {
   Wifi,
@@ -49,6 +49,7 @@ import {
 } from "@/components/ui/alert-dialog"
 
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
+import { listenForegroundMessages } from "@/lib/fcm"
 import { useRecentDetections } from "@/hooks/useRecentDetections"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useAlerts } from "@/hooks/useAlerts"
@@ -929,6 +930,7 @@ export default function HomePage() {
   const realDetections = useRecentDetections(carId, 50)
   const realAlerts = useAlerts()
   const { setExternalAlerts } = realAlerts
+  const [fcmAlerts, setFcmAlerts] = useState<SystemAlert[]>([])
   const { isOnline: networkOnline } = useNetworkStatus()
   const carMaps = useCarMaps(carId)
   const currentMap = carMaps.currentMap
@@ -1130,8 +1132,40 @@ export default function HomePage() {
   }, [status?.isOnline, status?.updatedAt, currentMap])
 
   React.useEffect(() => {
-    setExternalAlerts(computedAlerts)
-  }, [computedAlerts, setExternalAlerts])
+    setExternalAlerts([...fcmAlerts, ...computedAlerts])
+  }, [computedAlerts, fcmAlerts, setExternalAlerts])
+
+  React.useEffect(() => {
+    let mounted = true
+    let unsubscribe: (() => void) | undefined
+    listenForegroundMessages((payload) => {
+      if (!mounted) return
+      const title =
+        payload?.notification?.title ?? payload?.data?.title ?? "탐지 알림"
+      const message =
+        payload?.notification?.body ?? payload?.data?.body ?? "탐지가 발생했습니다."
+      const id = payload?.messageId
+        ? `fcm-${payload.messageId}`
+        : `fcm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      setFcmAlerts((prev) => [
+        {
+          id,
+          type: "warning",
+          title,
+          message,
+          timestamp: new Date().toISOString(),
+          isRead: false,
+        },
+        ...prev,
+      ])
+    }).then((unsub) => {
+      unsubscribe = unsub
+    })
+    return () => {
+      mounted = false
+      if (unsubscribe) unsubscribe()
+    }
+  }, [])
 
   alerts = realAlerts.alerts
 

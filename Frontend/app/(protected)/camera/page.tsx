@@ -91,6 +91,9 @@ function LiveCameraView({
 }: LiveCameraViewProps) {
   const [hasStream, setHasStream] = React.useState(false)
   const [connectionState, setConnectionState] = React.useState<"offline" | "connecting" | "signaling" | "connected" | "failed">("offline")
+  const [reconnectInfo, setReconnectInfo] = React.useState<{ active: boolean; reason?: string; nextAt?: number }>({
+    active: false,
+  })
   const showVideo = hasStream
   const closingRef = React.useRef(false)
 
@@ -103,6 +106,8 @@ function LiveCameraView({
   const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([])
 
   const connectingRef = React.useRef(false)
+  const reconnectTimerRef = React.useRef<number | null>(null)
+  const reconnectAttemptsRef = React.useRef(0)
   const detectionConnectingRef = React.useRef(false)
   const detectionReconnectRef = React.useRef<number | null>(null)
   const [detections, setDetections] = React.useState<
@@ -111,7 +116,12 @@ function LiveCameraView({
 
   const cleanupWebRTC = React.useCallback(() => {
     connectingRef.current = false
+    if (reconnectTimerRef.current != null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
     closingRef.current = true
+    setReconnectInfo({ active: false })
     setConnectionState(networkOnline ? "connecting" : "offline")
 
     const pc = pcRef.current
@@ -143,6 +153,19 @@ function LiveCameraView({
     // 다음 connect를 위해 복구
     // setTimeout(() => { closingRef.current = false }, 0)
   }, [networkOnline])
+
+  const scheduleReconnect = React.useCallback((reason: string) => {
+    if (!networkOnline || !cameraConnected) return
+    if (reconnectTimerRef.current != null) return
+    const attempt = reconnectAttemptsRef.current
+    const delay = Math.min(1000 * Math.pow(1.6, attempt), 15000) + Math.random() * 500
+    setReconnectInfo({ active: true, reason, nextAt: Date.now() + delay })
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null
+      reconnectAttemptsRef.current += 1
+      connectWebRTC()
+    }, delay)
+  }, [cameraConnected, networkOnline])
 
   const cleanupDetections = React.useCallback(() => {
     detectionConnectingRef.current = false
@@ -380,15 +403,29 @@ function LiveCameraView({
 
     pc.oniceconnectionstatechange = () => {
       const s = pc.iceConnectionState
-      if (s === "connected" || s === "completed") setConnectionState("connected")
+      if (s === "connected" || s === "completed") {
+        setConnectionState("connected")
+        setReconnectInfo({ active: false })
+      }
       if (s === "disconnected") setConnectionState("connecting")
       if (s === "failed") setConnectionState("failed")
+      if (s === "failed" || s === "disconnected") {
+        cleanupWebRTC()
+        scheduleReconnect("ICE 연결 끊김")
+      }
     }
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState
-      if (s === "connected") setConnectionState("connected")
+      if (s === "connected") {
+        setConnectionState("connected")
+        setReconnectInfo({ active: false })
+      }
       if (s === "connecting") setConnectionState("connecting")
       if (s === "failed") setConnectionState("failed")
+      if (s === "failed") {
+        cleanupWebRTC()
+        scheduleReconnect("ICE 연결 실패")
+      }
     }
 
     pc.addTransceiver("video", { direction: "recvonly" })
@@ -484,6 +521,7 @@ function LiveCameraView({
 
     if (!wsUrl || !roomId) return
     setConnectionState("connecting")
+    reconnectAttemptsRef.current = 0
 
     // 이전 pc가 살아있으면 종료하고 새로 시작
     if (pcRef.current) {
@@ -500,6 +538,7 @@ function LiveCameraView({
 
     ws.onopen = () => {
       setConnectionState("signaling")
+      setReconnectInfo({ active: false })
       send({ type: "join", roomId })
       createPeerConnection()
       send({ type: "ready", roomId })
@@ -532,13 +571,15 @@ function LiveCameraView({
       setHasStream(false)
       setConnectionState(networkOnline ? "connecting" : "offline")
       if (videoRef.current) videoRef.current.srcObject = null
+      scheduleReconnect("시그널 연결 종료")
     }
-  }, [cleanupWebRTC, roomId, wsUrl])
+  }, [cleanupWebRTC, roomId, scheduleReconnect, wsUrl])
 
   React.useEffect(() => {
     if (!networkOnline || !cameraConnected) {
       connectingRef.current = false
       setConnectionState(cameraConnected ? "offline" : "offline")
+      setReconnectInfo({ active: false })
       cleanupWebRTC()
       return
     }
@@ -690,6 +731,11 @@ function LiveCameraView({
                   ? "연결 실패"
                   : "오프라인"}
         </Badge>
+        {reconnectInfo.active && (
+          <Badge className="bg-amber-500/10 text-amber-200 border-amber-500/20">
+            재연결 중 · {reconnectInfo.reason ?? "원인 미상"}
+          </Badge>
+        )}
       </div>
 
       {/* Top right badges */}
@@ -1325,6 +1371,9 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
     const [open, setOpen] = useState(false)
     const [previewSrc, setPreviewSrc] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
+    const normalizeGcsUrl = (url: string) =>
+      url.replace("storage.googleapisapis.com", "storage.googleapis.com")
+    const isPublicGcs = (url: string) => url.includes("storage.googleapis.com")
 
     useEffect(() => {
       if (!open || previewSrc) return
@@ -1333,10 +1382,18 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
       let objectUrl: string | null = null
 
       setLoading(true)
-      fetch(snapshotUrl, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        signal: controller.signal,
-      })
+      const normalizedUrl = normalizeGcsUrl(snapshotUrl)
+      if (isPublicGcs(normalizedUrl)) {
+        setPreviewSrc(normalizedUrl)
+        setLoading(false)
+        return
+      }
+      const headers = normalizedUrl.includes("storage.googleapis.com")
+        ? undefined
+        : accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : undefined
+      fetch(normalizedUrl, { headers, signal: controller.signal })
         .then(async (res) => {
           if (!res.ok) throw new Error("snapshot fetch failed")
           const blob = await res.blob()
@@ -1367,9 +1424,17 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
       const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
       try {
         setLoading(true)
-        const res = await fetch(snapshotUrl, {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        })
+        const normalizedUrl = normalizeGcsUrl(snapshotUrl)
+        if (isPublicGcs(normalizedUrl)) {
+          window.open(normalizedUrl, "_blank", "noopener,noreferrer")
+          return
+        }
+        const headers = normalizedUrl.includes("storage.googleapis.com")
+          ? undefined
+          : accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined
+        const res = await fetch(normalizedUrl, { headers })
         if (!res.ok) throw new Error("snapshot fetch failed")
         const blob = await res.blob()
         const objectUrl = URL.createObjectURL(blob)

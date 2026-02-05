@@ -94,6 +94,7 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
     return null
   }
   if (!token) return null
+  console.log("[FCM] token", token)
 
   const stored = localStorage.getItem(FCM_TOKEN_KEY)
   if (stored !== token) {

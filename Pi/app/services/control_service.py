@@ -46,9 +46,9 @@ class ControlService:
         # Steering calibration (deg)
         self._steer_channel = 0  # change if needed
         self._steer_center = 115.0
-        self._steer_scale = 25.0
-        self._steer_min = 85.0
-        self._steer_max = 145.0
+        self._steer_scale = 40.0
+        self._steer_min = 65.0
+        self._steer_max = 165.0
 
         # Hardware controllers (same I2C bus, different addresses)
         self._motor: Optional[MotorHatController] = None

@@ -39,7 +39,7 @@ def main():
     global encoder
     
     print("=" * 50)
-    print("  Raspberry Pi Motor Controller + Odom")
+    print("  Raspberry Pi Motor Controller + Odom (MQTT)")
     print("=" * 50)
     print(f"  Broker: {settings.MQTT_BROKER}:{settings.MQTT_PORT}")
     print(f"  Robot ID: {settings.ROBOT_ID}")
@@ -95,7 +95,7 @@ def main():
             print("[*] Odometry: DISABLED (encoder not available)")
         print()
         
-        # 메인 루프 (20Hz로 tick 호출)
+        # 메인 루프
         while True:
             control_service.tick()  # Watchdog 체크
             odom_service.tick()     # Odom 계산 및 발행

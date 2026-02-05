@@ -1,237 +1,106 @@
 """
-ROS2 Odometry Publisher Node for Raspberry Pi
-엔코더 데이터를 ROS2 /odom 토픽으로 발행.
+Odometry Service for Raspberry Pi (MQTT Version)
+엔코더 데이터를 읽어 위치(x, y, theta)를 계산하고 MQTT로 발행합니다.
 """
 import math
 import time
-import threading
-from typing import Optional
-
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Quaternion, TransformStamped
-from tf2_ros import TransformBroadcaster
+import json
+import logging
+from typing import Optional, Any, Callable
 
 from app.controllers.encoder_controller import EncoderController
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
 
-def euler_to_quaternion(roll: float, pitch: float, yaw: float) -> Quaternion:
-    """오일러 각도를 쿼터니언으로 변환."""
-    cy = math.cos(yaw * 0.5)
-    sy = math.sin(yaw * 0.5)
-    cp = math.cos(pitch * 0.5)
-    sp = math.sin(pitch * 0.5)
-    cr = math.cos(roll * 0.5)
-    sr = math.sin(roll * 0.5)
+
+class OdomService:
+    """
+    엔코더 및 조향 각도를 기반으로 Odometry를 계산하고
+    MQTT로 발행하는 서비스.
+    """
     
-    q = Quaternion()
-    q.w = cr * cp * cy + sr * sp * sy
-    q.x = sr * cp * cy - cr * sp * sy
-    q.y = cr * sp * cy + sr * cp * sy
-    q.z = cr * cp * sy - sr * sp * cy
-    return q
-
-
-class OdomPublisherNode(Node):
-    """ROS2 Odometry Publisher Node."""
-    
-    def __init__(
-        self,
-        encoder: Optional[EncoderController] = None,
-        steering=None,  # SteeringServo 인스턴스
-        wheelbase: float = 0.16,
-        publish_hz: float = 20.0,
-    ):
-        super().__init__('pi_odom_publisher')
+    def __init__(self):
+        self._encoder: Optional[EncoderController] = None
+        self._steering = None  # SteeringServoController instance
+        self._publisher: Optional[Callable[[str, Any], None]] = None
+        self._topic: str = ""
         
-        self._encoder = encoder
-        self._steering = steering
-        self._wheelbase = wheelbase
+        # 차량 파라미터
+        self._wheelbase = settings.WHEELBASE_M
         
-        # 상태
+        # 상태 변수 (global frame)
         self._x = 0.0
         self._y = 0.0
         self._theta = 0.0
-        self._last_time = self.get_clock().now()
         
-        # QoS 설정 (Jetson과 맞춤)
-        qos = QoSProfile(
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST,
-            depth=10
-        )
+        # 시간 추적
+        self._last_time = time.time()
         
-        # Publisher
-        self._odom_pub = self.create_publisher(Odometry, '/odom', qos)
-        
-        # TF Broadcaster (odom -> base_link)
-        self._tf_broadcaster = TransformBroadcaster(self)
-        
-        # Timer (20Hz)
-        self._timer = self.create_timer(1.0 / publish_hz, self._timer_callback)
-        
-        self.get_logger().info(f'OdomPublisher initialized (Hz={publish_hz})')
-    
-    def set_encoder(self, encoder: EncoderController) -> None:
-        """엔코더 연결."""
-        self._encoder = encoder
-    
-    def set_steering(self, steering) -> None:
-        """조향 컨트롤러 연결."""
-        self._steering = steering
-    
-    def _timer_callback(self) -> None:
-        """타이머 콜백 - odom 계산 및 발행."""
-        now = self.get_clock().now()
-        dt = (now - self._last_time).nanoseconds / 1e9
-        
-        if dt <= 0:
-            return
-        
-        self._last_time = now
-        
-        # 엔코더에서 속도 가져오기
-        if self._encoder:
-            self._encoder.update()
-            v = self._encoder.speed
-        else:
-            v = 0.0
-        
-        # 조향각 가져오기
-        if self._steering:
-            steer_deg = self._steering.last_angle - 115.0  # center 기준
-            steer_rad = math.radians(steer_deg)
-        else:
-            steer_rad = 0.0
-        
-        # Ackermann 모델로 각속도 계산
-        # 작은 조향각에서는 직진으로 간주 (numerical stability)
-        MIN_STEER_ANGLE = 0.01  # 약 0.57도
-        if abs(steer_rad) > MIN_STEER_ANGLE and abs(v) > 0.001:
-            # tan() 값이 0에 가까워지는 것 방지
-            tan_steer = math.tan(steer_rad)
-            if abs(tan_steer) > 0.001:
-                turning_radius = self._wheelbase / tan_steer
-                w = v / turning_radius
-            else:
-                w = 0.0
-        else:
-            w = 0.0
-        
-        # 위치 업데이트
-        self._theta += w * dt
-        self._theta = self._normalize_angle(self._theta)
-        self._x += v * math.cos(self._theta) * dt
-        self._y += v * math.sin(self._theta) * dt
-        
-        # Odometry 메시지 생성
-        odom_msg = Odometry()
-        odom_msg.header.stamp = now.to_msg()
-        odom_msg.header.frame_id = 'odom'
-        odom_msg.child_frame_id = 'base_link'
-        
-        # Position
-        odom_msg.pose.pose.position.x = self._x
-        odom_msg.pose.pose.position.y = self._y
-        odom_msg.pose.pose.position.z = 0.0
-        odom_msg.pose.pose.orientation = euler_to_quaternion(0, 0, self._theta)
-        
-        # Pose Covariance (6x6 matrix: x, y, z, rotation about X, Y, Z)
-        # SLAM에서 필요한 불확실성 정보
-        odom_msg.pose.covariance = [
-            0.01, 0.0,  0.0, 0.0, 0.0, 0.0,  # x
-            0.0,  0.01, 0.0, 0.0, 0.0, 0.0,  # y
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # z (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # rotation about X (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # rotation about Y (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.03  # rotation about Z (yaw)
-        ]
-        
-        # Velocity
-        odom_msg.twist.twist.linear.x = v
-        odom_msg.twist.twist.linear.y = 0.0
-        odom_msg.twist.twist.angular.z = w
-        
-        # Twist Covariance (6x6 matrix)
-        odom_msg.twist.covariance = [
-            0.02, 0.0,  0.0, 0.0, 0.0, 0.0,  # vx
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # vy (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # vz (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # rotation about X (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.0,  # rotation about Y (not used)
-            0.0,  0.0,  0.0, 0.0, 0.0, 0.05  # rotation about Z (angular velocity)
-        ]
-        
-        # Publish
-        self._odom_pub.publish(odom_msg)
+        logger.info("OdomService initialized")
 
-        # 디버깅을 위한 상세 로그
-        steer_deg = 0.0
-        if self._steering:
-            steer_deg = self._steering.last_angle - 115.0
-        
-        self.get_logger().info(
-            f"Odom: x={self._x:.3f}, y={self._y:.3f}, th={math.degrees(self._theta):.1f}°, "
-            f"v={v:.3f}m/s, w={w:.3f}rad/s, steer={steer_deg:.1f}°"
-        )
-        
-        # TF broadcast (odom -> base_link)
-        t = TransformStamped()
-        t.header.stamp = now.to_msg()
-        t.header.frame_id = 'odom'
-        t.child_frame_id = 'base_link'
-        t.transform.translation.x = self._x
-        t.transform.translation.y = self._y
-        t.transform.translation.z = 0.0
-        t.transform.rotation = euler_to_quaternion(0, 0, self._theta)
-        
-        self._tf_broadcaster.sendTransform(t)
-    
-    @staticmethod
-    def _normalize_angle(angle: float) -> float:
-        """각도를 -π ~ π로 정규화."""
-        while angle > math.pi:
-            angle -= 2 * math.pi
-        while angle < -math.pi:
-            angle += 2 * math.pi
-        return angle
-    
+    def set_encoder(self, encoder: EncoderController) -> None:
+        self._encoder = encoder
+
+    def set_steering(self, steering) -> None:
+        self._steering = steering
+
+    def set_publisher(self, publish_func: Callable[[str, Any], None], topic: str) -> None:
+        self._publisher = publish_func
+        self._topic = topic
+
     def reset(self) -> None:
-        """위치 리셋."""
         self._x = 0.0
         self._y = 0.0
         self._theta = 0.0
         if self._encoder:
             self._encoder.reset()
-        self.get_logger().info('Odom reset')
+        logger.info("Odom reset")
+
+    def _normalize_angle(self, angle: float) -> float:
+        """각도를 -pi ~ pi로 정규화"""
+        while angle > math.pi:
+            angle -= 2 * math.pi
+        while angle < -math.pi:
+            angle += 2 * math.pi
+        return angle
+
+    def tick(self) -> None:
+        """주기적 실행: 속도/조향각 MQTT 발행"""
+        current_time = time.time()
+        dt = current_time - self._last_time
+        
+        if dt <= 0:
+            return
+
+        self._last_time = current_time
+        
+        # 1. 속도(v) 가져오기
+        v = 0.0
+        if self._encoder:
+            self._encoder.update()
+            v = self._encoder.speed
+            
+        # 2. 조향각(delta) 가져오기
+        steer_rad = 0.0
+        if self._steering:
+            # SteeringServoController의 last_angle은 degree 단위 (center=115)
+            # 115도가 직진(0도)이라고 가정하고 변환
+            steer_deg = self._steering.last_angle - 115.0
+            steer_rad = math.radians(steer_deg)
+
+        # 3. 데이터 발행 (MQTT)
+        # Jetson의 mqtt_odom_bridge.py가 v_mps, steer_rad를 기대함
+        if self._publisher and self._topic:
+            payload = {
+                "timestamp": current_time,
+                "v_mps": round(v, 4),
+                "steer_rad": round(steer_rad, 4),
+                # 디버깅용 추가 정보
+                "steer_deg": round(math.degrees(steer_rad), 2)
+            }
+            # JSON 직렬화 후 발행
+            self._publisher(self._topic, json.dumps(payload))
 
 
-def main(args=None):
-    """테스트용 메인."""
-    rclpy.init(args=args)
-    
-    # 엔코더 초기화
-    encoder = EncoderController(
-        pin_a=settings.ENCODER_PIN_A,
-        pin_b=settings.ENCODER_PIN_B,
-        ppr=settings.ENCODER_PPR,
-        wheel_diameter_m=settings.WHEEL_DIAMETER_M,
-    )
-    
-    node = OdomPublisherNode(encoder=encoder)
-    
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        encoder.cleanup()
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+odom_service = OdomService()

@@ -59,6 +59,16 @@ public class CarResponse {
                     status.isOnline(),
                     status.getUpdatedAt());
         }
+
+        public static StatusResponse from(CarStatus status, boolean isOnline) {
+            return new StatusResponse(
+                    status.getX(),
+                    status.getY(),
+                    status.getHeading(),
+                    status.getMode(),
+                    isOnline,
+                    status.getUpdatedAt());
+        }
     }
 
     /**

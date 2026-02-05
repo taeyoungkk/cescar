@@ -17,6 +17,7 @@ import com.ssafy.backend.domain.history.application.DetectionHistoryService;
 import com.ssafy.backend.domain.map.application.SlamMapService;
 import com.ssafy.backend.domain.notification.application.FcmService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -42,6 +43,7 @@ public class MqttInboundService {
     private static final String EMQX_API_URL = "http://localhost:18083/api/v5/clients/";
     private static final long CAR_STATUS_DB_INTERVAL_MS = 2_000L;
     private static final double CAR_STATUS_MOVE_THRESHOLD = 0.5d;
+    private static final long MILLIS_PER_SECOND = 1_000L;
     private final ObjectMapper objectMapper;
     private final FcmService fcmService;
     private final CarRepository carRepository;
@@ -58,6 +60,10 @@ public class MqttInboundService {
     private final Map<String, CarStatusMqttRequest> carStatusCache = new ConcurrentHashMap<>();
     private final Map<String, CarStatusSnapshot> carStatusSnapshots = new ConcurrentHashMap<>();
     private final Set<String> mapResultProcessed = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> statusLastSeen = new ConcurrentHashMap<>();
+
+    @Value("${status.ttl-seconds:60}")
+    private long statusTtlSeconds;
 
     @ServiceActivator(inputChannel = "mqttInboundChannel")
     public void handleDeviceStatus(Message<byte[]> message) {
@@ -120,6 +126,7 @@ public class MqttInboundService {
         System.out.println("[STATUS] " + robotId + " - battery=" + battery + "%, temp=" + status.getTemperature());
         // 최신 상태 캐시
         statusCache.put(robotId, status);
+        statusLastSeen.put(robotId, System.currentTimeMillis());
     }
 
     private void handleRobotDetection(String robotId, DetectionRequest detect, String payload, String topic) {
@@ -332,6 +339,19 @@ public class MqttInboundService {
 
     public DetectionRequest getLatestDetection(String deviceId) {
         return detectionCache.get(deviceId);
+    }
+
+    public boolean isStatusOnline(String deviceId) {
+        if (deviceId == null || deviceId.isBlank()) {
+            return false;
+        }
+        Long lastSeen = statusLastSeen.get(deviceId);
+        if (lastSeen == null) {
+            return false;
+        }
+        long now = System.currentTimeMillis();
+        long ttlMillis = Math.max(0L, statusTtlSeconds) * MILLIS_PER_SECOND;
+        return (now - lastSeen) <= ttlMillis;
     }
 
     // (참고) status 전용 처리 메서드: 외부에서 직접 호출하는 경우를 대비

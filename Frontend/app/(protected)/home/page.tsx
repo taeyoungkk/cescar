@@ -144,6 +144,12 @@ function RobotStatusSection({
 
   const modeLabels: Record<CarMode, string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
   
+  const parseBackendDate = (value: string) => {
+    const normalized = value.includes("T") ? value : value.replace(" ", "T")
+    const hasTimezone = /Z$|[+-]\d{2}:\d{2}$/.test(normalized)
+    return new Date(hasTimezone ? normalized : `${normalized}+09:00`)
+  }
+
   const formatKstDateTime = (date: Date) => {
     const parts = new Intl.DateTimeFormat("ko-KR", {
       timeZone: "Asia/Seoul",
@@ -161,7 +167,8 @@ function RobotStatusSection({
     }
   }
 
-  const lastSeenParts = formatKstDateTime(new Date(status.updatedAt))
+  const lastSeenDate = parseBackendDate(status.updatedAt)
+  const lastSeenParts = formatKstDateTime(lastSeenDate)
   const lastSeenLabel = (
     <div className="flex flex-col leading-tight">
       <span className="text-xs text-muted-foreground font-normal">{lastSeenParts.date}</span>

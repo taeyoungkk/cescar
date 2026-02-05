@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import {
   Wifi,
   WifiOff,
@@ -36,14 +37,14 @@ function applyDriveCurve(v: number, w: number) {
   if (vAdj === 0 && wAdj !== 0) {
     vAdj = 0.4
   }
-  if (vAdj !== 0 && wAdj !== 0) {
-    vAdj = Math.sign(vAdj) * Math.max(Math.abs(vAdj) * 0.75, 0.5)
-    wAdj = Math.sign(wAdj) * Math.min(1, Math.abs(wAdj) * 1.6)
-  }
-  const turn = Math.min(1, Math.abs(w))
+  const turn = Math.min(1, Math.abs(wAdj))
   const forwardSign = vAdj < -0.001 ? -1 : 1
-  const vNorm = Math.max(Math.abs(vAdj), TURN_MIN_FORWARD * turn) * forwardSign
-  const wNorm = Math.max(-1, Math.min(1, wAdj * (1 + TURN_BOOST * (1 - Math.abs(vAdj)))))
+  let vAbs = Math.abs(vAdj)
+  if (turn > 0) {
+    vAbs = Math.max(vAbs, 0.4)
+  }
+  const vNorm = vAbs * forwardSign
+  const wNorm = Math.max(-1, Math.min(1, wAdj))
   return { v: vNorm * DRIVE_MAX_V, w: wNorm * DRIVE_MAX_W }
 }
 
@@ -62,6 +63,7 @@ interface LiveCameraViewProps {
   driveVector: { v: number; w: number }
   onDriveVector: (v: number, w: number) => void
   onDriveStop: () => void
+  onDisplayVector: (v: number, w: number) => void
   wsUrl: string
   detectionWsUrl: string
   roomId: string
@@ -80,6 +82,7 @@ function LiveCameraView({
   driveVector,
   onDriveVector,
   onDriveStop,
+  onDisplayVector,
   wsUrl,
   detectionWsUrl,
   roomId,
@@ -745,10 +748,12 @@ function LiveCameraView({
             </div>
               <JoystickPad
                 disabled={manualDisabled}
-                vector={driveVector}
+                vector={{ v: driveVector.v, w: driveVector.w }}
                 onMove={(v, w) => {
-                const curved = applyDriveCurve(v, w)
-                onDriveVector(curved.v, curved.w)
+                  onDisplayVector(v, w)
+                  const vSnap = Math.abs(v) < 0.05 ? 0 : v
+                  const curved = applyDriveCurve(-vSnap, -w)
+                  onDriveVector(curved.v, curved.w)
                 }}
                 onStop={onDriveStop}
                 size={96}
@@ -767,6 +772,7 @@ interface ControlPanelProps {
   onChangeMode: (mode: "AUTO" | "MANUAL" | "STOP") => void
   onDriveVector: (v: number, w: number) => void
   onDriveStop: () => void
+  onDisplayVector: (v: number, w: number) => void
   manualDisabled: boolean
   driveVector: { v: number; w: number }
   onStartMission: () => void
@@ -806,6 +812,8 @@ function JoystickPad({
   const activeRef = React.useRef(false)
   const pointerIdRef = React.useRef<number | null>(null)
   const pointerTypeRef = React.useRef<string | null>(null)
+  const lastVectorRef = React.useRef<{ v: number; w: number }>({ v: 0, w: 0 })
+  const holdTimerRef = React.useRef<number | null>(null)
 
   const resetKnob = () => {
     if (knobRef.current) {
@@ -829,19 +837,36 @@ function JoystickPad({
     const y = dy * clamped
     knob.style.transform = `translate(${x}px, ${y}px)`
 
-    const nx = x / maxR
-    const ny = y / maxR
-    const deadZone = 0.08
-    const applyDeadZone = (value: number) => {
-      const abs = Math.abs(value)
-      if (abs <= deadZone) return 0
-      const scaled = (abs - deadZone) / (1 - deadZone)
-      return Math.sign(value) * scaled
+    const radial = Math.min(1, dist / maxR)
+    const deadZone = 0.1
+    if (radial <= deadZone) {
+      if (!activeRef.current) {
+        lastVectorRef.current = { v: 0, w: 0 }
+        onMove(0, 0)
+      }
+      return
     }
 
-    const v = applyDeadZone(-ny)
-    const invertTouchX = pointerTypeRef.current === "touch"
-    const w = applyDeadZone(invertTouchX ? nx : -nx)
+    const scaledR = (radial - deadZone) / (1 - deadZone)
+    const angle = Math.atan2(y, x)
+    let v = Math.sin(angle) * scaledR
+    let w = Math.cos(angle) * scaledR
+
+    if (pointerTypeRef.current === "touch") {
+      const prev = lastVectorRef.current
+      const dv = v - prev.v
+      const dw = w - prev.w
+      if (Math.abs(dv) < 0.01 && Math.abs(dw) < 0.01) {
+        v = prev.v
+        w = prev.w
+      } else {
+        const alpha = 0.25
+        v = prev.v + dv * alpha
+        w = prev.w + dw * alpha
+      }
+    }
+
+    lastVectorRef.current = { v, w }
     onMove(v, w)
   }
 
@@ -849,6 +874,10 @@ function JoystickPad({
     if (!activeRef.current) return
     activeRef.current = false
     pointerIdRef.current = null
+    if (holdTimerRef.current != null) {
+      window.clearInterval(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
     resetKnob()
     onStop()
   }, [onStop])
@@ -902,6 +931,13 @@ function JoystickPad({
         pointerTypeRef.current = e.pointerType
         e.currentTarget.setPointerCapture?.(e.pointerId)
         updateFromEvent(e.clientX, e.clientY)
+        if (holdTimerRef.current == null) {
+          holdTimerRef.current = window.setInterval(() => {
+            if (!activeRef.current) return
+            const { v, w } = lastVectorRef.current
+            onMove(v, w)
+          }, 80)
+        }
       }}
       onPointerMove={(e) => {
         if (!activeRef.current) return
@@ -941,6 +977,7 @@ function ControlPanel({
   onChangeMode,
   onDriveVector,
   onDriveStop,
+  onDisplayVector,
   manualDisabled,
   driveVector,
   onStartMission,
@@ -1013,9 +1050,11 @@ function ControlPanel({
             <div className="flex justify-center">
               <JoystickPad
                 disabled={manualDisabled}
-                vector={driveVector}
+                vector={{ v: driveVector.v, w: driveVector.w }}
                 onMove={(v, w) => {
-                  const curved = applyDriveCurve(v, w)
+                  onDisplayVector(v, w)
+                  const vSnap = Math.abs(v) < 0.05 ? 0 : v
+                  const curved = applyDriveCurve(-vSnap, -w)
                   onDriveVector(curved.v, curved.w)
                 }}
                 onStop={onDriveStop}
@@ -1479,11 +1518,35 @@ export default function CameraPage() {
   const lastDriveToastRef = useRef<number>(0)
 
   const driveTimerRef = useRef<number | null>(null)
+  const holdTimerRef = useRef<number | null>(null)
+  const holdWRef = useRef(0)
   const lastDriveSentRef = useRef(0)
+  const lastInputRef = useRef<number | null>(null)
   const driveCommandRef = useRef<{ v: number; w: number } | null>(null)
   const driveTargetRef = useRef<{ v: number; w: number } | null>(null)
   const driveCurrentRef = useRef<{ v: number; w: number }>({ v: 0, w: 0 })
   const [driveVector, setDriveVector] = useState<{ v: number; w: number }>({ v: 0, w: 0 })
+
+  const setDisplayVector = React.useCallback((v: number, w: number) => {
+    const clamp = (value: number) => Math.min(1, Math.max(-1, value))
+    setDriveVector({ v: clamp(v), w: clamp(w) })
+  }, [])
+
+  const clearHold = React.useCallback(() => {
+    if (holdTimerRef.current != null) {
+      window.clearInterval(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    holdWRef.current = 0
+  }, [])
+
+  const markInput = React.useCallback((v: number, w: number) => {
+    if (v !== 0 || w !== 0) {
+      lastInputRef.current = Date.now()
+    } else {
+      lastInputRef.current = null
+    }
+  }, [])
 
   React.useEffect(() => {
     let mounted = true
@@ -1899,45 +1962,60 @@ export default function CameraPage() {
 
   const handleDriveVector = React.useCallback((v: number, w: number) => {
     if (driveMode !== "MANUAL") return
-    const clamp = (value: number) => Math.min(1, Math.max(-1, value))
-    setDriveVector({
-      v: clamp(DRIVE_MAX_V ? v / DRIVE_MAX_V : 0),
-      w: clamp(DRIVE_MAX_W ? w / DRIVE_MAX_W : 0),
-    })
-    driveTargetRef.current = { v, w }
+    clearHold()
+    const wAdjusted = Math.abs(w) < 0.03 ? 0 : w
+    markInput(v, wAdjusted)
+    driveTargetRef.current = { v, w: wAdjusted }
     if (driveTimerRef.current == null) {
       driveTimerRef.current = window.setInterval(() => {
         stepDriveCommand()
       }, 40)
     }
     stepDriveCommand()
-  }, [driveMode, stepDriveCommand])
+  }, [clearHold, driveMode, markInput, stepDriveCommand])
 
   const handleDriveStop = React.useCallback(() => {
-    const lastW = driveCommandRef.current?.w ?? driveCurrentRef.current.w
-    driveCommandRef.current = { v: 0, w: lastW }
+    const holdW = 0
+    driveCommandRef.current = { v: 0, w: holdW }
     driveTargetRef.current = null
-    driveCurrentRef.current = { v: 0, w: lastW }
+    driveCurrentRef.current = { v: 0, w: holdW }
     if (driveTimerRef.current != null) {
       window.clearInterval(driveTimerRef.current)
       driveTimerRef.current = null
     }
-    setDriveVector({ v: 0, w: 0 })
-    sendDriveVector(0, lastW).catch(() => { })
-  }, [sendDriveVector])
+    markInput(0, 0)
+    setDisplayVector(0, 0)
+    sendDriveVector(0, holdW).catch(() => { })
+    clearHold()
+  }, [clearHold, markInput, sendDriveVector])
 
   React.useEffect(() => {
     return () => {
       if (driveTimerRef.current != null) {
         window.clearInterval(driveTimerRef.current)
       }
+      if (holdTimerRef.current != null) {
+        window.clearInterval(holdTimerRef.current)
+      }
     }
   }, [])
 
   React.useEffect(() => {
     if (driveMode !== "MANUAL") {
-      setDriveVector({ v: 0, w: 0 })
+      clearHold()
+      setDisplayVector(0, 0)
     }
+  }, [clearHold, driveMode, setDisplayVector])
+
+  React.useEffect(() => {
+    if (driveMode !== "MANUAL") return
+    const timer = window.setInterval(() => {
+      const lastInputAt = lastInputRef.current
+      if (lastInputAt && Date.now() - lastInputAt < 150) return
+      // 입력이 없을 때는 여기서 0,0을 보내지 않고,
+      // pointerup/keyup에서만 정지 명령을 보냄.
+    }, 200)
+    return () => window.clearInterval(timer)
   }, [driveMode])
 
   React.useEffect(() => {
@@ -1981,16 +2059,18 @@ export default function CameraPage() {
 
       let v = 0
       let w = 0
-      if (up && !down) v = 1
-      else if (down && !up) v = -1
+      if (up && !down) v = -1
+      else if (down && !up) v = 1
 
-      if (left && !right) w = 1
-      else if (right && !left) w = -1
+      if (left && !right) w = -1
+      else if (right && !left) w = 1
 
       if (v === 0 && w === 0) {
         handleDriveStop()
       } else {
-        const curved = applyDriveCurve(v, w)
+        setDisplayVector(-v, -w)
+        const curved = applyDriveCurve(-v, -w)
+        markInput(curved.v, curved.w)
         handleDriveVector(curved.v, curved.w)
       }
     }
@@ -2012,14 +2092,28 @@ export default function CameraPage() {
       computeVector()
     }
 
+    const handleBlur = () => {
+      if (pressedKeys.size === 0) return
+      pressedKeys.clear()
+      handleDriveStop()
+    }
+
+    const holdTimer = window.setInterval(() => {
+      if (pressedKeys.size === 0) return
+      computeVector()
+    }, 100)
+
     window.addEventListener("keydown", handleKeyDown)
     window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("blur", handleBlur)
 
     return () => {
+      window.clearInterval(holdTimer)
       window.removeEventListener("keydown", handleKeyDown)
       window.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("blur", handleBlur)
     }
-  }, [driveMode, networkOnline, selectedCarId, handleDriveStop, handleDriveVector])
+  }, [driveMode, networkOnline, selectedCarId, handleDriveStop, handleDriveVector, markInput, setDisplayVector])
 
   const carSelectCard = (
     <Card className="bg-card border-border">
@@ -2098,6 +2192,29 @@ export default function CameraPage() {
     />
   )
 
+  if (!carsLoading && cars.length === 0) {
+    return (
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="max-w-3xl mx-auto space-y-3">
+          <ErrorAlert title="차량 목록 불러오기 실패" message={carsError} />
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base font-medium">등록된 차량이 없습니다</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                차량을 등록하면 실시간 카메라와 수동 제어를 사용할 수 있습니다.
+              </p>
+              <Link href="/home">
+                <Button size="sm">차량 등록하러 가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="p-3 sm:p-4 lg:p-6">
       <div className="max-w-[1920px] mx-auto h-full">
@@ -2128,6 +2245,7 @@ export default function CameraPage() {
                   driveVector={driveVector}
                   onDriveVector={handleDriveVector}
                   onDriveStop={handleDriveStop}
+                  onDisplayVector={setDisplayVector}
                   wsUrl={signalingUrl || "ws://I14B201.p.ssafy.io/ws/webrtc"}
                   detectionWsUrl={detectionWsUrl}
                   roomId={roomId}
@@ -2154,6 +2272,7 @@ export default function CameraPage() {
                 onChangeMode={handleChangeMode}
                 onDriveVector={handleDriveVector}
                 onDriveStop={handleDriveStop}
+                onDisplayVector={setDisplayVector}
                 onStartMission={handleStartMission}
                 onStopMission={handleStopMission}
                 manualDisabled={!networkOnline || carStatus.isLoading}
@@ -2216,5 +2335,3 @@ export default function CameraPage() {
     </div>
   )
 }
-
-

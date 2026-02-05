@@ -22,8 +22,10 @@ if platform.system() == 'Linux':
     except ImportError:
         logging.warning("Linux 환경이지만 gi 또는 관련 모듈을 찾을 수 없어 WebRTC 서비스를 로드하지 못했습니다.")
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(levelname)s:     %(message)s')
+from app.core.logger import setup_logging
+
+# 전역 로깅 설정 적용
+setup_logging()
 logger = logging.getLogger(__name__)
 
 async def system_status_publisher():

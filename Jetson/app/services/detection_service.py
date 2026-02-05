@@ -2,8 +2,6 @@ import logging
 import json
 from datetime import datetime
 import os
-import time
-import threading
 import cv2
 from app.services.mqtt_service import mqtt_service
 from app.services.storage_service import storage_service
@@ -19,11 +17,6 @@ except ImportError:
     ffmpeg = None
     logging.warning("ffmpeg-python 모듈이 없습니다. 영상 변환이 스킵됩니다. 'pip install ffmpeg-python'으로 설치하세요.")
 
-logging.basicConfig(
-    level=logging.INFO, # INFO 레벨 이상의 모든 로그를 표시 (DEBUG < INFO < WARNING < ERROR)
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
 logger = logging.getLogger(__name__)
 
 class DetectionService:
@@ -122,8 +115,14 @@ class DetectionService:
     
     def _handle_detection_event(self, frame, detections: list[dict]):
         """탐지 이벤트 처리: 스크린샷, 녹화, MQTT 발행 (백그라운드에서 실행)"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
+        if self.is_recording:
+            logger.warning("⚠️ 녹화 중이므로 이벤트를 처리하지 않습니다.")
+            return
+
+        self.is_recording = True
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # 가장 높은 신뢰도의 탐지 결과 사용
         top_detection = max(detections, key=lambda x: x['confidence'])
 
@@ -133,6 +132,7 @@ class DetectionService:
         logger.info(f"📸 [SCREENSHOT] Saved: {screenshot_path}")
         
         # 녹화+업로드+MQTT발행은 별도 스레드에서 처리 (detection 루프 blocking 방지)
+
         thread = threading.Thread(
             target=self._background_recording_task,
             args=(timestamp, screenshot_path, top_detection, len(detections)),
@@ -184,7 +184,6 @@ class DetectionService:
         logger.info(f"🎥 [RECORDING] 5초간 시작됨: {file_path}")
         
         frames_to_record = int(fps * 5)  # 5초 동안 필요한 총 프레임 수
-        self.is_recording = True
         
         try:
             for _ in range(frames_to_record):
@@ -211,8 +210,8 @@ class DetectionService:
         except Exception as e:
             logger.error(f"🔥 녹화 중 에러: {e}")
         finally:
-            self.is_recording = False
             video_url = self._stop_recording()
+            self.is_recording = False
         
         return video_url
 
@@ -235,34 +234,42 @@ class DetectionService:
                 video_url = storage_service.upload_file(raw_path)
                 os.remove(raw_path)
             else:
-                web_path = raw_path.replace(".mp4", "_web.mp4") # 변환될 파일 경로
-                try:
-                    logger.info(f"🔄 웹 재생용으로 변환 시작 (H.264): {raw_path}")
-                    
-                    # FFmpeg를 이용한 H.264 변환 (소프트웨어 인코딩)
-                    (
-                        ffmpeg
-                        .input(raw_path)
-                        .output(web_path, vcodec='libx264', crf=28, preset='ultrafast')
-                        .overwrite_output()
-                        .run(capture_stdout=True, capture_stderr=True)
-                    )
-
-                    # 변환된 파일이 정상적이라면 변환된 파일을 업로드
-                    if os.path.exists(web_path) and os.path.getsize(web_path) > 0:
-                        logger.info(f"✅ 변환 완료. 업로드 시도: {web_path}")
-                        video_url = storage_service.upload_file(web_path)
-                        
-                        # 업로드 후 임시 파일들 삭제 (로컬 용량 관리)
-                        os.remove(raw_path)
-                        os.remove(web_path)
-                    else:
-                        logger.error("❌ 변환된 파일이 생성되지 않았습니다.")
+                web_path = raw_path.replace(".mp4", "_web.mp4")
+                retry_count = 3
                 
-                except Exception as e:
-                    logger.error(f"❌ FFmpeg 변환 에러: {e}")
-                    # 변환 실패 시 원본 업로드 시도
-                    video_url = storage_service.upload_file(raw_path)
+                for attempt in range(retry_count + 1):
+                    try:
+                        logger.info(f"🔄 웹 재생용으로 변환 시작 (H.264), 시도 {attempt+1}/{retry_count+1}: {raw_path}")
+                        
+                        # FFmpeg를 이용한 H.264 변환
+                        (
+                            ffmpeg
+                            .input(raw_path)
+                            .output(web_path, vcodec='libx264', crf=28, preset='ultrafast')
+                            .overwrite_output()
+                            .run(capture_stdout=True, capture_stderr=True)
+                        )
+
+                        # 변환된 파일 확인 및 업로드
+                        if os.path.exists(web_path) and os.path.getsize(web_path) > 0:
+                            logger.info(f"✅ 변환 완료. 업로드 시도: {web_path}")
+                            video_url = storage_service.upload_file(web_path)
+                            
+                            # 업로드 성공 시 원본 및 변환 파일 삭제 후 루프 종료
+                            if video_url:
+                                os.remove(raw_path)
+                                os.remove(web_path)
+                                break
+                        else:
+                            logger.error("변환된 파일이 생성되지 않았거나 비어있습니다.")
+
+                    except Exception as e:
+                        logger.error(f"❌ 시도 {attempt+1} 실패: {e}")
+                        if attempt < retry_count:
+                            logger.info("1초 후 재시도합니다...")
+                            time.sleep(1)
+                        else:
+                            logger.error("❌ 모든 재시도 실패. 원본 업로드를 건너뜁니다.")
 
         self.current_video_path = None
         return video_url

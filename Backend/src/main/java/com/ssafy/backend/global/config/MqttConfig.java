@@ -69,7 +69,15 @@ public class MqttConfig {
         String clientId = "SpringIn_" + System.currentTimeMillis();
         mqttClient = new MqttClient(brokerUrl, clientId, new MemoryPersistence());
 
-        mqttClient.setCallback(new MqttCallback() {
+        mqttClient.setCallback(new MqttCallbackExtended() {
+            @Override
+            public void connectComplete(boolean reconnect, String serverURI) {
+                if (reconnect) {
+                    log.info("[MQTT] Reconnected to {}", serverURI);
+                }
+                subscribeInboundIfConfigured();
+            }
+
             @Override
             public void connectionLost(Throwable cause) {
                 log.error("[MQTT] Connection Lost: {}", cause.getMessage());
@@ -107,9 +115,7 @@ public class MqttConfig {
 
         mqttClient.connect(getMqttConnectOptions());
 
-        if (inboundTopic != null && !inboundTopic.isBlank()) {
-            mqttClient.subscribe(inboundTopic, 0);
-        }
+        subscribeInboundIfConfigured();
         log.info("[MQTT] Client Started. ID: {}, Subscribed to: {}", clientId, inboundTopic);
     }
 
@@ -151,6 +157,18 @@ public class MqttConfig {
             }
         } catch (MqttException e) {
             log.error("[MQTT] Cleanup Failed", e);
+        }
+    }
+
+    private void subscribeInboundIfConfigured() {
+        if (inboundTopic == null || inboundTopic.isBlank() || mqttClient == null) {
+            return;
+        }
+        try {
+            mqttClient.subscribe(inboundTopic, 0);
+            log.info("[MQTT] Subscribed to: {}", inboundTopic);
+        } catch (MqttException e) {
+            log.error("[MQTT] Subscribe Failed: {}", inboundTopic, e);
         }
     }
 }

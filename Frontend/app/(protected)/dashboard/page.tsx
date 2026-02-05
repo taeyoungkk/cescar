@@ -286,9 +286,10 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
   const [videoSrc, setVideoSrc] = useState<string | null>(null)
   const [videoLoading, setVideoLoading] = useState(false)
   const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+  const normalizeGcsUrl = (url: string) => url.replace("storage.googleapisapis.com", "storage.googleapis.com")
   const toAbsUrl = (url?: string | null) => {
     if (!url) return null
-    if (url.startsWith("http://") || url.startsWith("https://")) return url
+    if (url.startsWith("http://") || url.startsWith("https://")) return normalizeGcsUrl(url)
     return `${BASE_URL}${url}`
   }
 
@@ -315,10 +316,19 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
     let objectUrl: string | null = null
 
     setSnapshotLoading(true)
-    fetch(snapshotUrl, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      signal: controller.signal,
-    })
+    if (snapshotUrl?.includes("storage.googleapis.com")) {
+      setSnapshotSrc(snapshotUrl)
+      setSnapshotLoading(false)
+      return () => {
+        controller.abort()
+      }
+    }
+    const headers = snapshotUrl?.includes("storage.googleapis.com")
+      ? undefined
+      : accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined
+    fetch(snapshotUrl, { headers, signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error("snapshot fetch failed")
         const blob = await res.blob()
@@ -354,10 +364,19 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
     let objectUrl: string | null = null
 
     setVideoLoading(true)
-    fetch(videoUrl, {
-      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-      signal: controller.signal,
-    })
+    if (videoUrl?.includes("storage.googleapis.com")) {
+      setVideoSrc(videoUrl)
+      setVideoLoading(false)
+      return () => {
+        controller.abort()
+      }
+    }
+    const headers = videoUrl?.includes("storage.googleapis.com")
+      ? undefined
+      : accessToken
+        ? { Authorization: `Bearer ${accessToken}` }
+        : undefined
+    fetch(videoUrl, { headers, signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error("video fetch failed")
         const blob = await res.blob()

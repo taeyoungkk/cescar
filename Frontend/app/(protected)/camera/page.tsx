@@ -1325,6 +1325,9 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
     const [open, setOpen] = useState(false)
     const [previewSrc, setPreviewSrc] = useState<string | null>(null)
     const [loading, setLoading] = useState(false)
+    const normalizeGcsUrl = (url: string) =>
+      url.replace("storage.googleapisapis.com", "storage.googleapis.com")
+    const isPublicGcs = (url: string) => url.includes("storage.googleapis.com")
 
     useEffect(() => {
       if (!open || previewSrc) return
@@ -1333,10 +1336,18 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
       let objectUrl: string | null = null
 
       setLoading(true)
-      fetch(snapshotUrl, {
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        signal: controller.signal,
-      })
+      const normalizedUrl = normalizeGcsUrl(snapshotUrl)
+      if (isPublicGcs(normalizedUrl)) {
+        setPreviewSrc(normalizedUrl)
+        setLoading(false)
+        return
+      }
+      const headers = normalizedUrl.includes("storage.googleapis.com")
+        ? undefined
+        : accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : undefined
+      fetch(normalizedUrl, { headers, signal: controller.signal })
         .then(async (res) => {
           if (!res.ok) throw new Error("snapshot fetch failed")
           const blob = await res.blob()
@@ -1367,9 +1378,17 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
       const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
       try {
         setLoading(true)
-        const res = await fetch(snapshotUrl, {
-          headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
-        })
+        const normalizedUrl = normalizeGcsUrl(snapshotUrl)
+        if (isPublicGcs(normalizedUrl)) {
+          window.open(normalizedUrl, "_blank", "noopener,noreferrer")
+          return
+        }
+        const headers = normalizedUrl.includes("storage.googleapis.com")
+          ? undefined
+          : accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined
+        const res = await fetch(normalizedUrl, { headers })
         if (!res.ok) throw new Error("snapshot fetch failed")
         const blob = await res.blob()
         const objectUrl = URL.createObjectURL(blob)

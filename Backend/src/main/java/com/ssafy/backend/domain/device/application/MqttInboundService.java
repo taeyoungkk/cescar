@@ -240,13 +240,15 @@ public class MqttInboundService {
         }
 
         String requestId = result.getRequestId();
+        if (requestId == null || requestId.isBlank()) {
+            System.out.println("[MQTT][map_result] missing requestId");
+            return;
+        }
         boolean reserved = false;
-        if (requestId != null && !requestId.isBlank()) {
-            reserved = mapResultProcessed.add(requestId);
-            if (!reserved) {
-                System.out.println("[MQTT][map_result] duplicate requestId=" + requestId);
-                return;
-            }
+        reserved = mapResultProcessed.add(requestId);
+        if (!reserved) {
+            System.out.println("[MQTT][map_result] duplicate requestId=" + requestId);
+            return;
         }
 
         try {
@@ -255,13 +257,17 @@ public class MqttInboundService {
                         + " status=" + result.getStatus()
                         + " code=" + result.getErrorCode()
                         + " message=" + result.getErrorMessage());
+                slamMapService.consumeCachedMapName(requestId);
                 if (reserved) {
                     mapResultProcessed.remove(requestId);
                 }
                 return;
             }
 
-            if (result.getName() == null || result.getName().isBlank()
+            String cachedName = slamMapService.consumeCachedMapName(requestId);
+
+            if ((cachedName == null || cachedName.isBlank())
+                    && (result.getName() == null || result.getName().isBlank())
                     || result.getImageUrl() == null || result.getImageUrl().isBlank()
                     || result.getWidth() == null || result.getHeight() == null
                     || result.getResolution() == null
@@ -273,7 +279,7 @@ public class MqttInboundService {
                 return;
             }
 
-            boolean saved = slamMapService.saveMapFromResult(robotId, result);
+            boolean saved = slamMapService.saveMapFromResult(robotId, result, cachedName);
             if (!saved) {
                 System.out.println("[MQTT][map_result] car not found for deviceId=" + robotId);
                 if (reserved) {

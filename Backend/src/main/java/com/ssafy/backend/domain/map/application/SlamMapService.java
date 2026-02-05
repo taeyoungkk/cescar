@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -38,6 +39,8 @@ public class SlamMapService {
 
     @Value("${storage.signed-url-ttl}")
     private Duration signedUrlTtl;
+
+    private final Map<String, String> mapRequestNameCache = new ConcurrentHashMap<>();
 
     @Transactional
     public SlamMapResponse.MapDetailResponse createMap(Long carId, Long memberId, SlamMapRequest.CreateRequest request) {
@@ -74,6 +77,8 @@ public class SlamMapService {
             name = "map_" + timestamp;
         }
 
+        mapRequestNameCache.put(requestId, name);
+
         try {
             Map<String, String> payload = new HashMap<>();
             payload.put("requestId", requestId);
@@ -89,8 +94,15 @@ public class SlamMapService {
         return new SlamMapResponse.MapGenerateResponse(requestId, "queued");
     }
 
+    public String consumeCachedMapName(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
+            return null;
+        }
+        return mapRequestNameCache.remove(requestId);
+    }
+
     @Transactional
-    public boolean saveMapFromResult(String deviceId, com.ssafy.backend.domain.device.dto.MapResultRequest result) {
+    public boolean saveMapFromResult(String deviceId, com.ssafy.backend.domain.device.dto.MapResultRequest result, String cachedName) {
         Car car = carRepository.findByDeviceId(deviceId).orElse(null);
         if (car == null) {
             return false;
@@ -100,9 +112,11 @@ public class SlamMapService {
         }
         Long ownerId = car.getOwner().getId();
 
+        String effectiveName = (cachedName != null && !cachedName.isBlank()) ? cachedName : result.getName();
+
         SlamMap map = SlamMap.create(
                 car,
-                result.getName(),
+                effectiveName,
                 result.getImageUrl(),
                 result.getWidth(),
                 result.getHeight(),

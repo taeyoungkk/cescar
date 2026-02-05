@@ -1914,15 +1914,16 @@ export default function CameraPage() {
   }, [driveMode, stepDriveCommand])
 
   const handleDriveStop = React.useCallback(() => {
-    driveCommandRef.current = null
+    const lastW = driveCommandRef.current?.w ?? driveCurrentRef.current.w
+    driveCommandRef.current = { v: 0, w: lastW }
     driveTargetRef.current = null
-    driveCurrentRef.current = { v: 0, w: 0 }
+    driveCurrentRef.current = { v: 0, w: lastW }
     if (driveTimerRef.current != null) {
       window.clearInterval(driveTimerRef.current)
       driveTimerRef.current = null
     }
     setDriveVector({ v: 0, w: 0 })
-    sendDriveVector(0, 0).catch(() => { })
+    sendDriveVector(0, lastW).catch(() => { })
   }, [sendDriveVector])
 
   React.useEffect(() => {
@@ -2103,7 +2104,7 @@ export default function CameraPage() {
         <div className="mb-4">
           <div>
             <h1 className="text-2xl font-semibold text-foreground">실시간 카메라</h1>
-            <p className="text-sm text-muted-foreground mt-1">로봇 카메라 영상을 실시간으로 확인하세요</p>
+            <p className="text-sm text-muted-foreground mt-1">차량 카메라 영상을 실시간으로 확인하세요</p>
           </div>
         </div>
 

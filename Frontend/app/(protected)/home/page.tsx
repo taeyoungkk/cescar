@@ -174,7 +174,7 @@ function RobotStatusSection({
       <div className="flex gap-2 overflow-x-auto pb-1 lg:hidden">
         <div className="min-w-[140px]">
           <StatusCard
-            title="로봇 연결 상태"
+            title="차량 연결 상태"
             value={status.isOnline ? "온라인" : "오프라인"}
             icon={status.isOnline ? Wifi : WifiOff}
             variant={status.isOnline ? "success" : "danger"}
@@ -203,18 +203,18 @@ function RobotStatusSection({
 
       <div className="hidden lg:grid grid-cols-4 gap-4">
         <StatusCard
-          title="로봇 연결 상태"
+          title="차량 연결 상태"
           value={status.isOnline ? "온라인" : "오프라인"}
           icon={status.isOnline ? Wifi : WifiOff}
           variant={status.isOnline ? "success" : "danger"}
           subtitle={status.isOnline ? "정상 연결" : "연결 끊김"}
         />
         <StatusCard
-          title="로봇 마지막 수신"
+          title="차량 마지막 수신"
           value={lastSeenLabel}
           icon={Clock}
           variant="default"
-          subtitle="로봇 상태 마지막 수신 시각"
+          subtitle="차량 상태 마지막 수신 시각"
         />
         <StatusCard
           title="현재 모드"
@@ -400,7 +400,7 @@ function MapVisualization({ status, progress = 0 }: { status: MapStatus; progres
           <div className="absolute top-3 right-3 flex items-center gap-2">
             <div className="flex items-center gap-1.5 bg-black/60 rounded px-2 py-1">
               <div className="h-2 w-2 rounded-full bg-emerald-400" />
-              <span className="text-xs text-white/80">로봇</span>
+              <span className="text-xs text-white/80">차량</span>
             </div>
             <div className="flex items-center gap-1.5 bg-black/60 rounded px-2 py-1">
               <div className="h-2 w-2 rounded-full bg-amber-400" />
@@ -712,14 +712,14 @@ function MapGenerationSection({
         {isDisabled && (
           <div className="flex items-center gap-2 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg">
             <AlertTriangle className="h-4 w-4 text-amber-400" />
-            <p className="text-xs text-amber-400">로봇이 오프라인이면 지도 생성이 불가합니다.</p>
+            <p className="text-xs text-amber-400">차량이 오프라인이면 지도 생성이 불가합니다.</p>
           </div>
         )}
         {!generationEnabled && (
           <div className="flex items-center gap-2 p-3 bg-secondary/40 border border-border rounded-lg">
             <Info className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">
-              {generationDisabledReason ?? "지도 생성은 로봇에서 수행합니다."}
+              {generationDisabledReason ?? "지도 생성은 차량에서 수행합니다."}
             </p>
           </div>
         )}
@@ -727,7 +727,7 @@ function MapGenerationSection({
           <div className="flex items-center gap-2 p-3 bg-secondary/20 border border-border rounded-lg">
             <Info className="h-4 w-4 text-muted-foreground" />
             <p className="text-xs text-muted-foreground">
-              지도 재생성은 로봇에서 새 지도를 만든 뒤, 여기서 “지도 등록”으로 메타데이터를 입력해 주세요.
+              지도 재생성은 차량에서 새 지도를 만든 뒤, 여기서 “지도 등록”으로 메타데이터를 입력해 주세요.
             </p>
           </div>
         )}
@@ -1365,7 +1365,7 @@ export default function HomePage() {
         </DialogHeader>
         <div className="space-y-4">
           <div className="text-xs text-muted-foreground">
-            로봇에서 지도 생성이 완료된 뒤, 메타데이터를 입력해 등록합니다.
+            차량에서 지도 생성이 완료된 뒤, 메타데이터를 입력해 등록합니다.
           </div>
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] text-muted-foreground">
@@ -1540,7 +1540,7 @@ export default function HomePage() {
         <div className="mb-4 sm:mb-6">
           <h1 className="text-xl sm:text-2xl font-semibold text-foreground">홈</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            로봇 상태 및 감지 현황을 확인하세요
+            차량 상태 및 감지 현황을 확인하세요
           </p>
         </div>
 
@@ -1596,7 +1596,7 @@ export default function HomePage() {
                 onSelectMap={(id) => carMaps.selectMap(Number(id))}
                 onDeleteMap={(id) => carMaps.deleteMap(Number(id))}
                 generationEnabled={false}
-                generationDisabledReason="지도 생성은 로봇에서 수행됩니다. 현재는 조회만 가능합니다."
+                generationDisabledReason="지도 생성은 차량에서 수행됩니다. 현재는 조회만 가능합니다."
                 detectionEnabled={false}
                 detectionDisabledReason="탐지 시작/중지 API 연동이 필요합니다."
                 isDetecting={isDetecting}

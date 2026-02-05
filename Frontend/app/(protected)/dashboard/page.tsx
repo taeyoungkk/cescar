@@ -76,8 +76,8 @@ function SummaryCard({ title, value, icon: Icon, subtitle, variant = "default", 
   const isSimpleValue = typeof value === "string" || typeof value === "number"
 
   return (
-    <Card className="bg-card border-border">
-      <CardContent className={compact ? "p-3" : "p-4"}>
+    <Card className="bg-card border-border h-full">
+      <CardContent className={compact ? "p-3 min-h-[78px]" : "p-4 min-h-[96px]"}>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">{title}</p>
@@ -991,19 +991,23 @@ function DashboardContent() {
       const parsed = JSON.parse(raw)
       if (parsed?.mapFilter) setMapFilter(parsed.mapFilter)
       if (parsed?.logSort === "asc" || parsed?.logSort === "desc") setLogSort(parsed.logSort)
-      if (parsed?.filters) setFilters({ ...filters, ...parsed.filters })
+      if (parsed?.filters) {
+        const { type, status, searchId } = parsed.filters as DetectionHistoryFilters
+        setFilters({ ...filters, type, status, searchId })
+      }
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
+    const { type, status, searchId } = filters
     window.localStorage.setItem(
       "dashboard.filters",
       JSON.stringify({
         mapFilter,
         logSort,
-        filters,
+        filters: { type, status, searchId },
       })
     )
   }, [filters, logSort, mapFilter])

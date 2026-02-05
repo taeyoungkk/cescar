@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     
     # MQTT Broker Settings
     MQTT_BROKER: str = "I14B201.p.ssafy.io"
-    MQTT_PORT: int = 1883
+    MQTT_PORT: int = 8085
     
     # Robot Identification
     ROBOT_ID: str = "robot-01"
@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # Odometry 발행
     @property
     def TOPIC_ODOM(self) -> str:
-        return f"robot/{self.ROBOT_ID}/odom"
+        return f"robot/{self.ROBOT_ID}/sensors/odom"
 
     model_config = SettingsConfigDict(
         env_file=".env",

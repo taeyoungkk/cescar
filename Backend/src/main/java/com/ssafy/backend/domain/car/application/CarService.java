@@ -7,6 +7,7 @@ import com.ssafy.backend.domain.car.domain.CarMode;
 import com.ssafy.backend.domain.car.domain.CarStatus;
 import com.ssafy.backend.domain.car.dto.CarRequest;
 import com.ssafy.backend.domain.car.dto.CarResponse;
+import com.ssafy.backend.domain.device.application.MqttInboundService;
 import com.ssafy.backend.domain.history.dao.CarLogRepository;
 import com.ssafy.backend.domain.history.domain.CarLog;
 import com.ssafy.backend.domain.history.domain.LogStatus;
@@ -41,6 +42,7 @@ public class CarService {
     private final CarLogRepository carLogRepository;
     private final MqttGateway mqttGateway;
     private final ObjectMapper objectMapper;
+    private final MqttInboundService mqttInboundService;
 
     /**
      * 1️⃣ 차량 소유 연결
@@ -114,7 +116,8 @@ public class CarService {
         CarStatus status = carStatusRepository.findById(carId)
                 .orElseThrow(() -> new CustomException(ErrorCode.CAR_STATUS_NOT_FOUND));
 
-        return CarResponse.StatusResponse.from(status);
+        boolean isOnline = mqttInboundService.isStatusOnline(car.getDeviceId());
+        return CarResponse.StatusResponse.from(status, isOnline);
     }
 
     /**

@@ -55,10 +55,12 @@ import { useRecentDetections } from "@/hooks/useRecentDetections"
 import { usePrimaryCarId } from "@/hooks/usePrimaryCarId"
 import { useAlerts } from "@/hooks/useAlerts"
 import { useCarMaps } from "@/hooks/useCarMaps"
+import { useCarLogs } from "@/hooks/useCarLogs"
 
 import type { Detection, SystemAlert, DetectionStats, CarStatus, CarSummary, CarMode } from "@/core/types"
 import { OfflineGuardButton } from "@/components/offline-guard-button"
 import * as carApi from "@/core/api/car"
+import * as detectionApi from "@/core/api/detection"
 
 
 import { useCarStatus } from "@/hooks/useCarStatus"
@@ -66,6 +68,11 @@ import { useCarStatus } from "@/hooks/useCarStatus"
 // ============================================
 // Presentational Components (UI Only)
 // ============================================
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>
+}
 
 function StatusCard({
   title,
@@ -423,7 +430,7 @@ function MapVisualization({
             </Badge>
             {mapName && (
               <div
-                className="bg-black/60 text-white/90 text-xs px-2 py-1 rounded max-w-full truncate"
+                className="bg-black/60 text-white/90 text-xs px-2 py-1 rounded max-w-full truncate text-center"
                 title={mapName}
               >
                 {mapName}
@@ -477,17 +484,27 @@ function MapHistoryDialog({
   maps,
   onSelect,
   onDelete,
+  currentMapId,
   disabled = false,
+  onOpen,
 }: {
   maps: StoredMap[]
   onSelect: (mapId: string) => void
   onDelete: (mapId: string) => void
+  currentMapId?: string | null
   disabled?: boolean
+  onOpen?: () => void
 }) {
   const [open, setOpen] = React.useState(false)
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) onOpen?.()
+      }}
+    >
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="bg-transparent w-full sm:w-auto" disabled={disabled}>
           <History className="mr-2 h-4 w-4" />
@@ -510,13 +527,24 @@ function MapHistoryDialog({
               {maps.map((map) => (
                 <div
                   key={map.id}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border hover:bg-secondary/30 transition-colors"
+                  className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                    currentMapId === map.id
+                      ? "border-emerald-500/40 bg-emerald-500/10"
+                      : "border-border hover:bg-secondary/30"
+                  }`}
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">{map.generatedAt}</p>
                     <div className="flex items-center gap-3 mt-1">
-                      <span className="text-xs text-muted-foreground">{map.areaSize}</span>
+                      {map.areaSize ? (
+                        <span className="text-xs text-muted-foreground">{map.areaSize}</span>
+                      ) : null}
                       <span className="text-xs text-muted-foreground">{map.detectionsCount}개 탐지</span>
+                      {currentMapId === map.id && (
+                        <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">
+                          현재 지도
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 ml-3">
@@ -562,12 +590,14 @@ function MapGenerationSection({
   imageUrl,
   imageVersion,
   mapName,
+  currentMapId,
   mapActions,
   maps,
   onStartGeneration,
   onStopGeneration,
   onSelectMap,
   onDeleteMap,
+  onOpenHistory,
   detectionEnabled,
   detectionDisabledReason,
   isDetecting,
@@ -591,12 +621,14 @@ function MapGenerationSection({
   imageUrl?: string | null
   imageVersion?: string | number | null
   mapName?: string | null
+  currentMapId?: string | null
   mapActions?: React.ReactNode
   maps: StoredMap[]
   onStartGeneration?: () => void
   onStopGeneration?: () => void
   onSelectMap?: (mapId: string) => void
   onDeleteMap?: (mapId: string) => void
+  onOpenHistory?: () => void
   detectionEnabled?: boolean
   detectionDisabledReason?: string
   isDetecting: boolean
@@ -610,7 +642,7 @@ function MapGenerationSection({
   generationEnabled?: boolean
   generationDisabledReason?: string
 }) {
-  const isDisabled = !isOnline
+  const isDisabled = false
   const enabled = detectionEnabled ?? true
   const canGenerate = generationEnabled && !!onStartGeneration && !isGeneratingMap
   const canStart = enabled && networkOnline && robotOnline && mapReady
@@ -649,37 +681,23 @@ function MapGenerationSection({
                 maps={maps}
                 onSelect={onSelectMap}
                 onDelete={onDeleteMap}
+                currentMapId={currentMapId}
                 disabled={isGeneratingMap}
+                onOpen={onOpenHistory}
               />
             )}
-            <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-              <OfflineGuardButton
-                className={`h-8 px-3 text-xs w-full sm:w-auto ${
-                  isDetecting ? "bg-secondary hover:bg-secondary/80" : "bg-primary hover:bg-primary/90"
-                }`}
-                onClick={() => onStartDetect()}
-                disabled={isDetecting || detectionLoading || !canStart || isGeneratingMap}
-                offlineMessage={startBlockMessage}
-              >
-                <Play className="mr-1.5 h-3.5 w-3.5" />
-                탐지 시작
-              </OfflineGuardButton>
-              <OfflineGuardButton
-                variant="destructive"
+            {isGeneratingMap && onStopGeneration && (
+              <Button
+                variant="outline"
+                size="sm"
                 className="h-8 px-3 text-xs w-full sm:w-auto"
-                onClick={() => onStopDetect()}
-                disabled={!isDetecting || detectionLoading || !canStop || isGeneratingMap}
-                offlineMessage={stopBlockMessage}
+                onClick={() => onStopGeneration()}
               >
-                <Square className="mr-1.5 h-3.5 w-3.5" />
-                탐지 중지
-              </OfflineGuardButton>
-            </div>
+                생성 중단
+              </Button>
+            )}
             {isGeneratingMap && (
               <Badge className="bg-amber-500/20 text-amber-400 border-amber-500/30 shrink-0">생성 중</Badge>
-            )}
-            {mapStatus === "completed" && !isGeneratingMap && (
-              <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shrink-0">완료됨</Badge>
             )}
           </div>
         </div>
@@ -705,7 +723,7 @@ function MapGenerationSection({
           <Button
             className="flex-1 h-9 text-xs sm:h-10 sm:text-sm bg-primary hover:bg-primary/90 text-primary-foreground"
             onClick={onStartGeneration}
-            disabled={isDisabled || !canGenerate}
+            disabled={!canGenerate}
           >
             {isGeneratingMap ? (
               <>
@@ -723,15 +741,6 @@ function MapGenerationSection({
                 지도 생성 시작
               </>
             )}
-          </Button>
-          <Button
-            variant="destructive"
-            className="flex-1 h-9 text-xs sm:h-10 sm:text-sm"
-            onClick={onStopGeneration}
-            disabled={isDisabled || !onStopGeneration}
-          >
-            <Square className="mr-2 h-4 w-4" />
-            생성 중단
           </Button>
 
           {mapStatus === "completed" && (
@@ -933,6 +942,8 @@ function DetectionItem({ detection }: { detection: Detection }) {
 
 export default function HomePage() {
   const [isStandalone, setIsStandalone] = React.useState(false)
+  const [installPrompt, setInstallPrompt] = React.useState<BeforeInstallPromptEvent | null>(null)
+  const [canInstall, setCanInstall] = React.useState(false)
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission | "unknown">("unknown")
   const { toast } = useToast()
   const [carList, setCarList] = React.useState<CarSummary[]>([])
@@ -962,6 +973,10 @@ export default function HomePage() {
   const [mapGenerateOpen, setMapGenerateOpen] = React.useState(false)
   const [mapGenerateName, setMapGenerateName] = React.useState("")
   const [mapGenerateError, setMapGenerateError] = React.useState<string | null>(null)
+  const [historyCountsOverride, setHistoryCountsOverride] = React.useState<{
+    byId: Record<number, number>
+    byName: Record<string, number>
+  } | null>(null)
   const [manualGenerating, setManualGenerating] = React.useState(false)
   const [mapRenderPending, setMapRenderPending] = React.useState<{
     startedAt: number
@@ -979,7 +994,9 @@ export default function HomePage() {
   const [fcmAlerts, setFcmAlerts] = useState<SystemAlert[]>([])
   const { isOnline: networkOnline } = useNetworkStatus()
   const carMaps = useCarMaps(carId)
+  const carLogs = useCarLogs(carId)
   const currentMap = carMaps.currentMap
+  const mapGeneratingKey = carId ? `mapGenerating:${carId}` : null
   const refreshCarsRequestIdRef = React.useRef(0)
   const refreshCarsInFlightRef = React.useRef(false)
   const refreshCarsQueuedRef = React.useRef(false)
@@ -1005,6 +1022,19 @@ export default function HomePage() {
       } else if (typeof media.removeListener === "function") {
         media.removeListener(handler)
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handlePrompt = (event: Event) => {
+      event.preventDefault()
+      setInstallPrompt(event as BeforeInstallPromptEvent)
+      setCanInstall(true)
+    }
+    window.addEventListener("beforeinstallprompt", handlePrompt)
+    return () => {
+      window.removeEventListener("beforeinstallprompt", handlePrompt)
     }
   }, [])
 
@@ -1044,9 +1074,59 @@ export default function HomePage() {
     }
   }, [networkOnline])
 
+  const handleInstallPwa = React.useCallback(async () => {
+    if (!installPrompt) return
+    try {
+      await installPrompt.prompt()
+      await installPrompt.userChoice
+    } finally {
+      setInstallPrompt(null)
+      setCanInstall(false)
+    }
+  }, [installPrompt])
+
+  const handleStopGeneration = React.useCallback(() => {
+    setManualGenerating(false)
+    setMapRenderPending(null)
+    if (mapRenderTimerRef.current) {
+      window.clearInterval(mapRenderTimerRef.current)
+      mapRenderTimerRef.current = null
+    }
+    mapRenderAttemptsRef.current = 0
+    if (mapGeneratingKey) {
+      try {
+        localStorage.removeItem(mapGeneratingKey)
+      } catch {
+        // ignore storage issues
+      }
+    }
+    toastInfo(toast, "지도 생성 중단", "지도 생성 대기를 중단했습니다.")
+  }, [mapGeneratingKey, toast])
+
   useEffect(() => {
     refreshCars()
   }, [refreshCars])
+
+  React.useEffect(() => {
+    if (!mapGeneratingKey) return
+    try {
+      const raw = localStorage.getItem(mapGeneratingKey)
+      if (!raw) return
+      if (currentMap?.imageUrl) {
+        localStorage.removeItem(mapGeneratingKey)
+        return
+      }
+      const parsed = JSON.parse(raw)
+      if (mapRenderPending) return
+      setManualGenerating(true)
+      setMapRenderPending({
+        startedAt: Number(parsed?.startedAt ?? Date.now()),
+        lastImageUrl: parsed?.lastImageUrl ?? null,
+      })
+    } catch {
+      // ignore storage issues
+    }
+  }, [mapGeneratingKey, currentMap?.imageUrl, mapRenderPending])
 
   useEffect(() => {
     if (networkOnline) refreshCars()
@@ -1083,10 +1163,17 @@ export default function HomePage() {
     const tick = async () => {
       mapRenderAttemptsRef.current += 1
       await carMaps.refresh()
-    if (mapRenderAttemptsRef.current >= maxAttempts) {
-      setMapRenderPending(null)
-      setManualGenerating(false)
-    }
+      if (mapRenderAttemptsRef.current >= maxAttempts) {
+        setMapRenderPending(null)
+        setManualGenerating(false)
+        if (mapGeneratingKey) {
+          try {
+            localStorage.removeItem(mapGeneratingKey)
+          } catch {
+            // ignore storage issues
+          }
+        }
+      }
     }
 
     const id = window.setInterval(() => {
@@ -1107,17 +1194,17 @@ export default function HomePage() {
     if (!currentMap?.imageUrl) return
     if (currentMap.imageUrl === mapRenderPending.lastImageUrl) return
 
-    const isRendered = currentMap.imageUrl.includes("maps/rendered")
-    if (isRendered) {
-      setMapRenderPending(null)
-      setManualGenerating(false)
-      toastSuccess(toast, "지도 변환 완료", "새 지도가 적용되었습니다.")
-      return
+    setMapRenderPending(null)
+    setManualGenerating(false)
+    if (mapGeneratingKey) {
+      try {
+        localStorage.removeItem(mapGeneratingKey)
+      } catch {
+        // ignore storage issues
+      }
     }
-
-    setMapRenderPending((prev) =>
-      prev ? { ...prev, lastImageUrl: currentMap.imageUrl } : prev
-    )
+    toastSuccess(toast, "지도 생성 완료", "새 지도가 적용되었습니다.")
+    return
   }, [currentMap?.imageUrl, mapRenderPending, toast])
 
   useEffect(() => {
@@ -1245,24 +1332,8 @@ export default function HomePage() {
     let unsubscribe: (() => void) | undefined
     listenForegroundMessages((payload) => {
       if (!mounted) return
-      const title =
-        payload?.notification?.title ?? payload?.data?.title ?? "탐지 알림"
-      const message =
-        payload?.notification?.body ?? payload?.data?.body ?? "탐지가 발생했습니다."
-      const id = payload?.messageId
-        ? `fcm-${payload.messageId}`
-        : `fcm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-      setFcmAlerts((prev) => [
-        {
-          id,
-          type: "warning",
-          title,
-          message,
-          timestamp: new Date().toISOString(),
-          isRead: false,
-        },
-        ...prev,
-      ])
+      // Foreground alerts are disabled to avoid duplicate notifications.
+      void payload
     }).then((unsub) => {
       unsubscribe = unsub
     })
@@ -1295,6 +1366,34 @@ export default function HomePage() {
   }
   const generatedAtDate = formatDateLine(currentMap?.createdAt ?? null)
   const generatedAtTime = formatTimeLine(currentMap?.createdAt ?? null)
+  const mapDetectionCounts = React.useMemo(() => {
+    const byId = new Map<number, number>()
+    const byName = new Map<string, number>()
+    if (historyCountsOverride) {
+      Object.entries(historyCountsOverride.byId).forEach(([key, value]) => {
+        const id = Number(key)
+        if (!Number.isNaN(id)) byId.set(id, Number(value))
+      })
+      Object.entries(historyCountsOverride.byName).forEach(([key, value]) => {
+        const name = key.trim()
+        if (name) byName.set(name, Number(value))
+      })
+      return { byId, byName }
+    }
+    carLogs.logs.forEach((log) => {
+      const count = Number(log.detectionCount ?? 0)
+      if (log.mapId != null) {
+        const prev = byId.get(log.mapId) ?? 0
+        byId.set(log.mapId, prev + count)
+        return
+      }
+      const name = (log.mapName ?? "").trim()
+      if (!name) return
+      const prev = byName.get(name) ?? 0
+      byName.set(name, prev + count)
+    })
+    return { byId, byName }
+  }, [carLogs.logs, historyCountsOverride])
   const mapHistoryItems: StoredMap[] = carMaps.maps.map((m) => ({
     id: String(m.id),
     generatedAt: (parseBackendDate(m.createdAt) ?? new Date(m.createdAt)).toLocaleString("ko-KR", {
@@ -1303,9 +1402,11 @@ export default function HomePage() {
     areaSize:
       m.width && m.height && m.resolution
         ? `${(m.width * m.resolution).toFixed(1)}m x ${(m.height * m.resolution).toFixed(1)}m`
-        : "-",
+        : null,
     robotId: carId ? String(carId) : "-",
-    detectionsCount: 0,
+    detectionsCount:
+      mapDetectionCounts.byId.get(m.id) ??
+      (m.name ? mapDetectionCounts.byName.get(m.name.trim()) ?? 0 : 0),
     mapSeed: Number(m.id),
   }))
 
@@ -1321,6 +1422,36 @@ export default function HomePage() {
       toastError(toast, "탐지 중지 불가", "탐지 시작/중지 API 연동이 필요합니다.")
     return false
   }, [toast])
+
+  const handleOpenHistory = React.useCallback(async () => {
+    if (!carId) return
+    try {
+      const logsResponse = await detectionApi.getCarLogs(carId, 200)
+      const logs = logsResponse.success && logsResponse.data ? logsResponse.data : []
+      const byId: Record<number, number> = {}
+      const byName: Record<string, number> = {}
+
+      await Promise.all(
+        logs.map(async (log) => {
+          const res = await detectionApi.getDetectionCountByLog(log.id)
+          if (!res.success) return
+          const count = Number(res.data ?? 0)
+          if (log.mapId != null) {
+            byId[log.mapId] = (byId[log.mapId] ?? 0) + count
+            return
+          }
+          const name = (log.mapName ?? "").trim()
+          if (!name) return
+          byName[name] = (byName[name] ?? 0) + count
+        })
+      )
+
+      setHistoryCountsOverride({ byId, byName })
+      await carLogs.refresh()
+    } catch (error) {
+      setHistoryCountsOverride(null)
+    }
+  }, [carId, carLogs])
 
   const handleClaim = async () => {
     if (!claimCode.trim()) {
@@ -1432,11 +1563,22 @@ export default function HomePage() {
         startedAt: Date.now(),
         lastImageUrl: currentMap?.imageUrl ?? null,
       })
+      if (mapGeneratingKey) {
+        try {
+          localStorage.setItem(
+            mapGeneratingKey,
+            JSON.stringify({ startedAt: Date.now(), lastImageUrl: currentMap?.imageUrl ?? null })
+          )
+        } catch {
+          // ignore storage issues
+        }
+      }
       setMapGenerateOpen(false)
     } else {
       toastError(toast, "지도 생성 실패", "잠시 후 다시 시도해 주세요.")
     }
   }
+
 
   const handleCreateMap = async () => {
     if (!carId) {
@@ -1737,13 +1879,19 @@ export default function HomePage() {
           <Alert className="mb-6">
             <AlertTitle>모바일 사용 팁</AlertTitle>
             <AlertDescription>
-              크롬 메뉴에서 “홈 화면에 추가”로 설치하면 앱처럼 실행되고 알림 수신이 더 안정적입니다. 알림 권한도 꼭
-              허용해 주세요.
+              {canInstall
+                ? "홈 화면에 추가로 설치하면 앱처럼 실행되고 알림 수신이 더 안정적입니다."
+                : "홈 화면에 추가로 설치하면 앱처럼 실행되고 알림 수신이 더 안정적입니다. iOS는 Safari 공유 메뉴에서 “홈 화면에 추가”를 선택해 주세요."}
             </AlertDescription>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <Badge variant="secondary" className="text-xs">
                 알림 권한: {notificationPermission === "unknown" ? "확인 불가" : notificationPermission}
               </Badge>
+              {canInstall && (
+                <Button size="sm" onClick={handleInstallPwa}>
+                  홈 화면에 추가
+                </Button>
+              )}
               {notificationPermission !== "granted" && (
                 <Button size="sm" variant="outline" onClick={handleRequestNotification}>
                   알림 권한 요청
@@ -1772,12 +1920,14 @@ export default function HomePage() {
                 imageUrl={currentMap?.imageUrl ?? null}
                 imageVersion={currentMap?.id ?? currentMap?.createdAt ?? null}
                 mapName={currentMap?.name ?? null}
+                currentMapId={currentMap ? String(currentMap.id) : null}
                 mapActions={null}
                 maps={mapHistoryItems}
                 onStartGeneration={handleOpenGenerateDialog}
-                onStopGeneration={undefined}
+                onStopGeneration={handleStopGeneration}
                 onSelectMap={(id) => carMaps.selectMap(Number(id))}
                 onDeleteMap={(id) => carMaps.deleteMap(Number(id))}
+                onOpenHistory={handleOpenHistory}
                 generationEnabled={true}
                 detectionEnabled={false}
                 detectionDisabledReason="탐지 시작/중지 API 연동이 필요합니다."

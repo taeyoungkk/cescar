@@ -134,7 +134,10 @@ function normalizeLogStats(raw: LogStatisticsResponse, fallbackLastTime?: string
 function normalizeLog(raw: any): CarLogResponse {
   return {
     id: Number(raw?.id),
-    mapId: raw?.mapId ?? raw?.map_id ?? null,
+    mapId:
+      raw?.mapId != null || raw?.map_id != null
+        ? Number(raw?.mapId ?? raw?.map_id)
+        : null,
     mapName: raw?.mapName ?? raw?.map_name ?? null,
     startAt: String(raw?.startAt ?? raw?.start_at ?? raw?.createdAt ?? ""),
     endAt: raw?.endAt ?? raw?.end_at ?? null,
@@ -200,6 +203,60 @@ export async function getDetectionsByLog(logId: number, limit: number = 50, carI
     return ok(detPage.content.map((d) => mapToUiDetection(d, { robotId })))
   } catch (e: any) {
     return fail(getErrorMessage(e, "감지 목록 조회 실패"))
+  }
+}
+
+export async function getAllDetectionsForCar(
+  carId: number,
+  opts?: { logPageSize?: number; detectionsPerLog?: number }
+): Promise<ApiResponse<Detection[]>> {
+  try {
+    const logPageSize = opts?.logPageSize ?? 50
+    const detectionsPerLog = opts?.detectionsPerLog ?? 1000
+
+    let page = 0
+    const allDetections: Detection[] = []
+
+    while (true) {
+      const logsPage = await apiFetch<SpringPage<any>>(
+        `/api/cars/${carId}/logs?page=${page}&size=${logPageSize}&sort=startAt,desc`
+      )
+      const logs = Array.isArray(logsPage?.content) ? logsPage.content : []
+      for (const log of logs) {
+        const logId = Number(log?.id)
+        if (!logId) continue
+        const detPage = await apiFetch<SpringPage<DetectionListItemResponse>>(
+          `/api/logs/${logId}/detections?page=0&size=${detectionsPerLog}&sort=createdAt,desc`
+        )
+        const robotId = `car-${carId}`
+        const items = Array.isArray(detPage?.content)
+          ? detPage.content.map((d) => mapToUiDetection(d, { robotId }))
+          : []
+        allDetections.push(...items)
+      }
+
+      if (logsPage?.last || logs.length === 0) break
+      page += 1
+    }
+
+    allDetections.sort((a, b) => {
+      const ta = new Date(a.timestamp).getTime()
+      const tb = new Date(b.timestamp).getTime()
+      return tb - ta
+    })
+
+    return ok(allDetections)
+  } catch (e: any) {
+    return fail(getErrorMessage(e, "감지 기록 조회 실패"))
+  }
+}
+
+export async function getDetectionCountByLog(logId: number): Promise<ApiResponse<number>> {
+  try {
+    const page = await apiFetch<SpringPage<any>>(`/api/logs/${logId}/detections?page=0&size=1`)
+    return ok(Number(page?.totalElements ?? 0))
+  } catch (e: any) {
+    return fail(getErrorMessage(e, "감지 건수 조회 실패"))
   }
 }
 

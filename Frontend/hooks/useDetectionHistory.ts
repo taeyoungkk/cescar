@@ -61,17 +61,19 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
       if (filters.type && filters.type !== "all" && d.type !== filters.type) return false
       if (filters.status && filters.status !== "all" && d.status !== filters.status) return false
       if (filters.searchId && !d.id.includes(filters.searchId)) return false
-      if (filters.dateFrom) {
-        const from = new Date(`${filters.dateFrom}T00:00:00`)
-        if (Number.isNaN(from.getTime()) || new Date(d.timestamp) < from) return false
-      }
-      if (filters.dateTo) {
-        const to = new Date(`${filters.dateTo}T23:59:59`)
-        if (Number.isNaN(to.getTime()) || new Date(d.timestamp) > to) return false
+      if (!useSearch) {
+        if (filters.dateFrom) {
+          const from = new Date(`${filters.dateFrom}T00:00:00`)
+          if (Number.isNaN(from.getTime()) || new Date(d.timestamp) < from) return false
+        }
+        if (filters.dateTo) {
+          const to = new Date(`${filters.dateTo}T23:59:59`)
+          if (Number.isNaN(to.getTime()) || new Date(d.timestamp) > to) return false
+        }
       }
       return true
     })
-  }, [allDetections, filters])
+  }, [allDetections, filters, useSearch])
 
   const computedStats = useMemo<DetectionStats>(() => {
     const items = filteredDetections
@@ -142,13 +144,9 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
     setIsLoading(true)
     try {
       if (useSearch) {
-        const searchResponse = await detectionApi.searchDetections({
-          startDate: filters.dateFrom,
-          endDate: filters.dateTo,
-          label: mapLabel(filters.type),
-        })
+        const historyResponse = await detectionApi.getAllDetectionsForCar(carId)
         if (requestIdRef.current !== requestId) return
-        setAllDetections(searchResponse.success && searchResponse.data ? searchResponse.data : [])
+        setAllDetections(historyResponse.success && historyResponse.data ? historyResponse.data : [])
         setStatsOverride(null)
       } else if (logId) {
         const historyResponse = await detectionApi.getDetectionsByLog(logId, 50, carId ?? undefined)

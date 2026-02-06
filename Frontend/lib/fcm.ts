@@ -5,6 +5,12 @@ import { getFirebaseMessaging } from "@/lib/firebase"
 import * as notificationApi from "@/core/api/notification"
 
 const FCM_TOKEN_KEY = "fcmToken"
+const FCM_DEBUG = process.env.NEXT_PUBLIC_FCM_DEBUG === "true"
+
+const log = (...args: any[]) => {
+  if (!FCM_DEBUG) return
+  console.info("[FCM]", ...args)
+}
 
 interface RegisterOptions {
   requestPermission?: boolean
@@ -22,9 +28,11 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
 
   const requestPermission = options.requestPermission ?? true
   if (!canRequestPermission(requestPermission)) return null
+  log("permission status", Notification.permission)
 
   if (Notification.permission === "default") {
     const permission = await Notification.requestPermission()
+    log("permission result", permission)
     if (permission !== "granted") return null
   } else if (Notification.permission !== "granted") {
     return null
@@ -47,6 +55,7 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
     registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js", {
       scope: "/firebase-messaging/",
     })
+    log("service worker registered", registration.scope)
   } catch (error) {
     console.error("[FCM] Service worker registration failed.", error)
     return null
@@ -94,12 +103,13 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
     return null
   }
   if (!token) return null
-  console.log("[FCM] token", token)
+  log("token", token)
 
   const stored = localStorage.getItem(FCM_TOKEN_KEY)
   if (stored !== token) {
     try {
       await notificationApi.registerToken(token)
+      log("token registered to server")
     } catch (error) {
       console.error("[FCM] Failed to register token to server.", error)
       return null
@@ -117,6 +127,7 @@ export async function unregisterFcmToken(): Promise<void> {
 
   try {
     await notificationApi.unregisterToken(token)
+    log("token unregistered from server")
   } finally {
     localStorage.removeItem(FCM_TOKEN_KEY)
   }
@@ -125,5 +136,8 @@ export async function unregisterFcmToken(): Promise<void> {
 export async function listenForegroundMessages(onReceive: (payload: any) => void) {
   const messaging = await getFirebaseMessaging()
   if (!messaging) return () => {}
-  return onMessage(messaging, onReceive)
+  return onMessage(messaging, (payload) => {
+    log("foreground message", payload)
+    onReceive(payload)
+  })
 }

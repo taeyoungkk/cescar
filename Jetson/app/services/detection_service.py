@@ -170,6 +170,8 @@ class DetectionService:
             logger.info(f"🐛 [DETECTION EVENT] {top_detection['label']} (conf: {top_detection['confidence']})")
         except Exception as e:
             logger.error(f"❌ 백그라운드 녹화 태스크 에러: {e}")
+        finally:
+            self.is_recording = False
 
     def _start_recording(self, timestamp):
         """녹화 시작: CameraService에서 프레임을 가져와 5초간 기록"""
@@ -213,7 +215,6 @@ class DetectionService:
             logger.error(f"🔥 녹화 중 에러: {e}")
         finally:
             video_url = self._stop_recording()
-            self.is_recording = False
         
         return video_url
 

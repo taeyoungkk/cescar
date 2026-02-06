@@ -237,6 +237,5 @@ class TrackingService:
             logger.error(f"Failed to send cmd_vel: {e}")
             return False
 
-
 # 싱글톤 인스턴스
 tracking_service = TrackingService()

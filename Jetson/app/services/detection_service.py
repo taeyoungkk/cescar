@@ -30,7 +30,7 @@ class DetectionService:
         
         # Detection 쿨다운 (연속 이벤트 방지)
         self._last_detection_time = 0
-        self._detection_cooldown = 5.0  # 5초 쿨다운
+        self._detection_cooldown = 20.0  # 20초 쿨다운
         
         # bbox persistence (탐지 없을 때도 잠시 유지)
         self._last_detections = []

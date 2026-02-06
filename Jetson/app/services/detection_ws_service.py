@@ -147,8 +147,8 @@ class DetectionWebSocketService:
             }
             
             self._ws.send(json.dumps(message))
-            if formatted_detections:
-                logger.info(f"📦 Sent {len(formatted_detections)} bbox(es) via WebSocket")
+            # if formatted_detections:
+            #     logger.info(f"📦 Sent {len(formatted_detections)} bbox(es) via WebSocket")
             return True
             
         except websocket.WebSocketConnectionClosedException:

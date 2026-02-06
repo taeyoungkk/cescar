@@ -754,3 +754,9 @@ models/
 *.pt
 *.onnx
 *.engine
+Jetson/maps/
+data/
+env/
+.venv/
+**/__pycache__/
+*.mp4

@@ -214,6 +214,20 @@ function StatusBadge({ status }: StatusBadgeProps) {
   )
 }
 
+function formatKstTimeParts(timestamp?: string | null) {
+  if (!timestamp) return { date: "-", time: "-" }
+  const d = parseBackendDate(timestamp)
+  if (!d) return { date: "-", time: "-" }
+  const date = d.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })
+  const time = d.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul",
+  })
+  return { date, time }
+}
+
 interface ConfidenceBadgeProps {
   confidence: number
 }
@@ -414,12 +428,25 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
         }
       }}
     >
-      <SheetContent side="right" className="w-full sm:max-w-lg bg-card border-border overflow-y-auto">
-        <SheetHeader className="border-b border-border px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4 pr-10 sm:pr-12">
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-lg bg-card border-border overflow-y-auto [&>button]:hidden"
+      >
+        <SheetHeader className="relative border-b border-border px-3 sm:px-5 pt-3 sm:pt-4 pb-3 sm:pb-4 pr-12 sm:pr-12">
+          <button
+            type="button"
+            aria-label="닫기"
+            onClick={() => onClose()}
+            className="absolute right-3 top-3 inline-flex h-10 w-10 sm:h-9 sm:w-9 items-center justify-center rounded-full border border-border bg-secondary/40 text-muted-foreground hover:text-foreground hover:bg-secondary/70"
+          >
+            <X className="h-4 w-4" />
+          </button>
           <div className="flex items-center justify-between gap-3 pr-2">
             <div>
-              <SheetTitle className="text-foreground text-sm sm:text-lg">탐지 상세 정보</SheetTitle>
-              <SheetDescription className="text-muted-foreground text-[11px] sm:text-sm">탐지 ID: {record.id}</SheetDescription>
+              <SheetTitle className="text-foreground text-base sm:text-lg">탐지 상세 정보</SheetTitle>
+              <SheetDescription className="text-muted-foreground text-[11px] sm:text-sm">
+                #{record.id} · {typeLabels[record.type] ?? record.type}
+              </SheetDescription>
             </div>
             <div className="shrink-0">
               {record.status !== "pending" && <StatusBadge status={record.status} />}
@@ -428,13 +455,16 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 sm:pt-3">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">탐지 시간</p>
-              <p className="text-[11px] sm:text-sm font-medium text-foreground">
-                {record.date} {record.time}
+              <p className="text-xs sm:text-sm font-medium text-foreground">
+                {(() => {
+                  const parts = formatKstTimeParts(record.timestamp)
+                  return `${parts.date} ${parts.time}`
+                })()}
               </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground uppercase tracking-wide">차량</p>
-              <p className="text-[11px] sm:text-sm font-medium text-foreground">
+              <p className="text-xs sm:text-sm font-medium text-foreground">
                 {currentCarName ?? record.robotId}
               </p>
             </div>
@@ -514,7 +544,10 @@ function DetailPanel({ record, open, onClose, onDelete, currentCarName }: Detail
           <DialogHeader>
             <DialogTitle>탐지 영상</DialogTitle>
           <DialogDescription>
-            {typeLabels[record.type] || record.type} · {record.date} {record.time}
+            {(() => {
+              const parts = formatKstTimeParts(record.timestamp)
+              return `${typeLabels[record.type] || record.type} · ${parts.date} ${parts.time}`
+            })()}
           </DialogDescription>
           </DialogHeader>
           <div className="relative aspect-video bg-secondary/50 rounded-lg overflow-hidden">
@@ -555,9 +588,10 @@ interface DetectionTableProps {
   detections: Detection[]
   onViewDetail: (detection: Detection) => void
   isLoading: boolean
+  highlightId?: string | null
 }
 
-function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableProps) {
+function DetectionTable({ detections, onViewDetail, isLoading, highlightId }: DetectionTableProps) {
   const typeLabels: Record<string, string> = {
     cockroach: "바퀴벌레",
     ant: "개미",
@@ -585,12 +619,27 @@ function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableP
     <>
       <div className="space-y-3 sm:hidden">
         {detections.map((record) => (
-          <div key={record.id} className="rounded-lg border border-border bg-card/60 p-4 space-y-3">
+          <div
+            key={record.id}
+            id={`detection-row-${record.id}`}
+            className={`rounded-lg border border-border bg-card/60 p-4 space-y-3 ${
+              highlightId && String(record.id) === String(highlightId)
+                ? "ring-2 ring-emerald-500/50 bg-emerald-500/10"
+                : ""
+            }`}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-0.5">
                 <p className="text-xs text-muted-foreground">ID {record.id}</p>
-                <p className="text-sm font-medium text-foreground">{record.time}</p>
-                <p className="text-xs text-muted-foreground">{record.date}</p>
+                {(() => {
+                  const parts = formatKstTimeParts(record.timestamp)
+                  return (
+                    <>
+                      <p className="text-sm font-medium text-foreground">{parts.time}</p>
+                      <p className="text-xs text-muted-foreground">{parts.date}</p>
+                    </>
+                  )
+                })()}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -632,12 +681,27 @@ function DetectionTable({ detections, onViewDetail, isLoading }: DetectionTableP
           </TableHeader>
           <TableBody>
             {detections.map((record) => (
-              <TableRow key={record.id} className="border-border">
+              <TableRow
+                key={record.id}
+                id={`detection-row-${record.id}`}
+                className={`border-border ${
+                  highlightId && String(record.id) === String(highlightId)
+                    ? "bg-emerald-500/10"
+                    : ""
+                }`}
+              >
                 <TableCell className="text-xs text-muted-foreground font-mono">{record.id}</TableCell>
                 <TableCell>
                   <div className="space-y-0.5">
-                    <p className="text-sm font-medium text-foreground">{record.time}</p>
-                    <p className="text-xs text-muted-foreground">{record.date}</p>
+                    {(() => {
+                      const parts = formatKstTimeParts(record.timestamp)
+                      return (
+                        <>
+                          <p className="text-sm font-medium text-foreground">{parts.time}</p>
+                          <p className="text-xs text-muted-foreground">{parts.date}</p>
+                        </>
+                      )
+                    })()}
                   </div>
                 </TableCell>
                 <TableCell>
@@ -711,6 +775,7 @@ function DashboardContent() {
     refresh,
   } = useDetectionHistory(carId)
   const [removedDetectionIds, setRemovedDetectionIds] = useState<Set<string>>(new Set())
+  const [highlightDetectionId, setHighlightDetectionId] = useState<string | null>(null)
 
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Detection | null>(null)
@@ -733,16 +798,21 @@ function DashboardContent() {
     () => detections.filter((d) => !removedDetectionIds.has(String(d.id))),
     [detections, removedDetectionIds]
   )
+  const toKstDateString = React.useCallback((value?: string | null) => {
+    if (!value) return null
+    const date = parseBackendDate(value) ?? new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return date.toLocaleDateString("sv-SE", { timeZone: "Asia/Seoul" })
+  }, [])
   const displayedDetections = React.useMemo(() => {
-    if (!useSearch) return visibleDetections
     const items = [...visibleDetections]
     items.sort((a, b) => {
-      const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0
-      const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0
+      const aTime = a.timestamp ? (parseBackendDate(a.timestamp)?.getTime() ?? 0) : 0
+      const bTime = b.timestamp ? (parseBackendDate(b.timestamp)?.getTime() ?? 0) : 0
       return logSort === "desc" ? bTime - aTime : aTime - bTime
     })
     return items
-  }, [visibleDetections, logSort, useSearch])
+  }, [visibleDetections, logSort])
   const totalPages = Math.max(1, Math.ceil(displayedDetections.length / pageSize))
   const pagedDetections = React.useMemo(() => {
     const start = (currentPage - 1) * pageSize
@@ -756,14 +826,14 @@ function DashboardContent() {
     const msPerDay = 24 * 60 * 60 * 1000
     const toStartOfDayMs = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 
-    const providedStart = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00`) : null
-    const providedEnd = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59`) : null
+    const providedStart = filters.dateFrom ? new Date(`${filters.dateFrom}T00:00:00+09:00`) : null
+    const providedEnd = filters.dateTo ? new Date(`${filters.dateTo}T23:59:59+09:00`) : null
     const startMs =
       providedStart && !Number.isNaN(providedStart.getTime())
         ? providedStart.getTime()
         : displayedDetections.reduce<number | null>((acc, item) => {
             if (!item.timestamp) return acc
-            const t = new Date(item.timestamp).getTime()
+            const t = parseBackendDate(item.timestamp)?.getTime() ?? NaN
             if (Number.isNaN(t)) return acc
             if (acc === null || t < acc) return t
             return acc
@@ -773,7 +843,7 @@ function DashboardContent() {
         ? providedEnd.getTime()
         : displayedDetections.reduce<number | null>((acc, item) => {
             if (!item.timestamp) return acc
-            const t = new Date(item.timestamp).getTime()
+            const t = parseBackendDate(item.timestamp)?.getTime() ?? NaN
             if (Number.isNaN(t)) return acc
             if (acc === null || t > acc) return t
             return acc
@@ -788,7 +858,7 @@ function DashboardContent() {
 
     const lastTimestamp = displayedDetections.reduce<number | null>((acc, item) => {
       if (!item.timestamp) return acc
-      const t = new Date(item.timestamp).getTime()
+      const t = parseBackendDate(item.timestamp)?.getTime() ?? NaN
       if (Number.isNaN(t)) return acc
       if (acc === null || t > acc) return t
       return acc
@@ -796,12 +866,22 @@ function DashboardContent() {
 
     const formatLast = (ms: number) => {
       const d = new Date(ms)
-      const yy = String(d.getFullYear()).slice(-2)
-      const mm = String(d.getMonth() + 1).padStart(2, "0")
-      const dd = String(d.getDate()).padStart(2, "0")
-      const hh = String(d.getHours()).padStart(2, "0")
-      const min = String(d.getMinutes()).padStart(2, "0")
-      return { date: `${yy}.${mm}.${dd}`, time: `${hh}:${min}` }
+      const date = new Intl.DateTimeFormat("ko-KR", {
+        timeZone: "Asia/Seoul",
+        year: "2-digit",
+        month: "2-digit",
+        day: "2-digit",
+      })
+        .format(d)
+        .replace(/\s/g, "")
+        .replace(/\.$/, "")
+      const time = d.toLocaleTimeString("ko-KR", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+        timeZone: "Asia/Seoul",
+      })
+      return { date, time }
     }
 
     const lastDetectionDate = lastTimestamp !== null ? formatLast(lastTimestamp).date : ""
@@ -930,7 +1010,8 @@ function DashboardContent() {
   const activeLogId = logId
   const activeLogCount = logId ? visibleDetections.length : null
 
-  const formatLogLabel = (log: {
+  const formatLogLabel = (
+    log: {
     id: number
     mapId: number | null
     startAt: string
@@ -938,21 +1019,14 @@ function DashboardContent() {
     status: string
     detectionCount: number
     mapName?: string | null
-  }) => {
-    const start = log.startAt ? parseBackendDate(log.startAt) : null
-    const end = log.endAt ? parseBackendDate(log.endAt) : null
-    const startLabel =
-      start && !Number.isNaN(start.getTime())
-        ? start.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
-        : log.startAt
-    const endLabel =
-      end && !Number.isNaN(end.getTime())
-        ? end.toLocaleString("ko-KR", { timeZone: "Asia/Seoul" })
-        : "-"
+    },
+    index?: number
+  ) => {
     const mapLabel = log.mapName ?? (log.mapId ? `지도 ${log.mapId}` : "지도 미지정")
     const count = activeLogId === log.id && activeLogCount !== null ? activeLogCount : log.detectionCount
     const countSuffix = activeLogId === log.id && activeLogCount !== null ? " (현재)" : ""
-    return `${startLabel} ~ ${endLabel} · ${log.status} · ${count}건${countSuffix} · ${mapLabel}`
+    const runNumber = typeof index === "number" ? index + 1 : log.id
+    return `운행 ${runNumber} / ${count}건${countSuffix} / ${mapLabel}`
   }
 
   const mapOptions = React.useMemo(() => {
@@ -1057,28 +1131,85 @@ function DashboardContent() {
     if (!raw) return
     try {
       const parsed = JSON.parse(raw)
-      if (parsed?.mapFilter) setMapFilter(parsed.mapFilter)
-      if (parsed?.logSort === "asc" || parsed?.logSort === "desc") setLogSort(parsed.logSort)
-      if (parsed?.filters) {
-        const { type, status, searchId } = parsed.filters as DetectionHistoryFilters
-        setFilters({ ...filters, type, status, searchId })
-      }
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (parsed?.mapFilter) setMapFilter(parsed.mapFilter)
+    if (parsed?.logSort === "asc" || parsed?.logSort === "desc") setLogSort(parsed.logSort)
+    if (parsed?.useSearch === true) {
+      setUseSearch(true)
+      setLogId(null)
+    } else if (parsed?.logId) {
+      setUseSearch(false)
+      setLogId(Number(parsed.logId))
+    }
+    if (parsed?.filters) {
+      const { type, status, searchId, dateFrom, dateTo } = parsed.filters as DetectionHistoryFilters
+      setFilters({ ...filters, type, status, searchId, dateFrom, dateTo })
+    }
+  } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   React.useEffect(() => {
     if (typeof window === "undefined") return
-    const { type, status, searchId } = filters
+    const id = window.sessionStorage.getItem("dashboard.highlightDetectionId")
+    if (!id) return
+    setHighlightDetectionId(id)
+    window.sessionStorage.removeItem("dashboard.highlightDetectionId")
+  }, [])
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return
+    const { type, status, searchId, dateFrom, dateTo } = filters
     window.localStorage.setItem(
       "dashboard.filters",
       JSON.stringify({
         mapFilter,
         logSort,
-        filters: { type, status, searchId },
+        logId: logId ?? null,
+        useSearch,
+        filters: { type, status, searchId, dateFrom, dateTo },
       })
     )
-  }, [filters, logSort, mapFilter])
+  }, [filters, logSort, mapFilter, logId, useSearch])
+
+  React.useEffect(() => {
+    if (!highlightDetectionId) return
+    setUseSearch(false)
+    setLogId(null)
+    setMapFilter("all")
+    setLogSort("desc")
+    detectionApi.getDetectionById(highlightDetectionId).then((res) => {
+      const timestamp = res.success && res.data ? res.data.timestamp : null
+      const dateStr = toKstDateString(timestamp)
+      if (!dateStr) return
+      setFilters((prev) => ({
+        ...prev,
+        dateFrom: dateStr,
+        dateTo: dateStr,
+        searchId: "",
+      }))
+    })
+  }, [highlightDetectionId, setFilters, setLogId, setLogSort, setMapFilter, setUseSearch, toKstDateString])
+
+  React.useEffect(() => {
+    if (!highlightDetectionId) return
+    const index = visibleDetections.findIndex((d) => String(d.id) === String(highlightDetectionId))
+    if (index >= 0) {
+      const nextPage = Math.floor(index / pageSize) + 1
+      if (nextPage !== currentPage) setCurrentPage(nextPage)
+      window.setTimeout(() => {
+        const el = document.getElementById(`detection-row-${highlightDetectionId}`)
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
+      }, 60)
+    }
+  }, [highlightDetectionId, visibleDetections, pageSize, currentPage])
+
+  React.useEffect(() => {
+    if (!isDetailOpen) return
+    if (!highlightDetectionId) return
+    setHighlightDetectionId(null)
+  }, [isDetailOpen, highlightDetectionId])
 
   React.useEffect(() => {
     if (!useSearch) return
@@ -1109,6 +1240,22 @@ function DashboardContent() {
     })
   }, [deepLinkId, visibleDetections, fetchDetectionDetail])
 
+  React.useEffect(() => {
+    if (!deepLinkId) return
+    if (String(selectedDetection?.id) === deepLinkId && !isDetailOpen) {
+      setIsDetailOpen(true)
+      lastOpenedRef.current = deepLinkId
+      return
+    }
+    if (!selectedDetection && !isDetailOpen) {
+      fetchDetectionDetail(deepLinkId).then((ok) => {
+        if (!ok) return
+        setIsDetailOpen(true)
+        lastOpenedRef.current = deepLinkId
+      })
+    }
+  }, [deepLinkId, selectedDetection, isDetailOpen, fetchDetectionDetail])
+
   return (
     <div className="p-3 sm:p-4 lg:p-6">
       {carId ? (
@@ -1135,10 +1282,10 @@ function DashboardContent() {
               <SelectTrigger className="bg-input border-border">
                 <SelectValue placeholder={logsLoading ? "운행 로그 불러오는 중..." : "운행 로그 선택"} />
               </SelectTrigger>
-              <SelectContent>
-                {sortedLogs.map((log) => (
+              <SelectContent className="max-h-64 overflow-y-auto">
+                {sortedLogs.map((log, index) => (
                   <SelectItem key={log.id} value={String(log.id)}>
-                    {formatLogLabel(log)}
+                    {formatLogLabel(log, index)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1236,6 +1383,7 @@ function DashboardContent() {
                 setMapFilter("all")
                 setLogSort("desc")
                 setUseSearch(false)
+                setLogId(null)
                 clearFilters()
                 window.history.replaceState(null, "", window.location.pathname)
                 toastInfo(toast, "필터 초기화", "필터와 저장값을 초기화했습니다.")
@@ -1271,10 +1419,10 @@ function DashboardContent() {
                     <SelectTrigger className="bg-input border-border">
                       <SelectValue placeholder={logsLoading ? "운행 로그 불러오는 중..." : "운행 로그 선택"} />
                     </SelectTrigger>
-                    <SelectContent>
-                      {sortedLogs.map((log) => (
+                    <SelectContent className="max-h-64 overflow-y-auto">
+                      {sortedLogs.map((log, index) => (
                         <SelectItem key={log.id} value={String(log.id)}>
-                          {formatLogLabel(log)}
+                          {formatLogLabel(log, index)}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1371,6 +1519,7 @@ function DashboardContent() {
                         setMapFilter("all")
                         setLogSort("desc")
                         setUseSearch(false)
+                        setLogId(null)
                         clearFilters()
                         window.history.replaceState(null, "", window.location.pathname)
                         toastInfo(toast, "필터 초기화", "필터와 저장값을 초기화했습니다.")
@@ -1397,12 +1546,20 @@ function DashboardContent() {
         )}
 
         <div className="mb-4 sm:mb-6">
+          {isLoading && useSearch && (
+            <div className="mb-2 text-xs text-muted-foreground">집계 중...</div>
+          )}
           <StatsSection stats={computedStats} isLoading={isLoading} />
         </div>
 
         <Card className="bg-card border-border">
           <CardHeader className="pb-4">
-            <CardTitle className="text-base font-medium">탐지 기록</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle className="text-base font-medium">탐지 기록</CardTitle>
+              {isLoading && useSearch && (
+                <span className="text-xs text-muted-foreground">불러오는 중...</span>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <ErrorAlert title="탐지 기록 불러오기 실패" message={error} className="mb-4" />
@@ -1414,6 +1571,7 @@ function DashboardContent() {
                 await fetchDetectionDetail(String(d.id))
               }}
               isLoading={isLoading}
+              highlightId={highlightDetectionId}
             />
             {displayedDetections.length > pageSize && (
               <div className="mt-4 flex items-center justify-between">

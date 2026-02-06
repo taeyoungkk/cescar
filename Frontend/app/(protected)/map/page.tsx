@@ -235,18 +235,7 @@ function LargeMapVisualization({ status, imageUrl, imageVersion }: LargeMapVisua
             </>
           )}
 
-          {/* Scale indicator */}
-          <div className="hidden sm:block absolute bottom-4 left-4 bg-black/70 rounded px-3 py-2">
-            <div className="flex items-center gap-2">
-              <div className="w-16 h-1 bg-white/60 rounded" />
-              <span className="text-xs text-white/80">1m</span>
-            </div>
-          </div>
-
-          {/* Coordinates */}
-          <div className="hidden sm:block absolute bottom-4 right-4 bg-black/70 rounded px-3 py-2">
-            <span className="text-xs text-white/60 font-mono">X: 6.2m | Y: 4.1m</span>
-          </div>
+          {/* Scale / Coordinates removed per request */}
         </>
       )}
     </div>
@@ -284,11 +273,26 @@ interface DetectionPointItemProps {
   location: string
   time: string
   status: "confirmed" | "pending"
+  onSelect?: (id: string) => void
 }
 
-function DetectionPointItem({ id, type, location, time, status }: DetectionPointItemProps) {
+function DetectionPointItem({ id, type, location, time, status, onSelect }: DetectionPointItemProps) {
   return (
-    <div className="flex items-center justify-between px-4 py-3 hover:bg-secondary/30 transition-colors">
+    <div
+      className={`flex items-center justify-between px-4 py-3 hover:bg-secondary/30 transition-colors ${
+        onSelect ? "cursor-pointer" : ""
+      }`}
+      onClick={() => onSelect?.(String(id))}
+      onKeyDown={(event) => {
+        if (!onSelect) return
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onSelect(String(id))
+        }
+      }}
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+    >
       <div className="flex items-center gap-3">
         <div className={`p-2 rounded-lg ${status === "confirmed" ? "bg-amber-500/20" : "bg-red-500/20"}`}>
           <Bug className={`h-4 w-4 ${status === "confirmed" ? "text-amber-400" : "text-red-400"}`} />
@@ -297,7 +301,7 @@ function DetectionPointItem({ id, type, location, time, status }: DetectionPoint
           <p className="text-sm font-medium text-foreground">
             {id}: {type}
           </p>
-          <p className="text-xs text-muted-foreground">{location}</p>
+          {location ? <p className="text-xs text-muted-foreground">{location}</p> : null}
         </div>
       </div>
       <div className="text-right">
@@ -317,6 +321,19 @@ function DetectionPointItem({ id, type, location, time, status }: DetectionPoint
       </div>
     </div>
   )
+}
+
+function formatKstDetectionTime(timestamp?: string | null, fallbackTime?: string | null) {
+  if (!timestamp) return fallbackTime ?? "-"
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(timestamp)) return timestamp
+  const d = parseBackendDate(timestamp)
+  if (!d) return fallbackTime ?? "-"
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d)
 }
 
 // ============================================
@@ -409,7 +426,9 @@ function MapHistoryDialog({
                     <p className="text-sm font-medium text-foreground truncate">{map.name}</p>
                     <div className="flex items-center gap-3 mt-1">
                       <span className="text-xs text-muted-foreground">{formatDateLabel(map.createdAt)}</span>
-                      <span className="text-xs text-muted-foreground">{toAreaSize(map)}</span>
+                      {toAreaSize(map) !== "-" ? (
+                        <span className="text-xs text-muted-foreground">{toAreaSize(map)}</span>
+                      ) : null}
                       {currentMapId === map.id && (
                         <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-[10px]">
                           현재 지도
@@ -450,7 +469,11 @@ function MapHistoryDialog({
 export default function MapDetailPage() {
   const { carId, error: primaryCarError } = usePrimaryCarId()
   const { maps, currentMap, isLoading, selectMap, deleteMap, renameMap, error: mapsError } = useCarMaps(carId)
-  const { recentDetections, isLoading: detectionsLoading, error: detectionsError } = useRecentDetections(carId, 20)
+  const { recentDetections, isLoading: detectionsLoading, error: detectionsError } = useRecentDetections(
+    carId,
+    20,
+    currentMap?.id ?? null
+  )
   const { toast } = useToast()
   const debouncedRefresh = useMemo(() => debounce(() => {}, 500, { leading: true, trailing: false }), [])
 
@@ -528,17 +551,25 @@ export default function MapDetailPage() {
     return recentDetections.map((d) => {
       const x = d.x == null ? "-" : d.x.toFixed(2)
       const y = d.y == null ? "-" : d.y.toFixed(2)
-      const location = d.x == null || d.y == null ? "-" : `(${x}m, ${y}m)`
+      const location = d.x == null || d.y == null ? null : `(${x}m, ${y}m)`
       const status = d.status === "confirmed" || d.status === "resolved" ? "confirmed" : "pending"
       return {
         id: d.id,
         type: typeLabels[d.type] ?? d.type,
         location,
-        time: d.time,
+        time: formatKstDetectionTime(d.timestamp, d.time),
         status,
       }
     })
   }, [recentDetections])
+
+  const handleSelectDetection = React.useCallback((id: string) => {
+    if (typeof window !== "undefined") {
+      window.localStorage.removeItem("dashboard.filters")
+      window.sessionStorage.setItem("dashboard.highlightDetectionId", String(id))
+    }
+    window.location.href = "/dashboard"
+  }, [])
 
   if (!carId) {
     return (
@@ -710,7 +741,7 @@ export default function MapDetailPage() {
                     <CardTitle className="text-base font-medium truncate">지도 시각화</CardTitle>
                     <Badge variant="secondary" className="text-xs shrink-0">
                       <Target className="h-3 w-3 mr-1" />
-                      Occupancy Grid
+                      SLAM
                     </Badge>
                     {currentMap && (
                       <Badge className="bg-emerald-500/20 text-emerald-400 border-emerald-500/30 text-xs">
@@ -731,6 +762,33 @@ export default function MapDetailPage() {
               </CardContent>
             </Card>
 
+            {/* Desktop detection list under map */}
+            <div className="hidden lg:block">
+              <Card className="bg-card border-border mt-4">
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium">탐지 지점 목록</CardTitle>
+                </CardHeader>
+                <CardContent className="p-0">
+                  {detectionsError && (
+                    <div className="p-4">
+                      <ErrorAlert title="탐지 기록 불러오기 실패" message={detectionsError} />
+                    </div>
+                  )}
+                  <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
+                    {detectionsLoading ? (
+                      <div className="p-4 text-sm text-muted-foreground">불러오는 중...</div>
+                    ) : detectionPoints.length === 0 ? (
+                      <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
+                    ) : (
+                      detectionPoints.map((point) => (
+                        <DetectionPointItem key={point.id} {...point} onSelect={handleSelectDetection} />
+                      ))
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Coming soon notice removed per request */}
           </div>
 
@@ -738,34 +796,7 @@ export default function MapDetailPage() {
           <div className="space-y-4">
             {/* Mobile: accordion */}
             <div className="lg:hidden">
-              <Accordion type="multiple" defaultValue={["info"]} className="space-y-2">
-                <AccordionItem value="info">
-                  <AccordionTrigger>지도 정보</AccordionTrigger>
-                  <AccordionContent>
-                    <div className="flex gap-3 overflow-x-auto pb-2">
-                      <div className="min-w-[160px]">
-                        <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} compact />
-                      </div>
-                      <div className="min-w-[160px]">
-                        <MapMetadataCard label="생성 시각" value={renderDateTime(currentMap?.createdAt)} icon={Clock} compact />
-                      </div>
-                      <div className="min-w-[160px]">
-                        <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} compact />
-                      </div>
-                      <div className="min-w-[160px]">
-                        <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} compact />
-                      </div>
-                      <div className="min-w-[160px]">
-                        <MapMetadataCard
-                          label="탐지 지점"
-                          value={detectionsLoading ? "-" : recentDetections.length ? `${recentDetections.length}개` : "-"}
-                          icon={Bug}
-                          compact
-                        />
-                      </div>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
+              <Accordion type="multiple" defaultValue={["detections"]} className="space-y-2">
                 <AccordionItem value="detections">
                   <AccordionTrigger>탐지 지점 목록</AccordionTrigger>
                   <AccordionContent>
@@ -782,11 +813,42 @@ export default function MapDetailPage() {
                           ) : detectionPoints.length === 0 ? (
                             <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
                           ) : (
-                            detectionPoints.map((point) => <DetectionPointItem key={point.id} {...point} />)
+                            detectionPoints.map((point) => (
+                              <DetectionPointItem key={point.id} {...point} onSelect={handleSelectDetection} />
+                            ))
                           )}
                         </div>
                       </CardContent>
                     </Card>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="info">
+                  <AccordionTrigger>지도 정보</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="flex gap-3 overflow-x-auto pb-2">
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} compact />
+                      </div>
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="생성 시각" value={renderDateTime(currentMap?.createdAt)} icon={Clock} compact />
+                      </div>
+                      {toAreaSize(currentMap) !== "-" ? (
+                        <div className="min-w-[160px]">
+                          <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} compact />
+                        </div>
+                      ) : null}
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} compact />
+                      </div>
+                      <div className="min-w-[160px]">
+                        <MapMetadataCard
+                          label="탐지 지점"
+                          value={detectionsLoading ? "-" : recentDetections.length ? `${recentDetections.length}개` : "-"}
+                          icon={Bug}
+                          compact
+                        />
+                      </div>
+                    </div>
                   </AccordionContent>
                 </AccordionItem>
               </Accordion>
@@ -804,7 +866,9 @@ export default function MapDetailPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-1 gap-3">
                   <MapMetadataCard label="지도 이름" value={currentMap?.name ?? "-"} icon={MapPin} />
                   <MapMetadataCard label="생성 시각" value={renderDateTime(currentMap?.createdAt)} icon={Clock} />
-                  <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
+                  {toAreaSize(currentMap) !== "-" ? (
+                    <MapMetadataCard label="맵 영역" value={toAreaSize(currentMap)} icon={Map} />
+                  ) : null}
                   <MapMetadataCard label="차량 ID" value={carId ? String(carId) : "-"} icon={Target} />
                   <MapMetadataCard
                     label="탐지 지점"
@@ -814,27 +878,7 @@ export default function MapDetailPage() {
                 </div>
               </div>
 
-              <Card className="bg-card border-border">
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium">탐지 지점 목록</CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                  {detectionsError && (
-                    <div className="p-4">
-                      <ErrorAlert title="탐지 기록 불러오기 실패" message={detectionsError} />
-                    </div>
-                  )}
-                  <div className="divide-y divide-border max-h-[320px] overflow-y-auto">
-                    {detectionsLoading ? (
-                      <div className="p-4 text-sm text-muted-foreground">불러오는 중...</div>
-                    ) : detectionPoints.length === 0 ? (
-                      <div className="p-4 text-sm text-muted-foreground">탐지 기록이 없습니다.</div>
-                    ) : (
-                      detectionPoints.map((point) => <DetectionPointItem key={point.id} {...point} />)
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+              {/* 탐지 지점 목록 moved under map visualization */}
             </div>
           </div>
         </div>

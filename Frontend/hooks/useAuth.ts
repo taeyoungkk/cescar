@@ -145,16 +145,15 @@ export function useAuth(): UseAuthReturn {
   )
 
   const logout = useCallback(async (): Promise<void> => {
-    if (!online) {
-      setError("오프라인 상태입니다.")
-      return
-    }
     if (logoutInFlightRef.current) return
     logoutInFlightRef.current = true
     const requestId = ++logoutRequestIdRef.current
     setIsLoading(true)
     try {
-      await unregisterFcmToken()
+      const timeout = new Promise<void>((resolve) => {
+        setTimeout(() => resolve(), 1500)
+      })
+      await Promise.race([unregisterFcmToken(), timeout])
       await authApi.logout()
       if (logoutRequestIdRef.current != requestId) return
       setUser(null)

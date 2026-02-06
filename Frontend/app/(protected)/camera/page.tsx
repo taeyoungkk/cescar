@@ -24,7 +24,7 @@ import * as mapApi from "@/core/api/map"
 import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
 import { useNetworkStatus } from "@/hooks/useNetworkStatus"
 import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
-import { parseBackendDate } from "@/lib/date"
+import { parseBackendDate, getKstNow } from "@/lib/date"
 import { ErrorAlert } from "@/components/ui/error-message"
 
 const DRIVE_MAX_V = 2.4
@@ -1046,6 +1046,7 @@ function ControlPanel({
   maxMissionPoints,
   modeError,
 }: ControlPanelProps) {
+  const showMissionInput = false
   const [dragIndex, setDragIndex] = React.useState<number | null>(null)
   const [showInvalidLines, setShowInvalidLines] = React.useState(true)
   const [showAllInvalidLines, setShowAllInvalidLines] = React.useState(false)
@@ -1115,127 +1116,7 @@ function ControlPanel({
           </div>
         )}
 
-        <div className="h-px bg-border" />
-
-        <div className="space-y-3">
-          <p className="text-xs text-muted-foreground uppercase tracking-wide">자율주행 제어</p>
-          <div className="space-y-2">
-            <textarea
-              value={missionInput}
-              onChange={(e) => onMissionInputChange(e.target.value)}
-              rows={3}
-              className="w-full min-h-[88px] sm:min-h-[120px] rounded-md border border-border bg-input px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              placeholder={`좌표를 줄마다 입력\n예시:\n12.3, 45.6\n14 48`}
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={onAddMissionPoints} disabled={reachedLimit}>
-                좌표 추가
-              </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={onAddFromDetections} disabled={reachedLimit}>
-                최근 탐지 좌표 추가
-              </Button>
-            </div>
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>
-                좌표 {missionPointCount}개 / {maxMissionPoints}개
-              </span>
-              <span>x,y 순서로 입력</span>
-            </div>
-            {invalidLineCount > 0 && showInvalidLines && (
-              <div className="space-y-2 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-2">
-                <div className="flex items-center justify-between">
-                  <p className="text-[11px] text-red-600">좌표 형식을 확인해 주세요.</p>
-                  <button
-                    type="button"
-                    className="text-[11px] text-red-600 hover:text-red-500"
-                    onClick={() => {
-                      setShowInvalidLines(false)
-                      setShowAllInvalidLines(false)
-                      onDismissMissionError()
-                    }}
-                  >
-                    닫기
-                  </button>
-                </div>
-                <div className="space-y-1">
-                  {limitedInvalidLines.map((line, idx) => (
-                    <div key={`${line}-${idx}`} className="rounded bg-red-500/10 px-2 py-1 text-[11px] text-red-600">
-                      {truncateLine(line)}
-                    </div>
-                  ))}
-                </div>
-                {invalidLineCount > 3 && (
-                  <button
-                    type="button"
-                    className="text-[11px] text-red-200 hover:text-red-100"
-                    onClick={() => setShowAllInvalidLines((prev) => !prev)}
-                  >
-                    {showAllInvalidLines ? "간단히 보기" : `더보기 (+${invalidLineCount - 3})`}
-                  </button>
-                )}
-              </div>
-            )}
-            {missionError && !showInvalidLines && (
-              <button
-                type="button"
-                className="text-[11px] text-red-300 underline-offset-2 hover:underline"
-                onClick={() => setShowInvalidLines(true)}
-              >
-                좌표 오류 다시 보기
-              </button>
-            )}
-          </div>
-          {missionPoints.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex flex-wrap gap-2">
-              {missionPoints.map((point, index) => (
-                <div
-                  key={`${point.x}-${point.y}-${index}`}
-                  className="flex items-center gap-1 rounded-full bg-secondary border border-transparent px-2 py-1 text-[11px] text-foreground"
-                  draggable
-                  onDragStart={() => setDragIndex(index)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => {
-                    if (dragIndex == null) return
-                    onMoveMissionPoint(dragIndex, index)
-                    setDragIndex(null)
-                  }}
-                >
-                  <span>
-                    ({point.x.toFixed(2)}, {point.y.toFixed(2)})
-                  </span>
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-foreground"
-                    onClick={() => onRemoveMissionPoint(index)}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              </div>
-            </div>
-          )}
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={onStartMission}
-              disabled={missionDisabled}
-            >
-              탐지 시작
-            </Button>
-            <Button
-              variant="outline"
-              className="w-full"
-              onClick={onStopMission}
-              disabled={missionStopDisabled}
-            >
-              탐지 중지
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">AUTO 모드에서 좌표가 있어야 시작됩니다.</p>
-        </div>
+        {/* 자율주행 제어(탐지 시작/중지) 컴포넌트 제거 */}
       </CardContent>
     </Card>
   )
@@ -1307,9 +1188,7 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
           <span className="text-sm text-muted-foreground font-mono">{updatedLabel}</span>
         </div>
 
-        <div className="rounded-md border border-border bg-secondary/30 p-2.5 text-xs text-muted-foreground">
-          좌표: X {xLabel} / Y {yLabel} · 방향: {headingLabel}°
-        </div>
+        {/* 좌표 표시 숨김 */}
       </CardContent>
     </Card>
   )
@@ -1318,6 +1197,31 @@ function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
 interface DetectionStatsPanelProps {
   stats: DetectionStats | null
   isLoading: boolean
+}
+
+function formatKstDetectionParts(timestamp?: string | null) {
+  if (!timestamp) return { date: "-", time: "-" }
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(timestamp)) {
+    return { date: "-", time: timestamp }
+  }
+  const d = parseBackendDate(timestamp)
+  if (!d) return { date: "-", time: "-" }
+  const date = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(d)
+    .replace(/\s/g, "")
+    .replace(/\.$/, "")
+  const time = d.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul",
+  })
+  return { date, time }
 }
 
 function DetectionStatsPanel({ stats, isLoading }: DetectionStatsPanelProps) {
@@ -1341,7 +1245,9 @@ function DetectionStatsPanel({ stats, isLoading }: DetectionStatsPanelProps) {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">마지막 탐지</span>
-              <span className="text-xs text-muted-foreground font-mono">{stats.lastDetectionTime}</span>
+              <span className="text-xs text-muted-foreground font-mono">
+                {formatKstDetectionParts(stats.lastDetectionTime).time}
+              </span>
             </div>
           </>
         )}
@@ -1516,7 +1422,9 @@ function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
                 >
                   <div className="flex items-center gap-2.5">
                     <Clock className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground font-mono">{event.time}</span>
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {formatKstDetectionParts(event.timestamp).time}
+                    </span>
                   </div>
                   <div className="flex items-center gap-2">
                     {snapshotUrl && (
@@ -1566,6 +1474,7 @@ export default function CameraPage() {
   const [carDetail, setCarDetail] = useState<CarDetail | null>(null)
   const [carDetailLoading, setCarDetailLoading] = useState(false)
   const [currentMap, setCurrentMap] = useState<{
+    id: number
     name?: string
     width: number
     height: number
@@ -1577,7 +1486,7 @@ export default function CameraPage() {
   const roomId = carDetail?.deviceId || (selectedCarId ? `car-${selectedCarId}` : fallbackRoomId)
 
   const carStatus = useCarStatus(selectedCarId ?? 0, { enabled: !!selectedCarId, intervalMs: 1000 })
-  const recentDetections = useRecentDetections(selectedCarId, 10)
+  const recentDetections = useRecentDetections(selectedCarId, 10, currentMap?.id ?? null)
 
   // Local UI state only (no data)
   const [showOverlay, setShowOverlay] = useState(true)
@@ -1695,6 +1604,7 @@ export default function CameraPage() {
           return
         }
         setCurrentMap({
+          id: map.id,
           name: map.name,
           width: map.width,
           height: map.height,
@@ -1752,13 +1662,14 @@ export default function CameraPage() {
   const lastDetectionLabel = useMemo(() => {
     const latest = recentDetections.recentDetections[0]
     if (!latest) return "-"
-    return `${latest.date} ${latest.time}`
+    const parts = formatKstDetectionParts(latest.timestamp)
+    return `${parts.date} ${parts.time}`
   }, [recentDetections.recentDetections])
 
   const isDetecting = useMemo(() => {
     const latest = recentDetections.recentDetections[0]
     if (!latest?.timestamp) return false
-    const last = new Date(latest.timestamp)
+    const last = parseBackendDate(latest.timestamp) ?? new Date(latest.timestamp)
     if (Number.isNaN(last.getTime())) return false
     return Date.now() - last.getTime() < 60_000
   }, [recentDetections.recentDetections])
@@ -2271,7 +2182,11 @@ export default function CameraPage() {
       detections={recentDetections.recentDetections}
       isLoading={recentDetections.isLoading}
       onSelect={(id) => {
-        window.location.href = `/dashboard?detectionId=${id}`
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem("dashboard.filters")
+          window.sessionStorage.setItem("dashboard.highlightDetectionId", String(id))
+        }
+        window.location.href = "/dashboard"
       }}
       baseUrl={baseUrl}
     />
@@ -2379,6 +2294,9 @@ export default function CameraPage() {
                 modeError={modeError}
               />
             </div>
+            <div className="mt-3">
+              {eventLogCard}
+            </div>
           </div>
 
           <div className="w-full lg:w-80 xl:w-96 space-y-3">
@@ -2400,10 +2318,7 @@ export default function CameraPage() {
                   <AccordionTrigger>탐지 통계</AccordionTrigger>
                   <AccordionContent>{statsCard}</AccordionContent>
                 </AccordionItem>
-                <AccordionItem value="log">
-                  <AccordionTrigger>탐지 로그</AccordionTrigger>
-                  <AccordionContent>{eventLogCard}</AccordionContent>
-                </AccordionItem>
+                {/* 탐지 로그 moved under control panel */}
               </Accordion>
             </div>
 
@@ -2412,7 +2327,7 @@ export default function CameraPage() {
               {carDetailCard}
               {statusCard}
               {statsCard}
-              {eventLogCard}
+              {/* 탐지 로그 moved under control panel */}
             </div>
           </div>
         </div>

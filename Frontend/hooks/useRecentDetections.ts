@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import type { Detection, DetectionStats } from "@/core/types"
 import * as detectionApi from "@/core/api/detection"
+import { getKstNow, parseBackendDate } from "@/lib/date"
 
 interface UseRecentDetectionsReturn {
   recentDetections: Detection[]
@@ -13,7 +14,11 @@ interface UseRecentDetectionsReturn {
   refresh: () => Promise<void>
 }
 
-export function useRecentDetections(carId: number | null, limit: number = 5): UseRecentDetectionsReturn {
+export function useRecentDetections(
+  carId: number | null,
+  limit: number = 5,
+  mapId?: number | null
+): UseRecentDetectionsReturn {
   const [recentDetections, setRecentDetections] = useState<Detection[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -29,13 +34,14 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
       return { todayCount: 0, weekCount: 0, falseAlarmRate: 0, lastDetectionTime: "-" }
     }
 
-    const now = new Date()
+    const now = getKstNow()
     const isSameDay = (a: Date, b: Date) =>
       a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
     const todayCount = items.filter((d) => {
       if (!d.timestamp) return false
-      const t = new Date(d.timestamp)
+      const t = parseBackendDate(d.timestamp)
+      if (!t) return false
       return !Number.isNaN(t.getTime()) && isSameDay(t, now)
     }).length
 
@@ -44,8 +50,8 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
 
     const weekCount = items.filter((d) => {
       if (!d.timestamp) return false
-      const t = new Date(d.timestamp)
-      return !Number.isNaN(t.getTime()) && t >= weekAgo
+      const t = parseBackendDate(d.timestamp)
+      return !!t && !Number.isNaN(t.getTime()) && t >= weekAgo
     }).length
 
     const last = items[0]
@@ -80,15 +86,37 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
 
     setIsLoading(true)
     try {
-      const detectionsResponse = await detectionApi.getRecentDetections(carId, limit)
-      const items = detectionsResponse.success && detectionsResponse.data ? detectionsResponse.data : []
-      if (requestIdRef.current !== requestId) return
-      setRecentDetections(items)
+      if (mapId) {
+        const logsResponse = await detectionApi.getCarLogs(carId, 50)
+        if (requestIdRef.current !== requestId) return
+        const logs = logsResponse.success && logsResponse.data ? logsResponse.data : []
+        const targetLog = logs.find((log) => log.mapId === mapId)
+        if (!targetLog) {
+          setRecentDetections([])
+          setStats(null)
+          setError(null)
+          return
+        }
+        const detectionsResponse = await detectionApi.getDetectionsByLog(targetLog.id, limit, carId)
+        const items = detectionsResponse.success && detectionsResponse.data ? detectionsResponse.data : []
+        if (requestIdRef.current !== requestId) return
+        setRecentDetections(items)
 
-      const latestTime = items[0]?.time ?? "-"
-      const statsResponse = await detectionApi.getLatestLogStatistics(carId, latestTime)
-      if (requestIdRef.current !== requestId) return
-      setStats(statsResponse.success ? statsResponse.data : null)
+        const latestTime = items[0]?.timestamp ?? items[0]?.time ?? "-"
+        const statsResponse = await detectionApi.getLogStatistics(targetLog.id, latestTime)
+        if (requestIdRef.current !== requestId) return
+        setStats(statsResponse.success ? statsResponse.data : null)
+      } else {
+        const detectionsResponse = await detectionApi.getRecentDetections(carId, limit)
+        const items = detectionsResponse.success && detectionsResponse.data ? detectionsResponse.data : []
+        if (requestIdRef.current !== requestId) return
+        setRecentDetections(items)
+
+        const latestTime = items[0]?.timestamp ?? items[0]?.time ?? "-"
+        const statsResponse = await detectionApi.getLatestLogStatistics(carId, latestTime)
+        if (requestIdRef.current !== requestId) return
+        setStats(statsResponse.success ? statsResponse.data : null)
+      }
       setError(null)
     } catch {
       if (requestIdRef.current !== requestId) return
@@ -103,7 +131,7 @@ export function useRecentDetections(carId: number | null, limit: number = 5): Us
         fetchData()
       }
     }
-  }, [carId, limit, online])
+  }, [carId, limit, mapId, online])
 
   useEffect(() => {
     fetchData()

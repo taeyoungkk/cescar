@@ -43,7 +43,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
 lib64/
 parts/
 sdist/
@@ -747,3 +746,5 @@ AMENT_IGNORE
 .ionide
 
 # End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,ros,ros2,opencv,reactnative,cmake,intellij,flask,react
+.vercel
+.env*.local

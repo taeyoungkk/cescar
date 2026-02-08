@@ -1,6 +1,8 @@
 # Created by https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,ros,ros2,opencv,reactnative,cmake,intellij,flask,react
 # Edit at https://www.toptal.com/developers/gitignore?templates=visualstudiocode,python,ros,ros2,opencv,reactnative,cmake,intellij,flask,react
 
+firebase-service-account.json
+
 ### CMake ###
 CMakeLists.txt.user
 CMakeCache.txt
@@ -764,3 +766,5 @@ env/
 .vercel
 .env*.local
 
+backend/src/main/resources/firebase-service-account.json
+# End of https://www.toptal.com/developers/gitignore/api/visualstudiocode,python,ros,ros2,opencv,reactnative,cmake,intellij,flask,react

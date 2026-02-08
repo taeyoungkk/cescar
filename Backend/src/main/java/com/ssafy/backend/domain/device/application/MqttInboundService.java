@@ -61,6 +61,10 @@ public class MqttInboundService {
     private final Map<String, CarStatusSnapshot> carStatusSnapshots = new ConcurrentHashMap<>();
     private final Set<String> mapResultProcessed = ConcurrentHashMap.newKeySet();
     private final Map<String, Long> statusLastSeen = new ConcurrentHashMap<>();
+    private final Map<String, Long> detectionDedupCache = new ConcurrentHashMap<>();
+
+    // 동일 탐지 중복 전송 방지용 (ms)
+    private static final long DETECTION_DEDUP_WINDOW_MS = 1500L;
 
     @Value("${status.ttl-seconds:60}")
     private long statusTtlSeconds;
@@ -133,18 +137,24 @@ public class MqttInboundService {
         System.out.println("[DETECTION] " + robotId + " - object=" + detect.getObject_type()
                 + " (confidence=" + detect.getConfidence() + ")");
 
+        if (shouldSkipDuplicateDetection(robotId, detect)) {
+            System.out.println("[DETECTION] duplicate skipped robotId=" + robotId);
+            return;
+        }
+
         // 최신 탐지 캐시
         detectionCache.put(robotId, detect);
         // 탐지 데이터는 WS로 브로드캐스트
         broadcastDetection(payload, topic, robotId);
 
         // 탐지 시 FCM 알림 전송
-        String title = "[" + robotId + "] Detection";
-        String body = String.format("%s detected (%.1f%%)", detect.getObject_type(), detect.getConfidence());
+        String title = buildAlertTitle(detect);
+        String body = buildAlertBody(detect);
 
         Car car = carRepository.findByDeviceId(robotId).orElse(null);
+        Long detectionId = null;
         if (car != null) {
-            detectionHistoryService.saveFromMqtt(
+            detectionId = detectionHistoryService.saveFromMqtt(
                     car,
                     detect.getObject_type(),
                     detect.getConfidence() != null ? detect.getConfidence().floatValue() : null,
@@ -159,8 +169,54 @@ public class MqttInboundService {
             return;
         }
 
-        fcmService.sendToMember(car.getOwner().getId(), title, body);
+        fcmService.sendToMember(car.getOwner().getId(), title, body, detectionId);
         System.out.println("[FCM] Sent: " + title);
+    }
+
+    private boolean shouldSkipDuplicateDetection(String robotId, DetectionRequest detect) {
+        if (robotId == null || robotId.isBlank() || detect == null) {
+            return false;
+        }
+        String label = detect.getObject_type() != null ? detect.getObject_type() : "";
+        String imageUrl = detect.getImageUrl() != null ? detect.getImageUrl() : "";
+        Double x = detect.getX();
+        Double y = detect.getY();
+        String key = robotId + "|" + label + "|" + imageUrl + "|" + x + "|" + y;
+        long now = System.currentTimeMillis();
+        Long last = detectionDedupCache.put(key, now);
+        if (last == null) {
+            return false;
+        }
+        return (now - last) <= DETECTION_DEDUP_WINDOW_MS;
+    }
+
+    private String buildAlertTitle(DetectionRequest detect) {
+        String label = detect != null && detect.getObject_type() != null
+                ? detect.getObject_type()
+                : "이상 물체";
+        return "긴급 알림: " + label + "가 감지되었습니다.";
+    }
+
+    private String buildAlertBody(DetectionRequest detect) {
+        String label = detect != null && detect.getObject_type() != null
+                ? detect.getObject_type()
+                : "이상 물체";
+        Double rawConfidence = detect != null ? detect.getConfidence() : null;
+        Double percent = toPercent(rawConfidence);
+        String confidenceText = percent != null ? String.format("확률 %.1f%%", percent) : "확률 정보 없음";
+        String timestamp = java.time.LocalDateTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        return String.format("%s가 감지되었습니다. (%s, %s)", label, confidenceText, timestamp);
+    }
+
+    private Double toPercent(Double value) {
+        if (value == null) {
+            return null;
+        }
+        if (value <= 1.0d) {
+            return value * 100.0d;
+        }
+        return value;
     }
 
     private void broadcastDetection(String payload, String topic, String robotId) {

@@ -64,7 +64,7 @@ public class DetectionHistoryService {
      * - map이 없으면 저장 스킵
      */
     @Transactional
-    public void saveFromMqtt(Car car,
+    public Long saveFromMqtt(Car car,
             String label,
             Float confidence,
             Double x,
@@ -72,30 +72,42 @@ public class DetectionHistoryService {
             String imageUrl,
             String videoUrl) {
         if (car == null) {
-            return;
+            return null;
         }
         if (label == null || confidence == null) {
-            return;
+            return null;
         }
         if (car.getOwner() == null) {
-            return;
+            return null;
         }
 
         Long ownerId = car.getOwner().getId();
+        SlamMap currentMap = car.getCurrentMap();
+        if (currentMap == null) {
+            return null;
+        }
+
         com.ssafy.backend.domain.history.domain.CarLog carLog = carLogRepository
                 .findFirstByCarIdAndOwnerIdAndStatusOrderByStartAtDesc(car.getId(), ownerId, LogStatus.RUNNING)
-                .orElseGet(() -> {
-                    SlamMap currentMap = car.getCurrentMap();
-                    if (currentMap == null) {
-                        return null;
-                    }
-                    com.ssafy.backend.domain.history.domain.CarLog newLog = com.ssafy.backend.domain.history.domain.CarLog
-                            .create(car, currentMap, ownerId);
-                    return carLogRepository.save(newLog);
-                });
+                .orElse(null);
+
+        if (carLog != null) {
+            Long runningMapId = carLog.getMap() != null ? carLog.getMap().getId() : null;
+            if (runningMapId != null && !runningMapId.equals(currentMap.getId())) {
+                carLog.finish(LogStatus.COMPLETED);
+                carLogRepository.save(carLog);
+                carLog = null;
+            }
+        }
 
         if (carLog == null) {
-            return;
+            com.ssafy.backend.domain.history.domain.CarLog newLog = com.ssafy.backend.domain.history.domain.CarLog
+                    .create(car, currentMap, ownerId);
+            carLog = carLogRepository.save(newLog);
+        }
+
+        if (carLog == null) {
+            return null;
         }
 
         BigDecimal mappedX = x != null ? BigDecimal.valueOf(x) : null;
@@ -118,6 +130,8 @@ public class DetectionHistoryService {
             carLog.finish(LogStatus.COMPLETED);
             carLogRepository.save(carLog);
         }
+
+        return detection.getId();
     }
 
     private boolean isAbsoluteUrl(String value) {

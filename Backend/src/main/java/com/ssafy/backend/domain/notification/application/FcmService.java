@@ -5,6 +5,7 @@ import com.google.firebase.messaging.FirebaseMessagingException;
 import com.google.firebase.messaging.MessagingErrorCode;
 import com.google.firebase.messaging.Message;
 import com.google.firebase.messaging.Notification;
+import com.google.firebase.messaging.WebpushFcmOptions;
 import com.google.firebase.messaging.WebpushConfig;
 import com.ssafy.backend.domain.member.dao.MemberRepository;
 import com.ssafy.backend.domain.member.domain.Member;
@@ -79,13 +80,30 @@ public class FcmService {
 
 
     public void sendMessage(String targetToken, String title, String body) {
+        sendMessage(targetToken, title, body, null);
+    }
+
+    public void sendMessage(String targetToken, String title, String body, String detectionId) {
         try {
+            String link = (detectionId != null && !detectionId.isBlank())
+                    ? "/dashboard?detectionId=" + detectionId
+                    : "/dashboard";
+            String safeTitle = title != null ? title : "";
+            String safeBody = body != null ? body : "";
+            System.out.println("[FCM] payload token=" + tokenTag(targetToken)
+                    + " title=" + safeTitle
+                    + " body=" + safeBody
+                    + " detectionId=" + (detectionId != null ? detectionId : ""));
             Message message = Message.builder()
                     .setToken(targetToken)
                     .setWebpushConfig(WebpushConfig.builder()
                             .putHeader("Urgency", "high")
+                            .setFcmOptions(WebpushFcmOptions.withLink(link))
                             .build())
-                    .setNotification(Notification.builder().setTitle(title).setBody(body).build())
+                    .setNotification(Notification.builder().setTitle(safeTitle).setBody(safeBody).build())
+                    .putData("title", safeTitle)
+                    .putData("body", safeBody)
+                    .putData("detectionId", detectionId != null ? detectionId : "")
                     .build();
 
             String response = FirebaseMessaging.getInstance().send(message);
@@ -109,6 +127,10 @@ public class FcmService {
     }
 
     public void sendToMember(Long memberId, String title, String body) {
+        sendToMember(memberId, title, body, null);
+    }
+
+    public void sendToMember(Long memberId, String title, String body, Long detectionId) {
         List<NotificationToken> tokens = notificationTokenRepository.findAllByMemberId(memberId);
 
         if (tokens.isEmpty()) {
@@ -117,8 +139,9 @@ public class FcmService {
         }
 
         System.out.println("[FCM] send to member start memberId=" + memberId + " tokenCount=" + tokens.size());
+        String detectionIdText = detectionId != null ? String.valueOf(detectionId) : null;
         for (NotificationToken token : tokens) {
-            sendMessage(token.getToken(), title, body);
+            sendMessage(token.getToken(), title, body, detectionIdText);
         }
     }
 
@@ -135,5 +158,14 @@ public class FcmService {
         for (NotificationToken token : tokens) {
             sendMessage(token.getToken(), title, body);
         }
+    }
+
+    private String tokenTag(String token) {
+        if (token == null || token.isBlank()) {
+            return "empty";
+        }
+        int len = token.length();
+        String suffix = token.substring(Math.max(0, len - 8));
+        return "..." + suffix;
     }
 }

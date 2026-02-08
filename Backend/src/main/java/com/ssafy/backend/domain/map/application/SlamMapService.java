@@ -2,6 +2,9 @@ package com.ssafy.backend.domain.map.application;
 
 import com.ssafy.backend.domain.car.dao.CarRepository;
 import com.ssafy.backend.domain.car.domain.Car;
+import com.ssafy.backend.domain.history.dao.CarLogRepository;
+import com.ssafy.backend.domain.history.domain.CarLog;
+import com.ssafy.backend.domain.history.domain.LogStatus;
 import com.ssafy.backend.domain.map.dao.SlamMapRepository;
 import com.ssafy.backend.domain.map.domain.SlamMap;
 import com.ssafy.backend.domain.map.dto.SlamMapRequest;
@@ -33,6 +36,7 @@ public class SlamMapService {
 
     private final CarRepository carRepository;
     private final SlamMapRepository slamMapRepository;
+    private final CarLogRepository carLogRepository;
     private final StorageService storageService;
     private final MqttGateway mqttGateway;
     private final ObjectMapper objectMapper;
@@ -61,6 +65,7 @@ public class SlamMapService {
 
         SlamMap savedMap = slamMapRepository.save(map);
         car.updateCurrentMap(savedMap);
+        rotateCarLogForMapChange(car, savedMap);
 
         return toMapDetailResponse(savedMap);
     }
@@ -128,6 +133,7 @@ public class SlamMapService {
 
         SlamMap savedMap = slamMapRepository.save(map);
         car.updateCurrentMap(savedMap);
+        rotateCarLogForMapChange(car, savedMap);
         return true;
     }
 
@@ -201,6 +207,7 @@ public class SlamMapService {
                 .orElseThrow(() -> new CustomException(ErrorCode.MAP_NOT_FOUND));
 
         car.updateCurrentMap(map);
+        rotateCarLogForMapChange(car, map);
 
         return toMapDetailResponse(map);
     }
@@ -214,6 +221,32 @@ public class SlamMapService {
         }
 
         return car;
+    }
+
+    private void rotateCarLogForMapChange(Car car, SlamMap newMap) {
+        if (car == null || newMap == null) {
+            return;
+        }
+        if (car.getOwner() == null) {
+            return;
+        }
+        Long ownerId = car.getOwner().getId();
+
+        CarLog running = carLogRepository
+                .findFirstByCarIdAndOwnerIdAndStatusOrderByStartAtDesc(car.getId(), ownerId, LogStatus.RUNNING)
+                .orElse(null);
+
+        if (running != null && running.getMap() != null
+                && running.getMap().getId().equals(newMap.getId())) {
+            return;
+        }
+
+        if (running != null) {
+            running.finish(LogStatus.COMPLETED);
+            carLogRepository.save(running);
+        }
+
+        carLogRepository.save(CarLog.create(car, newMap, ownerId));
     }
 
     private SlamMapResponse.MapDetailResponse toMapDetailResponse(SlamMap map) {

@@ -23,9 +23,20 @@ export function FcmListener() {
         return trimmed ? `[!] ${trimmed}` : "[!] 알림"
       }
 
+      const formatKst = (value: string | undefined) => {
+        if (!value) return ""
+        const parsed = new Date(value)
+        if (Number.isNaN(parsed.getTime())) return String(value)
+        const kst = new Date(parsed.getTime() + 9 * 60 * 60 * 1000)
+        const pad = (n: number) => String(n).padStart(2, "0")
+        return `${kst.getFullYear()}-${pad(kst.getMonth() + 1)}-${pad(kst.getDate())} ${pad(
+          kst.getHours()
+        )}:${pad(kst.getMinutes())}:${pad(kst.getSeconds())}`
+      }
+
       const buildBody = (rawBody: string | undefined, data: any) => {
         const body = rawBody ?? ""
-        const time = data?.timestamp || data?.detectedAt || ""
+        const time = formatKst(data?.timestamp || data?.detectedAt)
         const hasDetectedLine = body.includes("감지되었습니다")
         const hasProbabilityLine = body.includes("확률")
         const hasTimeLine = body.includes("시간")

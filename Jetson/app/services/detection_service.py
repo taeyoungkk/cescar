@@ -99,6 +99,10 @@ class DetectionService:
         # 4. 추적 모드일 때 cmd_vel 계산 및 Pi로 전송 (tracking_service 연동)
         # import를 여기서 하는 이유: circular import 방지
         from app.services.tracking_service import tracking_service
+        from app.services.auto_mode_controller import auto_mode_controller
+        
+        # AUTO 모드에서 탐지 발생 시 PATROL → TRACKING 자동 전환
+        auto_mode_controller.on_detection(detections)
         
         if tracking_service.is_tracking() and detections:
             tracking_service.process_detection(

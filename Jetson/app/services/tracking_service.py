@@ -43,9 +43,9 @@ class TrackingService:
         
         # 추적 파라미터
         self._dead_zone = 0.30  # 화면 중앙 30% 이내면 직진
-        self._max_steer = 0.8   # 최대 조향값
-        self._base_speed = 2.4  # 기본 전진 속도
-        self._min_speed = 2.0  # 최소 속도 (가까울 때)
+        self._max_steer = 1.0   # 최대 조향값
+        self._base_speed = 1.0  # 기본 전진 속도
+        self._min_speed =  0.8 # 최소 속도 (가까울 때)
         
         # 상태 추적
         self._last_cmd_time: float = 0.0

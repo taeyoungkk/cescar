@@ -128,6 +128,19 @@ async def lifespan(app: FastAPI):
         print("[*] Starting WebRTC Service...")
         webrtc_service.start(settings.ROBOT_ID)
 
+    # LiDAR Subscriber (ROS2 /scan for AUTO patrol mode)
+    lidar_node = None
+    if platform.system() == 'Linux':
+        try:
+            from app.ros2.lidar_subscriber import init_lidar_node
+            print("[*] Starting LiDAR Subscriber (ROS2 /scan)...")
+            lidar_node = init_lidar_node()
+            print("[*] LiDAR Subscriber started")
+        except ImportError as e:
+            logger.warning(f"LiDAR subscriber import failed: {e}")
+        except Exception as e:
+            logger.warning(f"LiDAR subscriber failed: {e}")
+
     # Background Tasks
     status_task = asyncio.create_task(system_status_publisher())
     detection_task = asyncio.create_task(detection_publisher())

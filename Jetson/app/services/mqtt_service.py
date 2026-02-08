@@ -78,11 +78,19 @@ class MQTTService:
                 mode = data.get("mode", "").upper()
                 from app.services.tracking_service import tracking_service
                 from app.services.explore_service import explore_service
+                from app.services.auto_mode_controller import auto_mode_controller
                 
                 if mode == "AUTO":
-                    # Explore 모드 시작
+                    # AUTO 모드 시작 (패트롤 + 트래킹 자동 전환)
                     self._stop_burst_flag = True # Stop Burst 중단
-                    logger.info("Starting explore service")
+                    logger.info("Starting AUTO mode (patrol + tracking)")
+                    auto_mode_controller.start()
+                    print(f"[MODE] -> AUTO STARTED (Received via {msg.topic})")
+                
+                elif mode == "EXPLORE":
+                    # 레거시 Explore 모드 (영상 촬영용)
+                    self._stop_burst_flag = True
+                    logger.info("Starting explore service (legacy)")
                     explore_service.start_explore()
                     print(f"[MODE] -> EXPLORE STARTED (Received via {msg.topic})")
                     
@@ -104,8 +112,9 @@ class MQTTService:
                         self.burst_stop() 
                         
                         logger.info("Stopping all services (Threaded)")
-                        tracking_service.stop_tracking()
-                        explore_service.stop_explore()
+                        from app.services.auto_mode_controller import auto_mode_controller
+                        auto_mode_controller.stop()  # 패트롤/트래킹 모두 중지
+                        explore_service.stop_explore()  # 레거시 explore도 중지
                         print(f"[MODE] -> ALL STOPPED (Processed in background)")
 
                     # 데몬 스레드로 실행하여 즉시 리턴
@@ -132,10 +141,14 @@ class MQTTService:
                     mode = data.get("mode", "").upper()
                     from app.services.tracking_service import tracking_service
                     from app.services.explore_service import explore_service
+                    from app.services.auto_mode_controller import auto_mode_controller
                     
                     if mode == "AUTO":
                         self._stop_burst_flag = True
-                        logger.info("Starting explore service")
+                        logger.info("Starting AUTO mode")
+                        auto_mode_controller.start()
+                    elif mode == "EXPLORE":
+                        self._stop_burst_flag = True
                         explore_service.start_explore()
                     elif mode == "TRACK":
                         self._stop_burst_flag = True
@@ -145,7 +158,7 @@ class MQTTService:
                         self.burst_stop()
                         
                         logger.info("Stopping all services")
-                        tracking_service.stop_tracking()
+                        auto_mode_controller.stop()
                         explore_service.stop_explore()
 
             # 4. 지도 생성 프로토콜
@@ -175,6 +188,19 @@ class MQTTService:
                     
         except Exception as e:
             logger.error(f"Message processing error: {e}")
+
+    def burst_stop(self, count: int = 5, interval: float = 0.05) -> None:
+        """정지 명령을 여러 번 연속 전송 (빠른 정지 보장)"""
+        import json
+        stop_payload = json.dumps({"v": 0.0, "w": 0.0, "source": "burst_stop"})
+        
+        for i in range(count):
+            if self._stop_burst_flag:
+                break
+            self.publish(settings.TOPIC_CMD_VEL, stop_payload)
+            time.sleep(interval)
+        
+        logger.info(f"Burst stop completed ({count} commands)")
 
     def publish(self, topic: str, message: str):
         if self.client and self.client.is_connected():

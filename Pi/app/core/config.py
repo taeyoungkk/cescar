@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ROBOT_ID: str = "robot-01"
     
     # Watchdog timeout (ms)
-    WATCHDOG_MS: int = 300
+    WATCHDOG_MS: int = 2000
     
     # Encoder GPIO pins (BCM numbering)
     ENCODER_PIN_A: int = 17

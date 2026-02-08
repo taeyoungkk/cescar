@@ -1,7 +1,8 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useRef } from "react"
 import { listenForegroundMessages } from "@/lib/fcm"
+import { parseBackendDate } from "@/lib/date"
 import { useToast } from "@/components/ui/use-toast"
 import { toastInfo } from "@/lib/toast-helpers"
 import { useAlertsStore } from "@/hooks/useAlertsStore"
@@ -19,15 +20,43 @@ export function FcmListener() {
 
     const handleFcmPayload = (payload: any) => {
       const normalizeTitle = (rawTitle: string | undefined) => {
-        const trimmed = (rawTitle ?? "").replace(/^긴급 알림[:\s]*/i, "").trim()
-        return trimmed ? `[!] ${trimmed}` : "[!] 알림"
+        const trimmed = (rawTitle ?? "").replace(/^Emergency Alert[:\s]*/i, "").trim()
+        return trimmed ? `[!] ${trimmed}` : "[!] Alert"
+      }
+
+      const formatKstFromDate = (date: Date) => {
+        const pad = (n: number) => String(n).padStart(2, "0")
+        const kst = new Date(date.toLocaleString("en-US", { timeZone: "Asia/Seoul" }))
+        return `${kst.getFullYear()}-${pad(kst.getMonth() + 1)}-${pad(kst.getDate())} ${pad(
+          kst.getHours()
+        )}:${pad(kst.getMinutes())}:${pad(kst.getSeconds())}`
+      }
+
+      const normalizeBodyTime = (body: string) => {
+        const match = body.match(/(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/)
+        if (!match) return body
+        const parsed = parseBackendDate(match[1])
+        if (!parsed) return body
+        const kstStr = formatKstFromDate(parsed)
+        return body.replace(match[1], kstStr)
       }
 
       const formatKst = (value: string | undefined) => {
         if (!value) return ""
+        const tzMatch = value.match(/([+-])(\d{2}):?(\d{2})$/)
+        const isUtc = value.endsWith("Z")
+        if (!isUtc && !tzMatch) return ""
         const parsed = new Date(value)
         if (Number.isNaN(parsed.getTime())) return String(value)
-        const kst = new Date(parsed.getTime() + 9 * 60 * 60 * 1000)
+
+        let offsetMinutes = 0
+        if (isUtc) {
+          offsetMinutes = 0
+        } else if (tzMatch) {
+          const sign = tzMatch[1] === "-" ? -1 : 1
+          offsetMinutes = sign * (parseInt(tzMatch[2], 10) * 60 + parseInt(tzMatch[3], 10))
+        }
+        const kst = new Date(parsed.getTime() + (9 * 60 - offsetMinutes) * 60 * 1000)
         const pad = (n: number) => String(n).padStart(2, "0")
         return `${kst.getFullYear()}-${pad(kst.getMonth() + 1)}-${pad(kst.getDate())} ${pad(
           kst.getHours()
@@ -35,15 +64,15 @@ export function FcmListener() {
       }
 
       const buildBody = (rawBody: string | undefined, data: any) => {
-        const body = rawBody ?? ""
         const time = formatKst(data?.timestamp || data?.detectedAt)
-        const hasDetectedLine = body.includes("감지되었습니다")
-        const hasProbabilityLine = body.includes("확률")
-        const hasTimeLine = body.includes("시간")
+        const body = normalizeBodyTime(rawBody ?? "")
+        const hasDetectedLine = body.toLowerCase().includes("detected")
+        const hasProbabilityLine = body.toLowerCase().includes("prob")
+        const hasTimeLine = body.toLowerCase().includes("time")
 
         if (hasDetectedLine || hasProbabilityLine || hasTimeLine) {
           if (time && !hasTimeLine) {
-            return `${body}\n시간: ${time}`
+            return `${body}\nTime: ${time}`
           }
           return body
         }
@@ -61,12 +90,12 @@ export function FcmListener() {
           }
         }
 
-        if (!type && !probability && !time) return body || "알림이 도착했습니다."
+        if (!type && !probability && !time) return body || "Notification received."
 
         const lines = []
-        lines.push(`${type || "탐지"} 감지되었습니다.`)
-        if (probability) lines.push(`확률: ${probability}`)
-        if (time) lines.push(`시간: ${time}`)
+        lines.push(`${type || "Detection"} detected.`)
+        if (probability) lines.push(`Probability: ${probability}`)
+        if (time) lines.push(`Time: ${time}`)
         return lines.join("\n")
       }
 
@@ -83,7 +112,6 @@ export function FcmListener() {
           : `${title}:${message}`)
       const now = Date.now()
       const ttlMs = 10000
-      // Clear old entries
       for (const [key, ts] of seenRef.current.entries()) {
         if (now - ts > ttlMs) seenRef.current.delete(key)
       }
@@ -116,18 +144,14 @@ export function FcmListener() {
               data: payload?.data ?? {},
             })
           })
-        } catch (_err) {
-          // best-effort
-        }
+        } catch (_err) {}
         try {
           new Notification(title, {
             body: message,
             icon: "/icons/icon-192.png",
             data: payload?.data ?? {},
           })
-        } catch (_err) {
-          // best-effort
-        }
+        } catch (_err) {}
       }
 
       toastInfo(toastRef.current, title, message)
@@ -151,8 +175,7 @@ export function FcmListener() {
         ...current,
       ])
     }
-
-    const handleMessage = (event: MessageEvent) => {
+const handleMessage = (event: MessageEvent) => {
       if (event.data?.type !== "FCM_FOREGROUND_MESSAGE") return
       console.info("[FcmListener] SW/Broadcast message received", event.data)
       handleFcmPayload(event.data.payload)
@@ -185,3 +208,4 @@ export function FcmListener() {
 
   return null
 }
+

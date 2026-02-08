@@ -1,0 +1,2337 @@
+﻿"use client"
+
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
+import {
+  Wifi,
+  WifiOff,
+  Camera,
+  Clock,
+  Circle,
+  Square,
+} from "lucide-react"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { useToast } from "@/components/ui/use-toast"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
+import { useCarStatus } from "@/hooks/useCarStatus"
+import { useRecentDetections } from "@/hooks/useRecentDetections"
+import * as carApi from "@/core/api/car"
+import * as mapApi from "@/core/api/map"
+import type { CarDetail, CarStatus, Detection, DetectionStats } from "@/core/types"
+import { useNetworkStatus } from "@/hooks/useNetworkStatus"
+import { toastError, toastInfo, toastSuccess } from "@/lib/toast-helpers"
+import { parseBackendDate, getKstNow } from "@/lib/date"
+import { ErrorAlert } from "@/components/ui/error-message"
+
+const DRIVE_MAX_V = 2.4
+const DRIVE_MAX_W = 5.0
+const TURN_MIN_FORWARD = 0.6
+const TURN_BOOST = 0.6
+
+function applyDriveCurve(v: number, w: number) {
+  let vAdj = v
+  let wAdj = w
+  if (vAdj === 0 && wAdj !== 0) {
+    vAdj = 0.4
+  }
+  const turn = Math.min(1, Math.abs(wAdj))
+  const forwardSign = vAdj < -0.001 ? -1 : 1
+  let vAbs = Math.abs(vAdj)
+  if (turn > 0) {
+    vAbs = Math.max(vAbs, 0.4)
+  }
+  const vNorm = vAbs * forwardSign
+  const wNorm = Math.max(-1, Math.min(1, wAdj))
+  return { v: vNorm * DRIVE_MAX_V, w: wNorm * DRIVE_MAX_W }
+}
+
+// ============================================
+// Presentational Components (UI Only)
+// ============================================
+
+interface LiveCameraViewProps {
+  isOnline: boolean
+  networkOnline: boolean
+  isDetecting: boolean
+  showOverlay: boolean
+  lastDetectionLabel: string
+  isManual: boolean
+  manualDisabled: boolean
+  driveVector: { v: number; w: number }
+  onDriveVector: (v: number, w: number) => void
+  onDriveStop: () => void
+  onDisplayVector: (v: number, w: number) => void
+  wsUrl: string
+  detectionWsUrl: string
+  roomId: string
+  cameraConnected: boolean
+  onToggleCameraConnection: () => void
+}
+
+function LiveCameraView({
+  isOnline,
+  networkOnline,
+  isDetecting,
+  showOverlay,
+  lastDetectionLabel,
+  isManual,
+  manualDisabled,
+  driveVector,
+  onDriveVector,
+  onDriveStop,
+  onDisplayVector,
+  wsUrl,
+  detectionWsUrl,
+  roomId,
+  cameraConnected,
+  onToggleCameraConnection,
+}: LiveCameraViewProps) {
+  const [hasStream, setHasStream] = React.useState(false)
+  const [connectionState, setConnectionState] = React.useState<"offline" | "connecting" | "signaling" | "connected" | "failed">("offline")
+  const [reconnectInfo, setReconnectInfo] = React.useState<{ active: boolean; reason?: string; nextAt?: number }>({
+    active: false,
+  })
+  const showVideo = hasStream
+  const closingRef = React.useRef(false)
+
+  const videoRef = React.useRef<HTMLVideoElement | null>(null)
+  const canvasRef = React.useRef<HTMLCanvasElement | null>(null)
+
+  const wsRef = React.useRef<WebSocket | null>(null)
+  const detectionWsRef = React.useRef<WebSocket | null>(null)
+  const pcRef = React.useRef<RTCPeerConnection | null>(null)
+  const pendingCandidatesRef = React.useRef<RTCIceCandidateInit[]>([])
+
+  const connectingRef = React.useRef(false)
+  const reconnectTimerRef = React.useRef<number | null>(null)
+  const reconnectAttemptsRef = React.useRef(0)
+  const detectionConnectingRef = React.useRef(false)
+  const detectionReconnectRef = React.useRef<number | null>(null)
+  const [detections, setDetections] = React.useState<
+    { x: number; y: number; w: number; h: number; label?: string; confidence?: number }[]
+  >([])
+
+  const cleanupWebRTC = React.useCallback(() => {
+    connectingRef.current = false
+    if (reconnectTimerRef.current != null) {
+      window.clearTimeout(reconnectTimerRef.current)
+      reconnectTimerRef.current = null
+    }
+    closingRef.current = true
+    setReconnectInfo({ active: false })
+    setConnectionState(networkOnline ? "connecting" : "offline")
+
+    const pc = pcRef.current
+    const ws = wsRef.current
+
+    // 핸들러 제거
+    if (ws) {
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onerror = null
+      // ws.onclose = null
+    }
+    if (pc) {
+      pc.onicecandidate = null
+      pc.ontrack = null
+      pc.oniceconnectionstatechange = null
+      pc.onconnectionstatechange = null
+    }
+
+    try { pc?.close() } catch { }
+    try { ws?.close() } catch { }
+
+    pcRef.current = null
+    wsRef.current = null
+    pendingCandidatesRef.current = []
+    setHasStream(false)
+    if (videoRef.current) videoRef.current.srcObject = null
+
+    // 다음 connect를 위해 복구
+    // setTimeout(() => { closingRef.current = false }, 0)
+  }, [networkOnline])
+
+  const scheduleReconnect = React.useCallback((reason: string) => {
+    if (!networkOnline || !cameraConnected) return
+    if (reconnectTimerRef.current != null) return
+    const attempt = reconnectAttemptsRef.current
+    const delay = Math.min(1000 * Math.pow(1.6, attempt), 15000) + Math.random() * 500
+    setReconnectInfo({ active: true, reason, nextAt: Date.now() + delay })
+    reconnectTimerRef.current = window.setTimeout(() => {
+      reconnectTimerRef.current = null
+      reconnectAttemptsRef.current += 1
+      connectWebRTC()
+    }, delay)
+  }, [cameraConnected, networkOnline])
+
+  const cleanupDetections = React.useCallback(() => {
+    detectionConnectingRef.current = false
+    if (detectionReconnectRef.current != null) {
+      window.clearTimeout(detectionReconnectRef.current)
+      detectionReconnectRef.current = null
+    }
+
+    const ws = detectionWsRef.current
+    if (ws) {
+      ws.onopen = null
+      ws.onmessage = null
+      ws.onerror = null
+      ws.onclose = null
+      try { ws.close() } catch { }
+    }
+    detectionWsRef.current = null
+    setDetections([])
+
+    const canvas = canvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext("2d")
+      ctx?.clearRect(0, 0, canvas.width, canvas.height)
+    }
+  }, [])
+
+  const normalizeDetections = React.useCallback((payload: any) => {
+    if (!payload) return []
+    const pickArray = (value: any) => (Array.isArray(value) ? value : null)
+    const candidates =
+      pickArray(payload) ??
+      pickArray(payload?.detections) ??
+      pickArray(payload?.boxes) ??
+      pickArray(payload?.bboxes) ??
+      pickArray(payload?.data?.detections) ??
+      pickArray(payload?.data?.boxes) ??
+      pickArray(payload?.data)
+
+    const list = candidates ?? [payload]
+
+    const toNumber = (value: any) => {
+      const num = typeof value === "string" ? Number(value) : value
+      return Number.isFinite(num) ? num : null
+    }
+
+    const toBox = (box: any) => {
+      if (!box) return null
+      const x1 = toNumber(box.x1 ?? box.left)
+      const y1 = toNumber(box.y1 ?? box.top)
+      const x2 = toNumber(box.x2 ?? box.right)
+      const y2 = toNumber(box.y2 ?? box.bottom)
+      const x = toNumber(box.x ?? x1)
+      const y = toNumber(box.y ?? y1)
+      const w = toNumber(box.w ?? box.width ?? (x1 != null && x2 != null ? x2 - x1 : null))
+      const h = toNumber(box.h ?? box.height ?? (y1 != null && y2 != null ? y2 - y1 : null))
+
+      if (x == null || y == null || w == null || h == null) return null
+      if (w <= 0 || h <= 0) return null
+
+      return {
+        x,
+        y,
+        w,
+        h,
+        label: box.label ?? box.class ?? box.type,
+        confidence: toNumber(box.confidence ?? box.score),
+      }
+    }
+
+    return list.map(toBox).filter(Boolean) as {
+      x: number
+      y: number
+      w: number
+      h: number
+      label?: string
+      confidence?: number
+    }[]
+  }, [])
+
+  const drawDetections = React.useCallback(() => {
+    const canvas = canvasRef.current
+    const video = videoRef.current
+    if (!canvas || !video) return
+
+    const rect = video.getBoundingClientRect()
+    if (!rect.width || !rect.height) return
+
+    const dpr = window.devicePixelRatio || 1
+    canvas.width = rect.width * dpr
+    canvas.height = rect.height * dpr
+    canvas.style.width = `${rect.width}px`
+    canvas.style.height = `${rect.height}px`
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, rect.width, rect.height)
+
+    if (!showOverlay || detections.length === 0) return
+
+    const videoWidth = video.videoWidth || rect.width
+    const videoHeight = video.videoHeight || rect.height
+    const scaleX = rect.width / videoWidth
+    const scaleY = rect.height / videoHeight
+
+    ctx.lineWidth = 2
+    ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace"
+
+    detections.forEach((det) => {
+      let { x, y, w, h } = det
+      const normalized = [x, y, w, h].every((value) => value >= 0 && value <= 1)
+
+      if (normalized) {
+        x = x * rect.width
+        y = y * rect.height
+        w = w * rect.width
+        h = h * rect.height
+      } else {
+        x = x * scaleX
+        y = y * scaleY
+        w = w * scaleX
+        h = h * scaleY
+      }
+
+      ctx.strokeStyle = "rgba(52, 211, 153, 0.9)"
+      ctx.fillStyle = "rgba(0, 0, 0, 0.6)"
+      ctx.strokeRect(x, y, w, h)
+
+      if (det.label) {
+        const confidenceText =
+          det.confidence != null && Number.isFinite(det.confidence) ? ` ${(det.confidence * 100).toFixed(0)}%` : ""
+        const text = `${det.label}${confidenceText}`
+        const textWidth = ctx.measureText(text).width
+        const paddingX = 6
+        const paddingY = 4
+        const labelX = x
+        const labelY = Math.max(0, y - 18)
+
+        ctx.fillRect(labelX, labelY, textWidth + paddingX * 2, 18)
+        ctx.fillStyle = "rgba(52, 211, 153, 0.95)"
+        ctx.fillText(text, labelX + paddingX, labelY + 13)
+      }
+    })
+  }, [detections, showOverlay])
+
+  React.useEffect(() => {
+    drawDetections()
+  }, [drawDetections])
+
+  React.useEffect(() => {
+    const handleResize = () => drawDetections()
+    window.addEventListener("resize", handleResize)
+    return () => {
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [drawDetections])
+
+  const connectDetections = React.useCallback(() => {
+    if (detectionWsRef.current && (detectionWsRef.current.readyState === WebSocket.OPEN || detectionWsRef.current.readyState === WebSocket.CONNECTING)) {
+      return
+    }
+    if (!detectionWsUrl || !roomId) return
+
+    detectionConnectingRef.current = true
+
+    const ws = new WebSocket(detectionWsUrl)
+    detectionWsRef.current = ws
+
+    ws.onopen = () => {
+      detectionConnectingRef.current = false
+      ws.send(JSON.stringify({ type: "join", roomId }))
+    }
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data)
+        setDetections(normalizeDetections(msg))
+      } catch {
+        setDetections([])
+      }
+    }
+
+    ws.onerror = () => {
+      try { ws.close() } catch { }
+    }
+
+    ws.onclose = () => {
+      detectionWsRef.current = null
+      if (!networkOnline) return
+      const delay = 1000 + Math.random() * 2000
+      if (detectionReconnectRef.current != null) {
+        window.clearTimeout(detectionReconnectRef.current)
+      }
+      detectionReconnectRef.current = window.setTimeout(() => {
+        connectDetections()
+      }, delay)
+    }
+  }, [detectionWsUrl, networkOnline, normalizeDetections, roomId])
+
+  React.useEffect(() => {
+    if (!networkOnline || !cameraConnected) {
+      cleanupDetections()
+      return
+    }
+    connectDetections()
+    return () => {
+      cleanupDetections()
+    }
+  }, [networkOnline, cameraConnected, connectDetections, cleanupDetections])
+
+  const ICE_SERVERS: RTCIceServer[] = [
+    { urls: "stun:stun.l.google.com:19302" },
+    {
+      urls: "turn:I14B201.p.ssafy.io:8086",
+      username: "ssafy",
+      credential: "1234",
+    },
+  ]
+
+  const send = (msg: any) => {
+    const ws = wsRef.current
+    if (!ws || ws.readyState !== WebSocket.OPEN) return
+    ws.send(JSON.stringify(msg))
+  }
+
+  const createPeerConnection = () => {
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    pcRef.current = pc
+
+    pc.oniceconnectionstatechange = () => {
+      const s = pc.iceConnectionState
+      if (s === "connected" || s === "completed") {
+        setConnectionState("connected")
+        setReconnectInfo({ active: false })
+      }
+      if (s === "disconnected") setConnectionState("connecting")
+      if (s === "failed") setConnectionState("failed")
+      if (s === "failed" || s === "disconnected") {
+        cleanupWebRTC()
+        scheduleReconnect("ICE 연결 끊김")
+      }
+    }
+    pc.onconnectionstatechange = () => {
+      const s = pc.connectionState
+      if (s === "connected") {
+        setConnectionState("connected")
+        setReconnectInfo({ active: false })
+      }
+      if (s === "connecting") setConnectionState("connecting")
+      if (s === "failed") setConnectionState("failed")
+      if (s === "failed") {
+        cleanupWebRTC()
+        scheduleReconnect("ICE 연결 실패")
+      }
+    }
+
+    pc.addTransceiver("video", { direction: "recvonly" })
+
+    pc.onicecandidate = (ev) => {
+      if (!ev.candidate) return
+      // Jetson이 기대하는 candidate 스펙으로 전송
+      send({
+        type: "candidate",
+        roomId,
+        candidate: ev.candidate.candidate,
+        sdpMLineIndex: ev.candidate.sdpMLineIndex,
+        sdpMid: ev.candidate.sdpMid,
+        data: {
+          candidate: ev.candidate.candidate,
+          sdpMLineIndex: ev.candidate.sdpMLineIndex,
+          sdpMid: ev.candidate.sdpMid,
+        },
+      })
+    }
+
+    pc.ontrack = (ev) => {
+      console.log("[ontrack]", ev.track.kind, ev.streams)
+
+      const stream = ev.streams?.[0] ?? new MediaStream([ev.track])
+      setHasStream(true)
+      setConnectionState("connected")
+
+      const video = videoRef.current
+
+      if (!video) return
+      console.log("before set, srcObject?", !!videoRef.current?.srcObject)
+      video.srcObject = stream
+      console.log("after set, srcObject?", !!videoRef.current?.srcObject)
+      video.play().catch(() => { })
+
+      // if (ev.streams?.[0]) {
+      //   setHasStream(true)
+      //   videoRef.current.srcObject = ev.streams[0]
+      //   videoRef.current.play().catch(() => {})
+      // }
+    }
+  }
+
+  const handleOffer = async (payload: any) => {
+    const pc = pcRef.current
+    if (!pc) return
+    const sdp = payload?.sdp
+    if (!sdp) return
+
+    await pc.setRemoteDescription({ type: "offer", sdp })
+
+    // offer 전에 쌓인 candidate 처리
+    for (const c of pendingCandidatesRef.current) {
+      await pc.addIceCandidate(new RTCIceCandidate(c))
+    }
+    pendingCandidatesRef.current = []
+
+    const answer = await pc.createAnswer()
+    await pc.setLocalDescription(answer)
+
+    // Jetson이 기대하는 answer 스펙으로 전송 (data.sdp 포함)
+    send({
+      type: "answer",
+      roomId,
+      sdp: answer.sdp,
+      data: { type: "answer", sdp: answer.sdp },
+    })
+  }
+
+  const handleCandidate = async (payload: any) => {
+    const pc = pcRef.current
+    if (!pc) return
+
+    const cand: RTCIceCandidateInit = {
+      candidate: payload?.candidate,
+      sdpMLineIndex: payload?.sdpMLineIndex ?? 0,
+      sdpMid: payload?.sdpMid,
+    }
+    if (!cand.candidate) return
+
+    if (pc.remoteDescription) {
+      await pc.addIceCandidate(new RTCIceCandidate(cand))
+    } else {
+      pendingCandidatesRef.current.push(cand)
+    }
+  }
+
+  const connectWebRTC = React.useCallback(() => {
+    if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
+      return
+    }
+
+    if (!wsUrl || !roomId) return
+    setConnectionState("connecting")
+    reconnectAttemptsRef.current = 0
+
+    // 이전 pc가 살아있으면 종료하고 새로 시작
+    if (pcRef.current) {
+      try { pcRef.current.close() } catch { }
+      pcRef.current = null
+    }
+    pendingCandidatesRef.current = []
+    setHasStream(false)
+    if (videoRef.current) videoRef.current.srcObject = null
+
+
+    const ws = new WebSocket(wsUrl)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      setConnectionState("signaling")
+      setReconnectInfo({ active: false })
+      send({ type: "join", roomId })
+      createPeerConnection()
+      send({ type: "ready", roomId })
+    }
+
+    ws.onmessage = async (ev) => {
+      const msg = JSON.parse(ev.data)
+
+      // Spring 릴레이만 쓰는 경우 msg.data가 없을 수 있어 방어
+      if (msg.type === "offer") await handleOffer(msg.data ?? msg)
+      if (msg.type === "candidate") await handleCandidate(msg.data ?? msg)
+      // answer는 viewer가 받는 쪽이라, 보통 offer 주도는 Jetson
+    }
+
+    ws.onerror = () => {
+      connectingRef.current = false
+      setConnectionState("failed")
+    }
+
+    ws.onclose = () => {
+      if (closingRef.current) {
+        closingRef.current = false
+        return
+      }
+
+      connectingRef.current = false
+      pcRef.current = null
+      wsRef.current = null
+      pendingCandidatesRef.current = []
+      setHasStream(false)
+      setConnectionState(networkOnline ? "connecting" : "offline")
+      if (videoRef.current) videoRef.current.srcObject = null
+      scheduleReconnect("시그널 연결 종료")
+    }
+  }, [cleanupWebRTC, roomId, scheduleReconnect, wsUrl])
+
+  React.useEffect(() => {
+    if (!networkOnline || !cameraConnected) {
+      connectingRef.current = false
+      setConnectionState(cameraConnected ? "offline" : "offline")
+      setReconnectInfo({ active: false })
+      cleanupWebRTC()
+      return
+    }
+
+    if (connectingRef.current) return
+    connectingRef.current = true
+
+    connectWebRTC()
+
+    return () => {
+      connectingRef.current = false
+      cleanupWebRTC()
+    }
+  }, [networkOnline, cameraConnected, connectWebRTC, cleanupWebRTC])
+
+  const [currentTime, setCurrentTime] = useState(new Date())
+
+  React.useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <div className="relative w-full h-full bg-black rounded-lg overflow-hidden">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`absolute inset-0 z-10 w-full h-full object-cover transition-opacity ${hasStream ? "opacity-100" : "opacity-0"}`}
+      />
+      <canvas ref={canvasRef} className="absolute inset-0 z-30 pointer-events-none" aria-hidden="true" />
+
+      {showVideo ? (
+        <>
+          <div
+            className="absolute inset-0 z-0 bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-900"
+            style={{
+              backgroundImage: `
+                radial-gradient(circle at 30% 40%, rgba(50, 50, 55, 0.8) 0%, transparent 50%),
+                radial-gradient(circle at 70% 60%, rgba(45, 45, 50, 0.6) 0%, transparent 40%),
+                radial-gradient(circle at 50% 80%, rgba(40, 40, 45, 0.5) 0%, transparent 30%)
+              `,
+            }}
+          />
+
+          <div
+            className="absolute inset-0 z-20 opacity-[0.03] pointer-events-none"
+            style={{
+              backgroundImage: `repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(255, 255, 255, 0.1) 2px,
+                rgba(255, 255, 255, 0.1) 4px
+              )`,
+            }}
+          />
+
+          <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
+            <div className="text-center space-y-2 opacity-20">
+              <Camera className="h-20 w-20 text-white/40 mx-auto" />
+              <p className="text-xs text-white/40 font-mono tracking-wider">CESCAR-CAM-01</p>
+            </div>
+          </div>
+
+        </>
+      ) : (
+        <div className="absolute inset-0 flex items-center justify-center bg-zinc-900">
+          <div className="text-center space-y-4 pointer-events-auto relative z-50">
+            {!cameraConnected ? (
+              <>
+                <Camera className="h-16 w-16 text-muted-foreground/50 mx-auto" />
+                <p className="text-sm text-muted-foreground">카메라가 연결되지 않았습니다</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log("[Camera] Connect button clicked!")
+                    onToggleCameraConnection()
+                  }}
+                  className="mt-3 px-6 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-white font-medium shadow-lg shadow-blue-500/30 cursor-pointer pointer-events-auto relative z-50
+                    hover:from-blue-500 hover:to-blue-400 hover:shadow-blue-500/50 hover:scale-105 hover:-translate-y-0.5
+                    active:from-blue-700 active:to-blue-600 active:scale-95 active:shadow-blue-500/20
+                    focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 focus:ring-offset-zinc-900
+                    transition-all duration-150 ease-out flex items-center gap-2 mx-auto"
+                >
+                  <Camera className="h-4 w-4" />
+                  카메라 연결
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="relative">
+                  <WifiOff className="h-16 w-16 text-amber-400/60 mx-auto animate-pulse" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="h-12 w-12 border-2 border-amber-400/30 border-t-amber-400 rounded-full animate-spin" />
+                  </div>
+                </div>
+                <p className="text-sm text-amber-400">카메라 스트림 연결 중...</p>
+                <p className="text-xs text-muted-foreground">WebRTC 연결을 시도하고 있습니다</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    console.log("[Camera] Cancel button clicked!")
+                    onToggleCameraConnection()
+                  }}
+                  className="mt-2 px-4 py-2 rounded-lg border border-white/30 text-white/80 text-sm cursor-pointer
+                    hover:bg-white/15 hover:border-white/50 hover:text-white hover:scale-105
+                    active:bg-white/25 active:scale-95
+                    focus:outline-none focus:ring-2 focus:ring-white/50
+                    transition-all duration-150"
+                >
+                  연결 취소
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Top left badges */}
+      <div className="absolute top-3 left-3 z-40 flex flex-wrap items-center gap-2 sm:top-4 sm:left-4">
+        <Badge
+          className={
+            showVideo ? "bg-red-500/90 text-white border-transparent" : "bg-muted/90 text-muted-foreground border-transparent"
+          }
+        >
+          <Circle className={`h-2 w-2 mr-1.5 ${showVideo ? "fill-white animate-pulse" : "fill-muted-foreground"}`} />
+          {showVideo ? "LIVE" : "OFFLINE"}
+        </Badge>
+        <Badge
+          className={
+            connectionState === "connected"
+              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+              : connectionState === "failed"
+                ? "bg-red-500/20 text-red-300 border-red-500/30"
+                : connectionState === "offline"
+                  ? "bg-muted text-muted-foreground border-border"
+                  : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+          }
+        >
+          {connectionState === "connected"
+            ? "스트림 연결됨"
+            : connectionState === "signaling"
+              ? "신호 교환 중"
+              : connectionState === "connecting"
+                ? "연결 중"
+                : connectionState === "failed"
+                  ? "연결 실패"
+                  : "오프라인"}
+        </Badge>
+        {reconnectInfo.active && (
+          <Badge className="bg-amber-500/10 text-amber-200 border-amber-500/20">
+            재연결 중 · {reconnectInfo.reason ?? "원인 미상"}
+          </Badge>
+        )}
+      </div>
+
+      {/* Top right badges */}
+      <div className="absolute top-3 right-3 z-40 flex items-center gap-2 sm:top-4 sm:right-4">
+        {showVideo && (
+          <>
+            <div className="flex items-center gap-1.5 bg-black/70 rounded px-2.5 py-1">
+              <div className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+              <span className="text-xs text-white font-medium">REC</span>
+            </div>
+            <div className="bg-black/70 rounded px-2.5 py-1">
+              <span className="text-xs text-white/80 font-mono">1920x1080 30fps</span>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Bottom bar */}
+      <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-3 sm:p-5">
+        <div className="flex items-end justify-between">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className={`h-2.5 w-2.5 rounded-full ${isDetecting ? "bg-emerald-400 animate-pulse" : "bg-amber-400"}`} />
+              <span className={`text-[11px] font-medium sm:text-sm ${isDetecting ? "text-emerald-400" : "text-amber-400"}`}>
+                {isDetecting ? "탐지 중" : "대기 중"}
+              </span>
+            </div>
+            <p className="text-[10px] text-white/60 sm:text-xs">마지막 탐지: {lastDetectionLabel}</p>
+          </div>
+          <div className="text-right space-y-0.5">
+            <p className="text-[10px] text-white/80 font-mono sm:text-xs">
+              {currentTime.toLocaleTimeString("ko-KR", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+                timeZone: "Asia/Seoul",
+              })}
+            </p>
+            <p className="text-[9px] text-white/50 font-mono sm:text-[10px]">
+              {currentTime.toLocaleDateString("ko-KR", { timeZone: "Asia/Seoul" })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Center crosshair */}
+      {showVideo && (
+        <div className="absolute top-1/2 left-1/2 z-40 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
+          <div className="w-40 h-40 border border-white/10 rounded-lg" />
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-px h-6 bg-white/20" />
+          <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-px h-6 bg-white/20" />
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 w-6 h-px bg-white/20" />
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 w-6 h-px bg-white/20" />
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-2 h-2 border border-white/30 rounded-full" />
+        </div>
+      )}
+
+      {isManual && (
+        <div className="absolute bottom-16 right-3 z-40 hidden select-none sm:block">
+          <div className="relative rounded-full border border-white/15 bg-black/60 backdrop-blur-md p-2 shadow-lg">
+            <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap">
+              <span className="text-[8px] text-white/25 font-medium">KBD</span>
+            </div>
+              <JoystickPad
+                disabled={manualDisabled}
+                vector={{ v: driveVector.v, w: driveVector.w }}
+                onMove={(v, w) => {
+                  onDisplayVector(v, w)
+                  const vSnap = Math.abs(v) < 0.05 ? 0 : v
+                  const curved = applyDriveCurve(-vSnap, -w)
+                  onDriveVector(curved.v, curved.w)
+                }}
+                onStop={onDriveStop}
+                size={96}
+              />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface ControlPanelProps {
+  isLoading: boolean
+  networkOnline: boolean
+  driveMode: "AUTO" | "MANUAL" | "STOP"
+  onChangeMode: (mode: "AUTO" | "MANUAL" | "STOP") => void
+  onDriveVector: (v: number, w: number) => void
+  onDriveStop: () => void
+  onDisplayVector: (v: number, w: number) => void
+  manualDisabled: boolean
+  driveVector: { v: number; w: number }
+  onStartMission: () => void
+  onStopMission: () => void
+  missionDisabled: boolean
+  missionStopDisabled: boolean
+  missionInput: string
+  onMissionInputChange: (value: string) => void
+  missionPointCount: number
+  missionError: string | null
+  missionPoints: { x: number; y: number }[]
+  invalidLines: string[]
+  onDismissMissionError: () => void
+  onAddMissionPoints: () => void
+  onRemoveMissionPoint: (index: number) => void
+  onAddFromDetections: () => void
+  onMoveMissionPoint: (from: number, to: number) => void
+  maxMissionPoints: number
+  modeError: string | null
+}
+
+function JoystickPad({
+  disabled,
+  onMove,
+  onStop,
+  vector,
+  size = 96,
+}: {
+  disabled: boolean
+  onMove: (v: number, w: number) => void
+  onStop: () => void
+  vector?: { v: number; w: number }
+  size?: number
+}) {
+  const baseRef = React.useRef<HTMLDivElement | null>(null)
+  const knobRef = React.useRef<HTMLDivElement | null>(null)
+  const activeRef = React.useRef(false)
+  const pointerIdRef = React.useRef<number | null>(null)
+  const pointerTypeRef = React.useRef<string | null>(null)
+  const lastVectorRef = React.useRef<{ v: number; w: number }>({ v: 0, w: 0 })
+  const holdTimerRef = React.useRef<number | null>(null)
+
+  const resetKnob = () => {
+    if (knobRef.current) {
+      knobRef.current.style.transform = "translate(0px, 0px)"
+    }
+  }
+
+  const updateFromEvent = (clientX: number, clientY: number) => {
+    const base = baseRef.current
+    const knob = knobRef.current
+    if (!base || !knob) return
+    const rect = base.getBoundingClientRect()
+    const cx = rect.left + rect.width / 2
+    const cy = rect.top + rect.height / 2
+    const dx = clientX - cx
+    const dy = clientY - cy
+    const maxR = rect.width / 2 - 8
+    const dist = Math.hypot(dx, dy)
+    const clamped = dist > maxR ? maxR / dist : 1
+    const x = dx * clamped
+    const y = dy * clamped
+    knob.style.transform = `translate(${x}px, ${y}px)`
+
+    const radial = Math.min(1, dist / maxR)
+    const deadZone = 0.1
+    if (radial <= deadZone) {
+      if (!activeRef.current) {
+        lastVectorRef.current = { v: 0, w: 0 }
+        onMove(0, 0)
+      }
+      return
+    }
+
+    const scaledR = (radial - deadZone) / (1 - deadZone)
+    const angle = Math.atan2(y, x)
+    let v = Math.sin(angle) * scaledR
+    let w = Math.cos(angle) * scaledR
+
+    if (pointerTypeRef.current === "touch") {
+      const prev = lastVectorRef.current
+      const dv = v - prev.v
+      const dw = w - prev.w
+      if (Math.abs(dv) < 0.01 && Math.abs(dw) < 0.01) {
+        v = prev.v
+        w = prev.w
+      } else {
+        const alpha = 0.25
+        v = prev.v + dv * alpha
+        w = prev.w + dw * alpha
+      }
+    }
+
+    lastVectorRef.current = { v, w }
+    onMove(v, w)
+  }
+
+  const handleStop = React.useCallback(() => {
+    if (!activeRef.current) return
+    activeRef.current = false
+    pointerIdRef.current = null
+    if (holdTimerRef.current != null) {
+      window.clearInterval(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    resetKnob()
+    onStop()
+  }, [onStop])
+
+  React.useEffect(() => {
+    const handleWindowPointerUp = (e: PointerEvent) => {
+      if (!activeRef.current) return
+      if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
+      handleStop()
+    }
+    window.addEventListener("pointerup", handleWindowPointerUp)
+    window.addEventListener("pointercancel", handleWindowPointerUp)
+    window.addEventListener("blur", handleStop)
+    return () => {
+      window.removeEventListener("pointerup", handleWindowPointerUp)
+      window.removeEventListener("pointercancel", handleWindowPointerUp)
+      window.removeEventListener("blur", handleStop)
+    }
+  }, [handleStop])
+
+  React.useEffect(() => {
+    if (activeRef.current) return
+    const base = baseRef.current
+    const knob = knobRef.current
+    if (!base || !knob) return
+
+    const rect = base.getBoundingClientRect()
+    const maxR = rect.width / 2 - 8
+    if (!maxR) return
+
+    const clamp = (value: number) => Math.min(1, Math.max(-1, value))
+    const v = clamp(vector?.v ?? 0)
+    const w = clamp(vector?.w ?? 0)
+    const x = -w * maxR
+    const y = -v * maxR
+    knob.style.transform = `translate(${x}px, ${y}px)`
+  }, [vector?.v, vector?.w])
+
+  return (
+    <div
+      ref={baseRef}
+      className={`relative rounded-full border border-white/20 bg-black/50 backdrop-blur-md ${
+        disabled ? "opacity-50" : "opacity-100"
+      }`}
+      style={{ width: size, height: size, touchAction: "none" }}
+      onPointerDown={(e) => {
+        if (disabled) return
+        e.preventDefault()
+        activeRef.current = true
+        pointerIdRef.current = e.pointerId
+        pointerTypeRef.current = e.pointerType
+        e.currentTarget.setPointerCapture?.(e.pointerId)
+        updateFromEvent(e.clientX, e.clientY)
+        if (holdTimerRef.current == null) {
+          holdTimerRef.current = window.setInterval(() => {
+            if (!activeRef.current) return
+            const { v, w } = lastVectorRef.current
+            onMove(v, w)
+          }, 80)
+        }
+      }}
+      onPointerMove={(e) => {
+        if (!activeRef.current) return
+        if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
+        updateFromEvent(e.clientX, e.clientY)
+      }}
+      onPointerUp={(e) => {
+        if (!activeRef.current) return
+        if (pointerIdRef.current != null && e.pointerId !== pointerIdRef.current) return
+        activeRef.current = false
+        pointerIdRef.current = null
+        e.currentTarget.releasePointerCapture?.(e.pointerId)
+        resetKnob()
+        onStop()
+      }}
+      onPointerCancel={() => {
+        handleStop()
+      }}
+      onPointerLeave={() => {
+        if (!activeRef.current) return
+        handleStop()
+      }}
+    >
+      <div className="absolute inset-2 rounded-full border border-white/10" />
+      <div
+        ref={knobRef}
+        className="absolute left-1/2 top-1/2 h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white/20 border border-white/30 shadow-sm"
+      />
+    </div>
+  )
+}
+
+function ControlPanel({
+  isLoading,
+  networkOnline,
+  driveMode,
+  onChangeMode,
+  onDriveVector,
+  onDriveStop,
+  onDisplayVector,
+  manualDisabled,
+  driveVector,
+  onStartMission,
+  onStopMission,
+  missionDisabled,
+  missionStopDisabled,
+  missionInput,
+  onMissionInputChange,
+  missionPointCount,
+  missionError,
+  missionPoints,
+  invalidLines,
+  onDismissMissionError,
+  onAddMissionPoints,
+  onRemoveMissionPoint,
+  onAddFromDetections,
+  onMoveMissionPoint,
+  maxMissionPoints,
+  modeError,
+}: ControlPanelProps) {
+  const showMissionInput = false
+  const [dragIndex, setDragIndex] = React.useState<number | null>(null)
+  const [showInvalidLines, setShowInvalidLines] = React.useState(true)
+  const [showAllInvalidLines, setShowAllInvalidLines] = React.useState(false)
+  const reachedLimit = missionPointCount >= maxMissionPoints
+  const invalidLineCount = invalidLines.length
+  const limitedInvalidLines = showAllInvalidLines ? invalidLines : invalidLines.slice(0, 3)
+  const truncateLine = (line: string) => (line.length > 28 ? `${line.slice(0, 28)}…` : line)
+
+  React.useEffect(() => {
+    if (invalidLineCount > 0) {
+      setShowInvalidLines(true)
+      setShowAllInvalidLines(false)
+    }
+  }, [invalidLineCount])
+
+  return (
+    <Card className="bg-card border-border">
+      <CardContent className="space-y-4 sm:space-y-5">
+        <div className="space-y-3">
+          <p className="text-xs text-muted-foreground uppercase tracking-wide">주행 모드</p>
+          <div className="grid grid-cols-3 gap-2">
+            <Button
+              variant={driveMode === "AUTO" ? "default" : "outline"}
+              className="w-full"
+              onClick={() => onChangeMode("AUTO")}
+            >
+              AUTO
+            </Button>
+            <Button
+              variant={driveMode === "MANUAL" ? "default" : "outline"}
+              className="w-full"
+              onClick={() => onChangeMode("MANUAL")}
+            >
+              MANUAL
+            </Button>
+            <Button
+              variant={driveMode === "STOP" ? "default" : "outline"}
+              className="w-full"
+              onClick={() => onChangeMode("STOP")}
+            >
+              STOP
+            </Button>
+          </div>
+          {modeError && <p className="text-xs text-red-400">{modeError}</p>}
+        </div>
+
+        {driveMode === "MANUAL" && (
+          <div className="space-y-2 sm:hidden">
+            <p className="text-xs text-muted-foreground uppercase tracking-wide">수동 조작</p>
+            <div className="flex justify-center">
+              <JoystickPad
+                disabled={manualDisabled}
+                vector={{ v: driveVector.v, w: driveVector.w }}
+                onMove={(v, w) => {
+                  onDisplayVector(v, w)
+                  const vSnap = Math.abs(v) < 0.05 ? 0 : v
+                  const curved = applyDriveCurve(-vSnap, -w)
+                  onDriveVector(curved.v, curved.w)
+                }}
+                onStop={onDriveStop}
+                size={120}
+              />
+            </div>
+            {manualDisabled && (
+              <p className="text-[11px] text-muted-foreground">네트워크 연결 시 수동 조작이 활성화됩니다.</p>
+            )}
+          </div>
+        )}
+
+        {/* 자율주행 제어(탐지 시작/중지) 컴포넌트 제거 */}
+      </CardContent>
+    </Card>
+  )
+}
+
+interface RobotStatusPanelProps {
+  status: CarStatus | null
+  isLoading: boolean
+}
+
+function RobotStatusPanel({ status, isLoading }: RobotStatusPanelProps) {
+  if (isLoading || !status) {
+    return (
+      <Card className="bg-card border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 상태</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="h-8 bg-secondary/20 rounded animate-pulse" />
+          <div className="h-8 bg-secondary/20 rounded animate-pulse" />
+          <div className="h-8 bg-secondary/20 rounded animate-pulse" />
+        </CardContent>
+      </Card>
+    )
+  }
+  const modeLabels: Record<CarStatus["mode"], string> = { STOP: "정지", MANUAL: "수동", AUTO: "자동" }
+  const updatedLabel = (parseBackendDate(status.updatedAt) ?? new Date(status.updatedAt)).toLocaleTimeString(
+    "ko-KR",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "Asia/Seoul",
+    }
+  )
+  const xLabel = status.x == null ? "-" : status.x.toFixed(2)
+  const yLabel = status.y == null ? "-" : status.y.toFixed(2)
+  const headingLabel = Number.isFinite(status.heading) ? status.heading.toFixed(0) : "-"
+
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 상태</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {status.isOnline ? <Wifi className="h-4 w-4 text-emerald-400" /> : <WifiOff className="h-4 w-4 text-red-400" />}
+            <span className="text-sm text-foreground">연결 상태</span>
+          </div>
+          <Badge
+            className={
+              status.isOnline
+                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30"
+                : "bg-red-500/20 text-red-400 border-red-500/30"
+            }
+          >
+            {status.isOnline ? "온라인" : "오프라인"}
+          </Badge>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-foreground">현재 모드</span>
+          <Badge variant="secondary">{modeLabels[status.mode]}</Badge>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-foreground">마지막 수신</span>
+          <span className="text-sm text-muted-foreground font-mono">{updatedLabel}</span>
+        </div>
+
+        {/* 좌표 표시 숨김 */}
+      </CardContent>
+    </Card>
+  )
+}
+
+interface DetectionStatsPanelProps {
+  stats: DetectionStats | null
+  isLoading: boolean
+}
+
+function formatKstDetectionParts(timestamp?: string | null) {
+  if (!timestamp) return { date: "-", time: "-" }
+  if (/^\d{2}:\d{2}(:\d{2})?$/.test(timestamp)) {
+    return { date: "-", time: timestamp }
+  }
+  const d = parseBackendDate(timestamp)
+  if (!d) return { date: "-", time: "-" }
+  const date = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "2-digit",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .format(d)
+    .replace(/\s/g, "")
+    .replace(/\.$/, "")
+  const time = d.toLocaleTimeString("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Seoul",
+  })
+  return { date, time }
+}
+
+function DetectionStatsPanel({ stats, isLoading }: DetectionStatsPanelProps) {
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">탐지 통계</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {isLoading || !stats ? (
+          <p className="text-xs text-muted-foreground">불러오는 중...</p>
+        ) : (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">오늘 탐지</span>
+              <span className="font-medium text-foreground">{stats.todayCount}건</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">이번 주 탐지</span>
+              <span className="font-medium text-foreground">{stats.weekCount}건</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">마지막 탐지</span>
+              <span className="text-xs text-muted-foreground font-mono">
+                {formatKstDetectionParts(stats.lastDetectionTime).time}
+              </span>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+interface EventLogProps {
+  detections: Detection[]
+  isLoading: boolean
+  onSelect: (id: string) => void
+  baseUrl: string
+}
+
+function EventLog({ detections, isLoading, onSelect, baseUrl }: EventLogProps) {
+  const typeLabels: Record<string, string> = {
+    cockroach: "바퀴벌레",
+    ant: "개미",
+    fly: "파리",
+    mosquito: "모기",
+    spider: "거미",
+    unknown: "미확인",
+  }
+
+  const resolveMediaUrl = (path?: string) => {
+    if (!path) return null
+    if (path.startsWith("http://") || path.startsWith("https://")) return path
+    return `${baseUrl}${path}`
+  }
+
+  function SnapshotPreview({ snapshotUrl }: { snapshotUrl: string }) {
+    const [open, setOpen] = useState(false)
+    const [previewSrc, setPreviewSrc] = useState<string | null>(null)
+    const [loading, setLoading] = useState(false)
+    const normalizeGcsUrl = (url: string) =>
+      url.replace("storage.googleapisapis.com", "storage.googleapis.com")
+    const isPublicGcs = (url: string) => url.includes("storage.googleapis.com")
+
+    useEffect(() => {
+      if (!open || previewSrc) return
+      const controller = new AbortController()
+      const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
+      let objectUrl: string | null = null
+
+      setLoading(true)
+      const normalizedUrl = normalizeGcsUrl(snapshotUrl)
+      if (isPublicGcs(normalizedUrl)) {
+        setPreviewSrc(normalizedUrl)
+        setLoading(false)
+        return
+      }
+      const headers = normalizedUrl.includes("storage.googleapis.com")
+        ? undefined
+        : accessToken
+          ? { Authorization: `Bearer ${accessToken}` }
+          : undefined
+      fetch(normalizedUrl, { headers, signal: controller.signal })
+        .then(async (res) => {
+          if (!res.ok) throw new Error("snapshot fetch failed")
+          const blob = await res.blob()
+          objectUrl = URL.createObjectURL(blob)
+          setPreviewSrc(objectUrl)
+        })
+        .catch(() => {
+          setPreviewSrc(null)
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setLoading(false)
+        })
+
+      return () => {
+        controller.abort()
+        setLoading(false)
+        if (objectUrl) URL.revokeObjectURL(objectUrl)
+      }
+    }, [open, previewSrc, snapshotUrl])
+
+    const handleOpenFull = async (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (previewSrc) {
+        window.open(previewSrc, "_blank", "noopener,noreferrer")
+        return
+      }
+
+      const accessToken = typeof window !== "undefined" ? window.localStorage.getItem("accessToken") : null
+      try {
+        setLoading(true)
+        const normalizedUrl = normalizeGcsUrl(snapshotUrl)
+        if (isPublicGcs(normalizedUrl)) {
+          window.open(normalizedUrl, "_blank", "noopener,noreferrer")
+          return
+        }
+        const headers = normalizedUrl.includes("storage.googleapis.com")
+          ? undefined
+          : accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined
+        const res = await fetch(normalizedUrl, { headers })
+        if (!res.ok) throw new Error("snapshot fetch failed")
+        const blob = await res.blob()
+        const objectUrl = URL.createObjectURL(blob)
+        window.open(objectUrl, "_blank", "noopener,noreferrer")
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    return (
+      <HoverCard open={open} onOpenChange={setOpen} openDelay={200}>
+        <HoverCardTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={(e) => {
+              e.stopPropagation()
+              setOpen((prev) => !prev)
+            }}
+          >
+            <Camera className="h-4 w-4" />
+          </Button>
+        </HoverCardTrigger>
+        <HoverCardContent className="w-48 p-2">
+          <div className="relative aspect-video overflow-hidden rounded-md border border-border bg-secondary/40">
+            {previewSrc ? (
+              <img src={previewSrc} alt="snapshot preview" className="h-full w-full object-cover" />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                {loading ? "불러오는 중..." : "미리보기 없음"}
+              </div>
+            )}
+          </div>
+          <div className="mt-2 flex items-center justify-end">
+            <Button variant="outline" size="sm" onClick={handleOpenFull} disabled={loading}>
+              사진 보기
+            </Button>
+          </div>
+        </HoverCardContent>
+      </HoverCard>
+    )
+  }
+
+  return (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">탐지 로그</CardTitle>
+          <Badge variant="secondary" className="text-xs">
+            최근 {detections.length}건
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="p-0">
+        {isLoading ? (
+          <div className="max-h-48 overflow-y-auto">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="px-4 py-2.5 border-b border-border last:border-b-0">
+                <div className="h-5 bg-secondary/20 rounded animate-pulse" />
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="max-h-48 overflow-y-auto">
+            {detections.map((event) => {
+              const snapshotUrl = resolveMediaUrl(event.snapshotUrl)
+              return (
+                <div
+                  key={event.id}
+                  className="flex items-center justify-between px-4 py-2.5 border-b border-border last:border-b-0 hover:bg-secondary/30 transition-colors"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground font-mono">
+                      {formatKstDetectionParts(event.timestamp).time}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {snapshotUrl && (
+                      <SnapshotPreview snapshotUrl={snapshotUrl} />
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-sm text-foreground"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onSelect(event.id)
+                      }}
+                    >
+                      {typeLabels[event.type] || event.type}
+                    </Button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+// ============================================
+// Page Component (connects UI to hooks)
+// ============================================
+
+export default function CameraPage() {
+  const { isOnline: networkOnline } = useNetworkStatus()
+  const { toast } = useToast()
+  const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL ?? ""
+  const wsBaseUrl = useMemo(() => (baseUrl ? baseUrl.replace(/^http/, "ws") : ""), [baseUrl])
+  const detectionWsUrl = useMemo(() => {
+    return process.env.NEXT_PUBLIC_DETECTION_WS_URL ?? (wsBaseUrl ? `${wsBaseUrl}/ws/detections` : "")
+  }, [wsBaseUrl])
+  const signalingUrl = useMemo(() => {
+    return process.env.NEXT_PUBLIC_SIGNALING_URL ?? (wsBaseUrl ? `${wsBaseUrl}/ws/webrtc` : "")
+  }, [wsBaseUrl])
+  const [cars, setCars] = useState<{ carId: number; nickname: string }[]>([])
+  const [carsLoading, setCarsLoading] = useState(true)
+  const [carsError, setCarsError] = useState<string | null>(null)
+  const [selectedCarId, setSelectedCarId] = useState<number | null>(null)
+  const [carDetail, setCarDetail] = useState<CarDetail | null>(null)
+  const [carDetailLoading, setCarDetailLoading] = useState(false)
+  const [currentMap, setCurrentMap] = useState<{
+    id: number
+    name?: string
+    width: number
+    height: number
+    resolution: number
+    originX: number
+    originY: number
+  } | null>(null)
+  const fallbackRoomId = process.env.NEXT_PUBLIC_ROBOT_ROOM_ID ?? "robot_default"
+  const roomId = carDetail?.deviceId || (selectedCarId ? `car-${selectedCarId}` : fallbackRoomId)
+
+  const carStatus = useCarStatus(selectedCarId ?? 0, { enabled: !!selectedCarId, intervalMs: 1000 })
+  const recentDetections = useRecentDetections(selectedCarId, 10, currentMap?.id ?? null)
+
+  // Local UI state only (no data)
+  const [showOverlay, setShowOverlay] = useState(true)
+  const [cameraConnected, setCameraConnected] = useState(false)
+  const [driveMode, setDriveMode] = useState<"AUTO" | "MANUAL" | "STOP">("STOP")
+  const [modeError, setModeError] = useState<string | null>(null)
+  const [missionInput, setMissionInput] = useState("")
+  const [missionError, setMissionError] = useState<string | null>(null)
+  const [missionPoints, setMissionPoints] = useState<{ x: number; y: number }[]>([])
+  const [invalidMissionLines, setInvalidMissionLines] = useState<string[]>([])
+  const handleMissionInputChange = React.useCallback((value: string) => {
+    setMissionInput(value)
+    if (missionError) setMissionError(null)
+    if (invalidMissionLines.length) setInvalidMissionLines([])
+  }, [missionError, invalidMissionLines.length])
+  const lastDriveToastRef = useRef<number>(0)
+
+  const driveTimerRef = useRef<number | null>(null)
+  const holdTimerRef = useRef<number | null>(null)
+  const holdWRef = useRef(0)
+  const lastDriveSentRef = useRef(0)
+  const lastInputRef = useRef<number | null>(null)
+  const driveCommandRef = useRef<{ v: number; w: number } | null>(null)
+  const driveTargetRef = useRef<{ v: number; w: number } | null>(null)
+  const driveCurrentRef = useRef<{ v: number; w: number }>({ v: 0, w: 0 })
+  const [driveVector, setDriveVector] = useState<{ v: number; w: number }>({ v: 0, w: 0 })
+
+  const setDisplayVector = React.useCallback((v: number, w: number) => {
+    const clamp = (value: number) => Math.min(1, Math.max(-1, value))
+    setDriveVector({ v: clamp(v), w: clamp(w) })
+  }, [])
+
+  const clearHold = React.useCallback(() => {
+    if (holdTimerRef.current != null) {
+      window.clearInterval(holdTimerRef.current)
+      holdTimerRef.current = null
+    }
+    holdWRef.current = 0
+  }, [])
+
+  const markInput = React.useCallback((v: number, w: number) => {
+    if (v !== 0 || w !== 0) {
+      lastInputRef.current = Date.now()
+    } else {
+      lastInputRef.current = null
+    }
+  }, [])
+
+  React.useEffect(() => {
+    let mounted = true
+    setCarsLoading(true)
+    carApi
+      .getMyCars()
+      .then((list) => {
+        if (!mounted) return
+        setCars(list.map((c) => ({ carId: c.carId, nickname: c.nickname })))
+        setSelectedCarId((prev) => prev ?? list[0]?.carId ?? null)
+        setCarsError(null)
+      })
+      .catch(() => {
+        if (!mounted) return
+        setCarsError("차량 목록을 불러오는 데 실패했습니다. 잠시 후 다시 시도해 주세요.")
+      })
+      .finally(() => {
+        if (!mounted) return
+        setCarsLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!selectedCarId) {
+      setCarDetail(null)
+      return
+    }
+
+    let mounted = true
+    setCarDetailLoading(true)
+    carApi
+      .getCarDetail(selectedCarId)
+      .then((detail) => {
+        if (!mounted) return
+        setCarDetail(detail)
+      })
+      .catch(() => {
+        if (!mounted) return
+        setCarDetail(null)
+        toastError(toast, "차량 정보 불러오기 실패", "잠시 후 다시 시도해 주세요.")
+      })
+      .finally(() => {
+        if (!mounted) return
+        setCarDetailLoading(false)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [selectedCarId, toast])
+
+  React.useEffect(() => {
+    if (!selectedCarId) {
+      setCurrentMap(null)
+      return
+    }
+    let mounted = true
+    mapApi
+      .getCurrentMap(selectedCarId)
+      .then((map) => {
+        if (!mounted) return
+        if (!map) {
+          setCurrentMap(null)
+          return
+        }
+        setCurrentMap({
+          id: map.id,
+          name: map.name,
+          width: map.width,
+          height: map.height,
+          resolution: map.resolution,
+          originX: map.originX,
+          originY: map.originY,
+        })
+      })
+      .catch(() => {
+        if (!mounted) return
+        setCurrentMap(null)
+      })
+    return () => {
+      mounted = false
+    }
+  }, [selectedCarId])
+
+  React.useEffect(() => {
+    if (!selectedCarId) return
+    const key = `missionPoints:${selectedCarId}`
+    const raw = window.localStorage.getItem(key)
+    if (!raw) {
+      setMissionPoints([])
+      return
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) {
+        const points = parsed
+          .map((item: any) => {
+            if (!item) return null
+            const x = Number(item.x ?? item[0])
+            const y = Number(item.y ?? item[1])
+            return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+          })
+          .filter(Boolean) as { x: number; y: number }[]
+        setMissionPoints(points)
+      }
+    } catch {
+      setMissionPoints([])
+    }
+  }, [selectedCarId])
+
+  React.useEffect(() => {
+    if (!selectedCarId) return
+    const key = `missionPoints:${selectedCarId}`
+    if (!missionPoints.length) {
+      window.localStorage.removeItem(key)
+      return
+    }
+    window.localStorage.setItem(key, JSON.stringify(missionPoints))
+  }, [missionPoints, selectedCarId])
+
+
+  const lastDetectionLabel = useMemo(() => {
+    const latest = recentDetections.recentDetections[0]
+    if (!latest) return "-"
+    const parts = formatKstDetectionParts(latest.timestamp)
+    return `${parts.date} ${parts.time}`
+  }, [recentDetections.recentDetections])
+
+  const isDetecting = useMemo(() => {
+    const latest = recentDetections.recentDetections[0]
+    if (!latest?.timestamp) return false
+    const last = parseBackendDate(latest.timestamp) ?? new Date(latest.timestamp)
+    if (Number.isNaN(last.getTime())) return false
+    return Date.now() - last.getTime() < 60_000
+  }, [recentDetections.recentDetections])
+
+  const MAX_MISSION_POINTS = 20
+
+  const missionBounds = useMemo(() => {
+    if (currentMap && currentMap.width > 0 && currentMap.height > 0 && currentMap.resolution > 0) {
+      const widthMeters = currentMap.width * currentMap.resolution
+      const heightMeters = currentMap.height * currentMap.resolution
+      return {
+        minX: currentMap.originX,
+        minY: currentMap.originY,
+        maxX: currentMap.originX + widthMeters,
+        maxY: currentMap.originY + heightMeters,
+      }
+    }
+
+    const parse = (value?: string) => {
+      const num = Number(value)
+      return Number.isFinite(num) ? num : null
+    }
+    return {
+      minX: parse(process.env.NEXT_PUBLIC_MISSION_MIN_X) ?? 0,
+      minY: parse(process.env.NEXT_PUBLIC_MISSION_MIN_Y) ?? 0,
+      maxX: parse(process.env.NEXT_PUBLIC_MISSION_MAX_X),
+      maxY: parse(process.env.NEXT_PUBLIC_MISSION_MAX_Y),
+    }
+  }, [currentMap])
+
+  const isPointInBounds = useCallback(
+    (point: { x: number; y: number }) => {
+      if (missionBounds.minX != null && point.x < missionBounds.minX) return false
+      if (missionBounds.minY != null && point.y < missionBounds.minY) return false
+      if (missionBounds.maxX != null && point.x > missionBounds.maxX) return false
+      if (missionBounds.maxY != null && point.y > missionBounds.maxY) return false
+      return true
+    },
+    [missionBounds]
+  )
+
+  const parsedMissionInput = useMemo(() => {
+    const raw = missionInput.trim()
+    if (!raw) {
+      return { points: [] as { x: number; y: number }[], invalidLines: [] as string[] }
+    }
+
+    if (raw.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(raw)
+        const list = Array.isArray(parsed) ? parsed : []
+        const points = list
+          .map((item: any) => {
+            if (Array.isArray(item) && item.length >= 2) {
+              const x = Number(item[0])
+              const y = Number(item[1])
+              return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+            }
+            if (item && typeof item === "object") {
+              const x = Number(item.x)
+              const y = Number(item.y)
+              return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null
+            }
+            return null
+          })
+          .filter(Boolean) as { x: number; y: number }[]
+
+        return { points, invalidLines: points.length ? [] : ["JSON 형식 좌표가 비어있습니다."] }
+      } catch {
+        return { points: [] as { x: number; y: number }[], invalidLines: ["JSON 형식이 올바르지 않습니다."] }
+      }
+    }
+
+    const lines = raw
+      .split(/[\n;]+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    const invalidLines: string[] = []
+    const points = lines
+      .map((line) => {
+        const parts = line.split(/[,\s]+/).filter(Boolean)
+        if (parts.length < 2) {
+          invalidLines.push(line)
+          return null
+        }
+        const x = Number(parts[0])
+        const y = Number(parts[1])
+        if (!Number.isFinite(x) || !Number.isFinite(y)) {
+          invalidLines.push(line)
+          return null
+        }
+        return { x, y }
+      })
+      .filter(Boolean) as { x: number; y: number }[]
+
+    const outOfRange = points.filter((p) => !isPointInBounds(p)).map((p) => `범위 밖: ${p.x}, ${p.y}`)
+    return { points, invalidLines: [...invalidLines, ...outOfRange] }
+  }, [isPointInBounds, missionInput])
+
+  const appendMissionPoints = useCallback((points: { x: number; y: number }[]) => {
+    if (points.length === 0) return
+    setMissionPoints((prev) => {
+      const next = [...prev]
+      points.forEach((point) => {
+        const exists = next.some((p) => p.x === point.x && p.y === point.y)
+        if (!exists) next.push(point)
+      })
+      if (next.length > MAX_MISSION_POINTS) {
+        setMissionError(`좌표는 최대 ${MAX_MISSION_POINTS}개까지 추가할 수 있습니다.`)
+        return next.slice(0, MAX_MISSION_POINTS)
+      }
+      return next
+    })
+  }, [MAX_MISSION_POINTS])
+
+  const handleAddMissionPoints = useCallback(() => {
+    if (parsedMissionInput.invalidLines.length > 0) {
+      setInvalidMissionLines(parsedMissionInput.invalidLines)
+      setMissionError("좌표를 확인해 주세요.")
+      return
+    }
+    setInvalidMissionLines([])
+    setMissionError(null)
+    appendMissionPoints(parsedMissionInput.points)
+    setMissionInput("")
+  }, [appendMissionPoints, parsedMissionInput])
+
+  const handleDismissMissionError = useCallback(() => {
+    setMissionError(null)
+    setInvalidMissionLines([])
+  }, [])
+
+  const handleAddFromDetections = useCallback(() => {
+    const points = recentDetections.recentDetections
+      .filter((d) => d.x != null && d.y != null)
+      .map((d) => ({ x: d.x as number, y: d.y as number }))
+    if (!points.length) {
+      toastInfo(toast, "탐지 좌표 없음", "최근 탐지 좌표가 없습니다.")
+      return
+    }
+    setMissionError(null)
+    setInvalidMissionLines([])
+    const validPoints = points.filter(isPointInBounds)
+    appendMissionPoints(validPoints)
+    if (validPoints.length !== points.length) {
+      toastInfo(toast, "범위 밖 좌표 제외", "유효 범위 밖 좌표는 제외되었습니다.")
+    } else {
+      toastSuccess(toast, "좌표 추가 완료", "최근 탐지 좌표가 추가되었습니다.")
+    }
+  }, [appendMissionPoints, isPointInBounds, recentDetections.recentDetections, toast])
+
+  const handleRemoveMissionPoint = useCallback((index: number) => {
+    setMissionPoints((prev) => prev.filter((_, i) => i !== index))
+    setMissionError(null)
+  }, [])
+
+  const handleMoveMissionPoint = useCallback((from: number, to: number) => {
+    setMissionPoints((prev) => {
+      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) return prev
+      const next = [...prev]
+      const [item] = next.splice(from, 1)
+      next.splice(to, 0, item)
+      return next
+    })
+  }, [])
+
+  React.useEffect(() => {
+    if (carStatus.data?.mode) {
+      setDriveMode(carStatus.data.mode)
+    }
+  }, [carStatus.data?.mode])
+
+  const handleChangeMode = async (mode: "AUTO" | "MANUAL" | "STOP") => {
+    if (!selectedCarId) return
+    const prev = driveMode
+    setDriveMode(mode)
+    setModeError(null)
+    if (!networkOnline) {
+      setModeError("오프라인 상태에서는 모드를 변경할 수 없습니다.")
+      setDriveMode(prev)
+      toastError(toast, "모드 변경 실패", "오프라인 상태입니다.")
+      return
+    }
+    try {
+      await carApi.setCarMode(selectedCarId, mode)
+      toastSuccess(toast, "모드 변경 완료", `현재 모드: ${mode}`)
+    } catch {
+      setDriveMode(prev)
+      setModeError("모드 변경에 실패했습니다. 잠시 후 다시 시도해 주세요.")
+      toastError(toast, "모드 변경 실패", "잠시 후 다시 시도해 주세요.")
+    }
+  }
+
+  const handleStartMission = async () => {
+    if (!selectedCarId) return
+    if (driveMode !== "AUTO") {
+      toastInfo(toast, "AUTO 모드 필요", "AUTO 모드에서만 미션을 시작할 수 있습니다.")
+      return
+    }
+    if (!networkOnline) {
+      toastError(toast, "미션 시작 실패", "오프라인 상태입니다.")
+      return
+    }
+    if (missionPoints.length === 0) {
+      toastInfo(toast, "미션 좌표 없음", "미션 좌표를 입력한 뒤 다시 시도해 주세요.")
+      return
+    }
+    try {
+      await carApi.startMission(selectedCarId, { points: missionPoints })
+      toastSuccess(toast, "미션 시작 완료", "미션이 차량으로 전송되었습니다.")
+    } catch {
+      toastError(toast, "미션 시작 실패", "잠시 후 다시 시도해 주세요.")
+    }
+  }
+
+  const handleStopMission = async () => {
+    if (!selectedCarId) return
+    if (!networkOnline) {
+      toastError(toast, "탐지 중지 실패", "오프라인 상태입니다.")
+      return
+    }
+    try {
+      await carApi.setCarMode(selectedCarId, "STOP")
+      toastSuccess(toast, "탐지 중지 완료", "차량이 정지 모드로 전환되었습니다.")
+    } catch {
+      toastError(toast, "탐지 중지 실패", "잠시 후 다시 시도해 주세요.")
+    }
+  }
+
+  const sendDriveVector = useCallback(async (v: number, w: number) => {
+    if (!selectedCarId || !networkOnline || driveMode !== "MANUAL") return
+    try {
+      await carApi.controlCar(selectedCarId, v, w)
+    } catch {
+      const now = Date.now()
+      if (now - lastDriveToastRef.current > 2000) {
+        toastError(toast, "수동 조작 실패", "잠시 후 다시 시도해 주세요.")
+        lastDriveToastRef.current = now
+      }
+    }
+  }, [selectedCarId, networkOnline, driveMode, toast])
+
+  const stepDriveCommand = React.useCallback(() => {
+    const target = driveTargetRef.current
+    if (!target) return
+    const current = driveCurrentRef.current
+
+    const stepAxis = (cur: number, tgt: number, maxStep: number) => {
+      if (cur === tgt) return cur
+      const delta = tgt - cur
+      const step = Math.abs(delta) <= maxStep ? delta : Math.sign(delta) * maxStep
+      return cur + step
+    }
+
+    const accelV = DRIVE_MAX_V * 0.12
+    const accelW = DRIVE_MAX_W * 0.12
+    const decelV = DRIVE_MAX_V * 0.28
+    const decelW = DRIVE_MAX_W * 0.28
+
+    const nextV = stepAxis(
+      current.v,
+      target.v,
+      Math.abs(target.v) < Math.abs(current.v) ? decelV : accelV
+    )
+    const nextW = stepAxis(
+      current.w,
+      target.w,
+      Math.abs(target.w) < Math.abs(current.w) ? decelW : accelW
+    )
+
+    driveCurrentRef.current = { v: nextV, w: nextW }
+    driveCommandRef.current = { v: nextV, w: nextW }
+    const now = Date.now()
+    if (now - lastDriveSentRef.current >= 60) {
+      lastDriveSentRef.current = now
+      sendDriveVector(nextV, nextW).catch(() => { })
+    }
+  }, [sendDriveVector])
+
+  const handleDriveVector = React.useCallback((v: number, w: number) => {
+    if (driveMode !== "MANUAL") return
+    clearHold()
+    const wAdjusted = Math.abs(w) < 0.03 ? 0 : w
+    markInput(v, wAdjusted)
+    driveTargetRef.current = { v, w: wAdjusted }
+    if (driveTimerRef.current == null) {
+      driveTimerRef.current = window.setInterval(() => {
+        stepDriveCommand()
+      }, 40)
+    }
+    stepDriveCommand()
+  }, [clearHold, driveMode, markInput, stepDriveCommand])
+
+  const handleDriveStop = React.useCallback(() => {
+    const holdW = 0
+    driveCommandRef.current = { v: 0, w: holdW }
+    driveTargetRef.current = null
+    driveCurrentRef.current = { v: 0, w: holdW }
+    if (driveTimerRef.current != null) {
+      window.clearInterval(driveTimerRef.current)
+      driveTimerRef.current = null
+    }
+    markInput(0, 0)
+    setDisplayVector(0, 0)
+    sendDriveVector(0, holdW).catch(() => { })
+    clearHold()
+  }, [clearHold, markInput, sendDriveVector])
+
+  React.useEffect(() => {
+    return () => {
+      if (driveTimerRef.current != null) {
+        window.clearInterval(driveTimerRef.current)
+      }
+      if (holdTimerRef.current != null) {
+        window.clearInterval(holdTimerRef.current)
+      }
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (driveMode !== "MANUAL") {
+      clearHold()
+      setDisplayVector(0, 0)
+    }
+  }, [clearHold, driveMode, setDisplayVector])
+
+  React.useEffect(() => {
+    if (driveMode !== "MANUAL") return
+    const timer = window.setInterval(() => {
+      const lastInputAt = lastInputRef.current
+      if (lastInputAt && Date.now() - lastInputAt < 150) return
+      // 입력이 없을 때는 여기서 0,0을 보내지 않고,
+      // pointerup/keyup에서만 정지 명령을 보냄.
+    }, 200)
+    return () => window.clearInterval(timer)
+  }, [driveMode])
+
+  React.useEffect(() => {
+    const handleGlobalStop = () => {
+      if (driveCommandRef.current) {
+        handleDriveStop()
+      }
+    }
+    window.addEventListener("pointerup", handleGlobalStop)
+    window.addEventListener("pointercancel", handleGlobalStop)
+    window.addEventListener("touchend", handleGlobalStop)
+    window.addEventListener("touchcancel", handleGlobalStop)
+    window.addEventListener("blur", handleGlobalStop)
+    const handleVisibility = () => {
+      if (document.visibilityState !== "visible") handleGlobalStop()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    return () => {
+      window.removeEventListener("pointerup", handleGlobalStop)
+      window.removeEventListener("pointercancel", handleGlobalStop)
+      window.removeEventListener("touchend", handleGlobalStop)
+      window.removeEventListener("touchcancel", handleGlobalStop)
+      window.removeEventListener("blur", handleGlobalStop)
+      document.removeEventListener("visibilitychange", handleVisibility)
+    }
+  }, [handleDriveStop])
+
+  // Keyboard arrow key support for manual control
+  React.useEffect(() => {
+    if (driveMode !== "MANUAL" || !networkOnline || !selectedCarId) return
+
+    const pressedKeys = new Set<string>()
+    const isDirectionKey = (code: string) =>
+      code === "ArrowUp" || code === "ArrowDown" || code === "ArrowLeft" || code === "ArrowRight"
+
+    const computeVector = () => {
+      const up = pressedKeys.has("ArrowUp")
+      const down = pressedKeys.has("ArrowDown")
+      const left = pressedKeys.has("ArrowLeft")
+      const right = pressedKeys.has("ArrowRight")
+
+      let v = 0
+      let w = 0
+      if (up && !down) v = -1
+      else if (down && !up) v = 1
+
+      if (left && !right) w = -1
+      else if (right && !left) w = 1
+
+      if (v === 0 && w === 0) {
+        handleDriveStop()
+      } else {
+        setDisplayVector(-v, -w)
+        const curved = applyDriveCurve(-v, -w)
+        markInput(curved.v, curved.w)
+        handleDriveVector(curved.v, curved.w)
+      }
+    }
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isDirectionKey(e.code)) return
+      e.preventDefault()
+      e.stopPropagation()
+      if (pressedKeys.has(e.code)) return
+      pressedKeys.add(e.code)
+      computeVector()
+    }
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (!isDirectionKey(e.code)) return
+      e.preventDefault()
+      e.stopPropagation()
+      pressedKeys.delete(e.code)
+      computeVector()
+    }
+
+    const handleBlur = () => {
+      if (pressedKeys.size === 0) return
+      pressedKeys.clear()
+      handleDriveStop()
+    }
+
+    const holdTimer = window.setInterval(() => {
+      if (pressedKeys.size === 0) return
+      computeVector()
+    }, 100)
+
+    window.addEventListener("keydown", handleKeyDown)
+    window.addEventListener("keyup", handleKeyUp)
+    window.addEventListener("blur", handleBlur)
+
+    return () => {
+      window.clearInterval(holdTimer)
+      window.removeEventListener("keydown", handleKeyDown)
+      window.removeEventListener("keyup", handleKeyUp)
+      window.removeEventListener("blur", handleBlur)
+    }
+  }, [driveMode, networkOnline, selectedCarId, handleDriveStop, handleDriveVector, markInput, setDisplayVector])
+
+  const carSelectCard = (
+    <Card className="bg-card border-border">
+      <CardContent className="space-y-1.5 py-3">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">차량 선택</p>
+          {selectedCarId && (
+            <Badge variant="secondary" className="h-5 px-2 text-[10px]">
+              {cars.find((c) => c.carId === selectedCarId)?.nickname ?? "내 차"}
+            </Badge>
+          )}
+        </div>
+        <Select
+          value={selectedCarId ? String(selectedCarId) : ""}
+          onValueChange={(value) => setSelectedCarId(Number(value))}
+        >
+          <SelectTrigger className="bg-input border-border">
+            <SelectValue placeholder={carsLoading ? "차량 로딩 중..." : "차량 선택"} />
+          </SelectTrigger>
+          <SelectContent>
+            {cars.map((c) => (
+              <SelectItem key={c.carId} value={String(c.carId)}>
+                {c.nickname || "내 차"}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="min-h-[14px] text-[11px] text-muted-foreground">
+          {carsLoading ? "차량 목록 불러오는 중..." : "제어할 차량을 선택하세요."}
+        </p>
+        <p className="min-h-[14px] text-[11px] text-red-400">{carsError ?? ""}</p>
+      </CardContent>
+    </Card>
+  )
+
+  const carDetailCard = (
+    <Card className="bg-card border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">차량 정보</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        {carDetailLoading ? (
+          <p className="text-xs text-muted-foreground">불러오는 중...</p>
+        ) : carDetail ? (
+          <>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">닉네임</span>
+              <span className="font-medium text-foreground">{carDetail.nickname}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">현재 지도</span>
+              <span className="text-xs text-foreground font-medium">
+                {currentMap?.name ?? "없음"}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">디바이스 ID</span>
+              <span className="text-xs text-foreground font-mono">{carDetail.deviceId || "-"}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">클레임 코드</span>
+              <span className="text-xs text-foreground font-mono">{carDetail.claimCode || "-"}</span>
+            </div>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">차량을 선택해 주세요.</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+
+  const statusCard = <RobotStatusPanel status={carStatus.data} isLoading={carStatus.isLoading} />
+  const statsCard = <DetectionStatsPanel stats={recentDetections.stats} isLoading={recentDetections.isLoading} />
+  const eventLogCard = (
+    <EventLog
+      detections={recentDetections.recentDetections}
+      isLoading={recentDetections.isLoading}
+      onSelect={(id) => {
+        if (typeof window !== "undefined") {
+          window.localStorage.removeItem("dashboard.filters")
+          window.sessionStorage.setItem("dashboard.highlightDetectionId", String(id))
+        }
+        window.location.href = "/dashboard"
+      }}
+      baseUrl={baseUrl}
+    />
+  )
+
+  if (!carsLoading && cars.length === 0) {
+    return (
+      <div className="p-3 sm:p-4 lg:p-6">
+        <div className="max-w-3xl mx-auto space-y-3">
+          <ErrorAlert title="차량 목록 불러오기 실패" message={carsError} />
+          <Card className="bg-card border-border">
+            <CardHeader>
+              <CardTitle className="text-base font-medium">등록된 차량이 없습니다</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                차량을 등록하면 실시간 카메라와 수동 제어를 사용할 수 있습니다.
+              </p>
+              <Link href="/home">
+                <Button size="sm">차량 등록하러 가기</Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="p-3 sm:p-4 lg:p-6">
+      <div className="max-w-[1920px] mx-auto h-full">
+        <div className="mb-4">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">실시간 카메라</h1>
+            <p className="text-sm text-muted-foreground mt-1">차량 카메라 영상을 실시간으로 확인하세요</p>
+          </div>
+        </div>
+
+        <div className="mb-4 space-y-2">
+          <ErrorAlert title="차량 상태 불러오기 실패" message={carStatus.error} />
+          <ErrorAlert title="최근 탐지 불러오기 실패" message={recentDetections.error} />
+        </div>
+
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-6">
+          <div className="flex-1">
+            <div className="w-full">
+              <div className="relative w-full aspect-video max-h-[45vh] sm:max-h-[55vh] lg:max-h-[70vh]">
+                <LiveCameraView
+                  isOnline={carStatus.data?.isOnline ?? false}
+                  networkOnline={networkOnline}
+                  isDetecting={isDetecting}
+                  showOverlay={showOverlay}
+                  lastDetectionLabel={lastDetectionLabel}
+                  isManual={driveMode === "MANUAL"}
+                  manualDisabled={!networkOnline || carStatus.isLoading}
+                  driveVector={driveVector}
+                  onDriveVector={handleDriveVector}
+                  onDriveStop={handleDriveStop}
+                  onDisplayVector={setDisplayVector}
+                  wsUrl={signalingUrl || "ws://I14B201.p.ssafy.io/ws/webrtc"}
+                  detectionWsUrl={detectionWsUrl}
+                  roomId={roomId}
+                  cameraConnected={cameraConnected}
+                  onToggleCameraConnection={() => {
+                    setCameraConnected((prev) => {
+                      const next = !prev
+                      if (next) {
+                        toastInfo(toast, "카메라 연결 시도", "WebRTC 연결을 시작합니다.")
+                      } else {
+                        toastInfo(toast, "카메라 연결 해제", "카메라 연결을 해제했습니다.")
+                      }
+                      return next
+                    })
+                  }}
+                />
+              </div>
+            </div>
+            <div className="mt-3">
+              <ControlPanel
+                isLoading={carStatus.isLoading}
+                networkOnline={networkOnline}
+                driveMode={driveMode}
+                onChangeMode={handleChangeMode}
+                onDriveVector={handleDriveVector}
+                onDriveStop={handleDriveStop}
+                onDisplayVector={setDisplayVector}
+                onStartMission={handleStartMission}
+                onStopMission={handleStopMission}
+                manualDisabled={!networkOnline || carStatus.isLoading}
+                driveVector={driveVector}
+                missionDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO" || missionPoints.length === 0}
+                missionStopDisabled={!selectedCarId || !networkOnline || driveMode !== "AUTO"}
+                missionInput={missionInput}
+                onMissionInputChange={handleMissionInputChange}
+                missionPointCount={missionPoints.length}
+                missionError={missionError}
+                missionPoints={missionPoints}
+                invalidLines={invalidMissionLines}
+                onDismissMissionError={handleDismissMissionError}
+                onAddMissionPoints={handleAddMissionPoints}
+                onRemoveMissionPoint={handleRemoveMissionPoint}
+                onAddFromDetections={handleAddFromDetections}
+                onMoveMissionPoint={handleMoveMissionPoint}
+                maxMissionPoints={MAX_MISSION_POINTS}
+                modeError={modeError}
+              />
+            </div>
+            <div className="mt-3">
+              {eventLogCard}
+            </div>
+          </div>
+
+          <div className="w-full lg:w-80 xl:w-96 space-y-3">
+            <div className="lg:hidden space-y-3">
+              <Accordion type="multiple" defaultValue={["status"]} className="space-y-2">
+                <AccordionItem value="car">
+                  <AccordionTrigger>차량 선택</AccordionTrigger>
+                  <AccordionContent>{carSelectCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="detail">
+                  <AccordionTrigger>차량 정보</AccordionTrigger>
+                  <AccordionContent>{carDetailCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="status">
+                  <AccordionTrigger>차량 상태</AccordionTrigger>
+                  <AccordionContent>{statusCard}</AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="stats">
+                  <AccordionTrigger>탐지 통계</AccordionTrigger>
+                  <AccordionContent>{statsCard}</AccordionContent>
+                </AccordionItem>
+                {/* 탐지 로그 moved under control panel */}
+              </Accordion>
+            </div>
+
+            <div className="hidden lg:block space-y-3">
+              {carSelectCard}
+              {carDetailCard}
+              {statusCard}
+              {statsCard}
+              {/* 탐지 로그 moved under control panel */}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -153,10 +153,20 @@ class DetectionWebSocketService:
             
         except websocket.WebSocketConnectionClosedException:
             logger.warning("Detection WebSocket connection closed")
+            try:
+                self._ws.close()
+            except Exception:
+                pass
             self._connected = False
             return False
         except Exception as e:
             logger.error(f"Detection 전송 에러: {e}")
+                        # 에러 발생 시 확실하게 연결 종료 처리하여 리소스 반환
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._connected = False
             return False
 
 

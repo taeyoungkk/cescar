@@ -80,38 +80,35 @@ class YoloService:
         
         try:
             # YOLO 추론 수행
-            results = self.model(frame, verbose=False, save=False)
+            with torch.no_grad():
+                results = self.model(frame, verbose=False, save=False)
             
             detections = []
             for result in results:
                 if result.boxes is None:
                     continue
-                    
-                for box in result.boxes:
-                    conf = float(box.conf[0])
-                    
-                    # 신뢰도 임계값 체크
-                    if conf < self.confidence_threshold:
-                        continue
-                    
-                    # bbox 좌표 추출 (x1, y1, x2, y2)
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
-                    
-                    # 클래스 라벨
-                    cls_id = int(box.cls[0])
-                    label = result.names.get(cls_id, f"class_{cls_id}")
-                    
-                    detections.append({
-                        "label": label,
-                        "confidence": round(conf, 3),
-                        "bbox": {
-                            "x1": round(x1, 1),
-                            "y1": round(y1, 1),
-                            "x2": round(x2, 1),
-                            "y2": round(y2, 1)
-                        }
-                    })
-            
+                            
+            for box in result.boxes:
+                conf = float(box.conf[0].cpu())         # GPU -> CPU
+                x1, y1, x2, y2 = box.xyxy[0].cpu().tolist()  # GPU -> CPU
+                cls_id = int(box.cls[0].cpu())          # GPU -> CPU
+                label = result.names.get(cls_id, f"class_{cls_id}")
+
+                detections.append({
+                    "label": label,
+                    "confidence": round(conf, 3),
+                    "bbox": {
+                        "x1": round(x1, 1),
+                        "y1": round(y1, 1),
+                        "x2": round(x2, 1),
+                        "y2": round(y2, 1)
+                    }
+                })
+
+            # GPU 메모리 해제
+            del results
+            if self.device == 'cuda':
+                torch.cuda.empty_cache()
             return detections
             
         except Exception as e:

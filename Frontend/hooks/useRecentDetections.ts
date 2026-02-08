@@ -27,6 +27,7 @@ export function useRecentDetections(
   const requestIdRef = useRef(0)
   const inFlightRef = useRef(false)
   const queuedRef = useRef(false)
+  const pendingRef = useRef(false)
 
   const fallbackStats = useMemo<DetectionStats | null>(() => {
     const items = recentDetections
@@ -65,6 +66,7 @@ export function useRecentDetections(
 
   const fetchData = useCallback(async () => {
     if (!carId) {
+      pendingRef.current = true
       setRecentDetections([])
       setStats(null)
       setIsLoading(false)
@@ -92,8 +94,7 @@ export function useRecentDetections(
         const logs = logsResponse.success && logsResponse.data ? logsResponse.data : []
         const targetLog = logs.find((log) => log.mapId === mapId)
         if (!targetLog) {
-          setRecentDetections([])
-          setStats(null)
+          // Keep previous detections if there's no log yet for the selected map.
           setError(null)
           return
         }
@@ -152,6 +153,43 @@ export function useRecentDetections(
   useEffect(() => {
     if (online) fetchData()
   }, [online, fetchData])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    let timer: number | null = null
+    const trigger = () => {
+      pendingRef.current = false
+      fetchData()
+    }
+    const handleFcm = () => {
+      pendingRef.current = true
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        trigger()
+      }, 4000)
+      // Retry once more in case DB write is delayed
+      window.setTimeout(() => {
+        if (pendingRef.current) trigger()
+      }, 8000)
+    }
+    window.addEventListener("fcm-detection", handleFcm)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && pendingRef.current) {
+        trigger()
+      }
+    }
+    const handleFocus = () => {
+      if (pendingRef.current) trigger()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      window.removeEventListener("fcm-detection", handleFcm)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("focus", handleFocus)
+    }
+  }, [fetchData])
 
   return {
     recentDetections,

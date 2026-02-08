@@ -116,6 +116,7 @@ export interface SystemAlert {
   message: string
   timestamp: string
   isRead: boolean
+  detectionId?: string
 }
 
 // ============================================

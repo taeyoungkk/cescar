@@ -54,6 +54,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
   const requestIdRef = useRef(0)
   const inFlightRef = useRef(false)
   const queuedRef = useRef(false)
+  const pendingRef = useRef(false)
 
   const filteredDetections = useMemo(() => {
     const items = allDetections
@@ -123,6 +124,7 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
 
   const fetchData = useCallback(async () => {
     if (!carId) {
+      pendingRef.current = true
       setAllDetections([])
       setIsLoading(false)
       return
@@ -198,6 +200,42 @@ export function useDetectionHistory(carId: number | null): UseDetectionHistoryRe
   useEffect(() => {
     if (online) fetchData()
   }, [online, fetchData])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    let timer: number | null = null
+    const trigger = () => {
+      pendingRef.current = false
+      fetchData()
+    }
+    const handleFcm = () => {
+      pendingRef.current = true
+      if (timer) window.clearTimeout(timer)
+      timer = window.setTimeout(() => {
+        trigger()
+      }, 4000)
+      window.setTimeout(() => {
+        if (pendingRef.current) trigger()
+      }, 8000)
+    }
+    window.addEventListener("fcm-detection", handleFcm)
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && pendingRef.current) {
+        trigger()
+      }
+    }
+    const handleFocus = () => {
+      if (pendingRef.current) trigger()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+    window.addEventListener("focus", handleFocus)
+    return () => {
+      if (timer) window.clearTimeout(timer)
+      window.removeEventListener("fcm-detection", handleFcm)
+      document.removeEventListener("visibilitychange", handleVisibility)
+      window.removeEventListener("focus", handleFocus)
+    }
+  }, [fetchData])
 
   useEffect(() => {
     if (!selectedDetection) return

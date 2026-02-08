@@ -12,6 +12,10 @@ const log = (...args: any[]) => {
   console.info("[FCM]", ...args)
 }
 
+const info = (...args: any[]) => {
+  console.info("[FCM]", ...args)
+}
+
 interface RegisterOptions {
   requestPermission?: boolean
 }
@@ -28,11 +32,14 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
 
   const requestPermission = options.requestPermission ?? true
   if (!canRequestPermission(requestPermission)) return null
-  log("permission status", Notification.permission)
+  info("registerFcmToken: start", {
+    permission: Notification.permission,
+    requestPermission,
+  })
 
   if (Notification.permission === "default") {
     const permission = await Notification.requestPermission()
-    log("permission result", permission)
+    info("permission result", permission)
     if (permission !== "granted") return null
   } else if (Notification.permission !== "granted") {
     return null
@@ -52,44 +59,40 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
 
   let registration: ServiceWorkerRegistration
   try {
-    registration = await navigator.serviceWorker.register("/firebase-messaging-sw.js", {
-      scope: "/firebase-messaging/",
-    })
-    log("service worker registered", registration.scope)
+    // Ensure we use the main PWA service worker at "/" for FCM too.
+    registration = await navigator.serviceWorker.getRegistration("/")
+    if (!registration) {
+      info("registerFcmToken: no SW at '/', registering /sw.js")
+      registration = await navigator.serviceWorker.register("/sw.js", {
+        scope: "/",
+        updateViaCache: "none",
+      })
+    }
+    info("service worker registered", registration.scope)
   } catch (error) {
     console.error("[FCM] Service worker registration failed.", error)
     return null
   }
 
-  const waitForActive = () =>
-    new Promise<void>((resolve, reject) => {
-      if (registration.active) {
-        resolve()
-        return
-      }
-      const worker = registration.installing ?? registration.waiting
-      if (!worker) {
-        reject(new Error("Service worker is not installing."))
-        return
-      }
-      const timeout = window.setTimeout(() => {
-        reject(new Error("Service worker activation timeout."))
-      }, 10000)
-      worker.addEventListener("statechange", () => {
-        if (registration.active) {
-          window.clearTimeout(timeout)
-          resolve()
-          return
-        }
-        if (worker.state === "redundant") {
-          window.clearTimeout(timeout)
-          reject(new Error("Service worker became redundant."))
-        }
-      })
-    })
+  // Unregister legacy FCM worker if it still exists.
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations()
+    info("service worker registrations", regs.map((r) => r.active?.scriptURL ?? ""))
+    await Promise.all(
+      regs
+        .filter((reg) => reg.active?.scriptURL?.includes("firebase-messaging-sw.js"))
+        .map((reg) => reg.unregister())
+    )
+  } catch (_err) {
+    // best-effort cleanup
+  }
 
   try {
-    await waitForActive()
+    const ready = await navigator.serviceWorker.ready
+    if (ready?.active) {
+      registration = ready
+      info("service worker ready", registration.scope)
+    }
   } catch (error) {
     console.error("[FCM] Service worker not active.", error)
     return null
@@ -97,19 +100,21 @@ export async function registerFcmToken(options: RegisterOptions = {}): Promise<s
 
   let token: string
   try {
+    info("getToken: start", { scope: registration.scope })
     token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: registration })
   } catch (error) {
     console.error("[FCM] Failed to fetch token.", error)
     return null
   }
   if (!token) return null
-  log("token", token)
+  info("token fetched", token)
 
   const stored = localStorage.getItem(FCM_TOKEN_KEY)
+  info("token compare", { stored: Boolean(stored), changed: stored !== token })
   if (stored !== token) {
     try {
       await notificationApi.registerToken(token)
-      log("token registered to server")
+      info("token registered to server")
     } catch (error) {
       console.error("[FCM] Failed to register token to server.", error)
       return null
@@ -127,7 +132,7 @@ export async function unregisterFcmToken(): Promise<void> {
 
   try {
     await notificationApi.unregisterToken(token)
-    log("token unregistered from server")
+    info("token unregistered from server")
   } finally {
     localStorage.removeItem(FCM_TOKEN_KEY)
   }
@@ -136,8 +141,13 @@ export async function unregisterFcmToken(): Promise<void> {
 export async function listenForegroundMessages(onReceive: (payload: any) => void) {
   const messaging = await getFirebaseMessaging()
   if (!messaging) return () => {}
+  info("listenForegroundMessages: attached")
   return onMessage(messaging, (payload) => {
-    log("foreground message", payload)
+    info("onMessage hit", {
+      hasNotification: Boolean(payload?.notification),
+      dataKeys: payload?.data ? Object.keys(payload.data) : [],
+      messageId: payload?.messageId,
+    })
     onReceive(payload)
   })
 }
